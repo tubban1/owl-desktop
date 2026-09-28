@@ -52,6 +52,8 @@ Cloud projection
 
 Cloud owns the command lifecycle before Runtime acceptance.
 
+Cloud organization roles and DeviceGrants authorize whether a request may be sent. Desktop consumes effective access according to [Cloud Access Consumer Contract v1](../contracts/CLOUD_ACCESS_CONSUMER_V1.md); it must not turn Cloud roles into Runtime capabilities.
+
 Runtime owns execution after acceptance.
 
 Cloud stores projections/indexes, not a second execution truth.
