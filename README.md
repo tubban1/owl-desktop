@@ -30,6 +30,7 @@ Cloud and Worker are optional for local execution.
 See:
 
 - [Ownership](docs/architecture/OWNERSHIP.md)
+- [Cross-Repo Development Protocol v1](docs/architecture/CROSS_REPO_DEVELOPMENT_PROTOCOL_V1.md)
 - [Runtime Consumer Contract](docs/contracts/RUNTIME_CONSUMER_CONTRACT_V1.md)
 - [Cloud Bridge Contract](docs/contracts/CLOUD_BRIDGE_CONTRACT_V1.md)
 - [Platform Integration](docs/integration/PLATFORM_INTEGRATION.md)
