@@ -22,6 +22,8 @@ export class DesktopStore {
     const settings = {
       runtimeBaseUrl: "http://127.0.0.1:8788",
       autoConnectRuntime: true,
+      mcpEnabled: true,
+      mcpPort: 8790,
       launchAtLogin: false,
       diagnosticsEnabled: true,
       sessionId: stored.sessionId || `owl-desktop:${randomUUID()}`,

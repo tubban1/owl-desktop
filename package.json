@@ -7,15 +7,20 @@
   "main": "electron/main.mjs",
   "scripts": {
     "dev": "concurrently -k -n renderer,electron \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "mcp:start": "node mcp/server.mjs",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
+    "verify:local-e2e": "node scripts/verify-local-e2e.mjs",
     "package:mac": "npm run build && electron-builder --mac",
     "start": "electron ."
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "express": "^5.2.1",
     "lucide-react": "^0.468.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/react": "^19.1.10",
@@ -35,11 +40,15 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "mcp/**/*",
       "package.json"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     }
   }
 }

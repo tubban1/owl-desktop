@@ -75,6 +75,13 @@ export default function App() {
     if (!settings) return;
     const next = await window.owlDesktop.updateSettings(patch);
     setSettings(next);
+    if (
+      "runtimeBaseUrl" in patch ||
+      "mcpEnabled" in patch ||
+      "mcpPort" in patch
+    ) {
+      await refresh();
+    }
     setNotice("Settings saved");
     window.setTimeout(() => setNotice(""), 1600);
   };
@@ -128,7 +135,7 @@ export default function App() {
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">COMPONENTS</span><h3>Platform status</h3></div></div>
               <div className="component-list">
                 <div><span className="component-icon"><Boxes size={17} /></span><p><strong>OWL Runtime</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
-                <div><span className="component-icon"><Terminal size={17} /></span><p><strong>OWL MCP</strong><small>Desktop adapter boundary</small></p><span className="neutral-pill">Phase 1</span></div>
+                <div><span className="component-icon"><Terminal size={17} /></span><p><strong>OWL MCP</strong><small>{snapshot?.mcp.url ?? snapshot?.mcp.error ?? "Desktop adapter boundary"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
                 <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL Cloud Bridge</strong><small>Optional for local execution</small></p><span className="neutral-pill">Not connected</span></div>
               </div>
             </section>
@@ -143,8 +150,11 @@ export default function App() {
           <div className="session-card"><div className="session-title"><span className="avatar">D</span><div><strong>OWL Desktop</strong><span>Primary local consumer session</span></div><StatusPill online={online} /></div>
             <div className="session-details"><div><span>Session ID</span><code>{settings?.sessionId ?? "—"}</code></div><div><span>Runtime API</span><strong>{apiVersion}</strong></div><div><span>Transport</span><strong>{snapshot?.info?.transport ?? "HTTP"}</strong></div><div><span>Last seen</span><strong>{formatTime(snapshot?.checkedAt)}</strong></div></div>
           </div>
+          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">MCP TRANSPORT</span><h3>Connected transport sessions</h3></div><span className="neutral-pill">{snapshot?.mcp.sessionCount ?? 0} open</span></div>
+            <div className="transport-list">{snapshot?.mcp.sessions.map((session) => <div key={session.transportSessionId}><span className={"log-dot " + (session.ownerStable ? "info" : "warn")} /><p><strong>{session.runtimeSessionId?.slice(0, 28) ?? "bootstrap"}…</strong><small>{session.ownerStable ? "stable logical owner" : "transport fallback"} · seen {formatTime(session.lastSeenAt)}</small></p><code>{session.transportSessionId.slice(0, 12)}…</code></div>)}{!snapshot?.mcp.sessions.length && <div className="empty">No active MCP transport sessions.</div>}</div>
+          </section>
           <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RUNTIME PROJECTION</span><h3>Processes visible to this consumer</h3></div></div><pre className="code-block">{pretty(snapshot?.processes)}</pre></section>
-          <div className="contract-note"><ShieldCheck size={17} /><div><strong>Cross-session inventory is intentionally not reimplemented here.</strong><p>Desktop currently has no canonical Runtime session-list/event-stream contract. This is tracked as CR-DESKTOP-001/002.</p></div></div>
+          <div className="contract-note"><ShieldCheck size={17} /><div><strong>Transport sessions are not Runtime session truth.</strong><p>Desktop can show its own MCP connections, but canonical cross-session execution inventory and event streaming remain CR-DESKTOP-001/002.</p></div></div>
         </>}
 
         {page === "logs" && <>
@@ -172,6 +182,8 @@ export default function App() {
           <SectionHeader title="Settings" description="Local product preferences and Runtime connectivity." />
           <section className="panel settings-panel"><div className="setting-row"><div><strong>Runtime endpoint</strong><span>Loopback HTTP endpoint exposed by OWL Runtime.</span></div><input className="setting-input" value={settings.runtimeBaseUrl} onChange={(e) => setSettings({ ...settings, runtimeBaseUrl: e.target.value })} onBlur={() => saveSettings({ runtimeBaseUrl: settings.runtimeBaseUrl })} /></div>
             <div className="setting-row"><div><strong>Auto-connect Runtime</strong><span>Probe Runtime when OWL Desktop starts.</span></div><Toggle checked={settings.autoConnectRuntime} onChange={(v) => saveSettings({ autoConnectRuntime: v })} /></div>
+            <div className="setting-row"><div><strong>OWL MCP</strong><span>Run the ChatGPT/MCP compatibility adapter with the Desktop lifecycle.</span></div><Toggle checked={settings.mcpEnabled} onChange={(v) => saveSettings({ mcpEnabled: v })} /></div>
+            <div className="setting-row"><div><strong>MCP port</strong><span>Loopback port used by OWL MCP and the future Tunnel client.</span></div><input className="setting-input" type="number" min="1024" max="65535" value={settings.mcpPort} onChange={(e) => setSettings({ ...settings, mcpPort: Number(e.target.value) })} onBlur={() => saveSettings({ mcpPort: settings.mcpPort })} /></div>
             <div className="setting-row"><div><strong>Runtime diagnostics</strong><span>Include Runtime support projections in the Logs screen.</span></div><Toggle checked={settings.diagnosticsEnabled} onChange={(v) => saveSettings({ diagnosticsEnabled: v })} /></div>
             <div className="setting-row"><div><strong>Launch at login</strong><span>Start OWL Desktop after macOS login in packaged builds.</span></div><Toggle checked={settings.launchAtLogin} onChange={(v) => saveSettings({ launchAtLogin: v })} /></div>
           </section>

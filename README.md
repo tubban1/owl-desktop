@@ -32,10 +32,12 @@ See:
 - [Ownership](docs/architecture/OWNERSHIP.md)
 - [Cross-Repo Development Protocol v1](docs/architecture/CROSS_REPO_DEVELOPMENT_PROTOCOL_V1.md)
 - [Runtime Consumer Contract](docs/contracts/RUNTIME_CONSUMER_CONTRACT_V1.md)
+- [MCP Bridge Contract](docs/contracts/MCP_BRIDGE_CONTRACT_V1.md)
 - [Cloud Bridge Contract](docs/contracts/CLOUD_BRIDGE_CONTRACT_V1.md)
 - [Compatibility Matrix](docs/contracts/COMPATIBILITY_MATRIX.md)
 - [Platform Integration](docs/integration/PLATFORM_INTEGRATION.md)
 - [Platform Integration Gates v1](docs/integration/INTEGRATION_GATES_V1.md)
+- [Local E2E Status](docs/integration/LOCAL_E2E_STATUS.md)
 - [2.0 Dependency Roadmap](docs/roadmap/2.0-dependency-roadmap.md)
 
 ## Development
@@ -47,7 +49,7 @@ npm install
 npm run dev
 ```
 
-OWL Desktop development connects to OWL Runtime at `http://127.0.0.1:8788` by default. This intentionally stays separate from the legacy production service currently using port 8787.
+OWL Desktop development connects to OWL Runtime at `http://127.0.0.1:8788` by default and embeds OWL MCP at `http://127.0.0.1:8790/mcp`. These intentionally stay separate from the legacy production service currently using port 8787.
 
 Run the Runtime development daemon separately:
 
@@ -61,6 +63,9 @@ Quality gates:
 ```bash
 npm test
 npm run build
+npm run verify:local-e2e
 ```
+
+The Local E2E verifier expects Runtime to allow the target repository through `ALLOWED_DIRECTORIES`.
 
 The Electron renderer has no Node integration. Runtime credentials and project secrets remain in the Electron main process and are persisted only through OS-backed encryption.

@@ -1,6 +1,8 @@
 export type Settings = {
   runtimeBaseUrl: string;
   autoConnectRuntime: boolean;
+  mcpEnabled: boolean;
+  mcpPort: number;
   launchAtLogin: boolean;
   diagnosticsEnabled: boolean;
   sessionId: string;
@@ -35,6 +37,20 @@ export type RuntimeSnapshot = {
   diagnostics: unknown;
   error: string | null;
   metrics: { tasks: number; approvals: number; processes: number };
+  mcp: {
+    status: "stopped" | "starting" | "running" | "error";
+    url: string | null;
+    error: string | null;
+    sessionCount: number;
+    sessions: Array<{
+      transportSessionId: string;
+      runtimeSessionId: string | null;
+      ownerStable: boolean;
+      ownerSource: string;
+      createdAt: string;
+      lastSeenAt: string;
+    }>;
+  };
   activity: ActivityEntry[];
 };
 

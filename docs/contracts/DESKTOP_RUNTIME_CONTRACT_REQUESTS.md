@@ -60,3 +60,20 @@ Requested provider behavior:
 - no mutation of Runtime execution semantics
 
 Desktop may spawn/supervise the process; Runtime remains execution authority.
+
+## CR-DESKTOP-005 — Consequential request replay / idempotency
+
+**Need:** Local E2E Gate 3 requires transport retry to never duplicate a consequential side effect after the first attempt may already have reached Runtime.
+
+Current Runtime HTTP request IDs provide cancellation ownership, but the public contract does not yet define completed-request replay or duplicate-request suppression.
+
+Requested semantics:
+
+- idempotency/replay key scoped to stable logical session identity
+- duplicate in-flight request returns or joins the original execution
+- duplicate completed request returns the canonical prior result/receipt
+- bounded retention policy is explicit
+- uncertain completion remains explicit; Desktop must not retry through another backend
+- consequential calls cannot rely on Desktop-local dedupe as execution truth
+
+Acceptance: fault injection after Runtime acceptance and before MCP response delivery proves one consequential execution and one canonical receipt.

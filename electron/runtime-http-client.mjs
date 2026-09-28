@@ -7,10 +7,20 @@ export class RuntimeHttpClient {
     this.token = token;
   }
 
-  async invoke(method, params, timeoutMs = 3500) {
+  async invoke(method, params, options = {}) {
+    const normalized =
+      typeof options === "number" ? { timeoutMs: options } : options;
+    const timeoutMs = normalized.timeoutMs ?? 3500;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const requestId = `desktop:${Date.now().toString(36)}:${crypto.randomUUID()}`;
+    const onAbort = () => controller.abort(normalized.signal?.reason);
+    normalized.signal?.addEventListener("abort", onAbort, { once: true });
+    const timeout = setTimeout(
+      () => controller.abort(new Error(`Runtime request timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    const requestId =
+      normalized.requestId ??
+      `desktop:${Date.now().toString(36)}:${crypto.randomUUID()}`;
     try {
       const response = await fetch(`${this.baseUrl}/runtime/v${API_VERSION}/rpc`, {
         method: "POST",
@@ -36,6 +46,7 @@ export class RuntimeHttpClient {
       return payload.result;
     } finally {
       clearTimeout(timeout);
+      normalized.signal?.removeEventListener("abort", onAbort);
     }
   }
 
