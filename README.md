@@ -37,3 +37,30 @@ See:
 - [Platform Integration](docs/integration/PLATFORM_INTEGRATION.md)
 - [Platform Integration Gates v1](docs/integration/INTEGRATION_GATES_V1.md)
 - [2.0 Dependency Roadmap](docs/roadmap/2.0-dependency-roadmap.md)
+
+## Development
+
+Requirements: Node.js 20+ and npm.
+
+```bash
+npm install
+npm run dev
+```
+
+OWL Desktop development connects to OWL Runtime at `http://127.0.0.1:8788` by default. This intentionally stays separate from the legacy production service currently using port 8787.
+
+Run the Runtime development daemon separately:
+
+```bash
+cd ../owl-runtime
+npm run start:source
+```
+
+Quality gates:
+
+```bash
+npm test
+npm run build
+```
+
+The Electron renderer has no Node integration. Runtime credentials and project secrets remain in the Electron main process and are persisted only through OS-backed encryption.

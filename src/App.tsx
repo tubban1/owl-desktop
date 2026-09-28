@@ -1,0 +1,183 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  Activity, Boxes, CheckCircle2, Cloud, Cpu, Gauge, HardDrive,
+  KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
+  Terminal, Trash2, Wifi, WifiOff,
+} from "lucide-react";
+import type { DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
+
+type Page = "overview" | "sessions" | "logs" | "runtime" | "secrets" | "settings";
+
+const nav = [
+  { id: "overview" as Page, label: "Overview", icon: Gauge },
+  { id: "sessions" as Page, label: "Sessions", icon: ListTree },
+  { id: "logs" as Page, label: "Live Logs", icon: Terminal },
+  { id: "runtime" as Page, label: "Runtime", icon: Boxes },
+  { id: "secrets" as Page, label: "Secrets", icon: KeyRound },
+  { id: "settings" as Page, label: "Settings", icon: Settings2 },
+];
+
+const pretty = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
+const formatTime = (value?: string) => value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange(v: boolean): void }) {
+  return <button className={"toggle " + (checked ? "on" : "")} onClick={() => onChange(!checked)} aria-pressed={checked}><span /></button>;
+}
+
+function StatusPill({ online }: { online: boolean }) {
+  return <span className={"status-pill " + (online ? "online" : "offline")}>{online ? <Wifi size={13} /> : <WifiOff size={13} />}{online ? "Connected" : "Offline"}</span>;
+}
+
+function MetricCard({ label, value, caption, icon: Icon }: { label: string; value: string | number; caption: string; icon: typeof Activity }) {
+  return <div className="metric-card"><div className="metric-icon"><Icon size={18} /></div><div><div className="metric-label">{label}</div><div className="metric-value">{value}</div><div className="metric-caption">{caption}</div></div></div>;
+}
+
+function SectionHeader({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {
+  return <div className="section-header"><div><h1>{title}</h1><p>{description}</p></div>{action}</div>;
+}
+
+export default function App() {
+  const [page, setPage] = useState<Page>("overview");
+  const [env, setEnv] = useState<DesktopEnvironment | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
+  const [secrets, setSecrets] = useState<SecretMeta[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [secretDraft, setSecretDraft] = useState({ name: "", project: "global", value: "" });
+  const [notice, setNotice] = useState("");
+
+  const online = snapshot?.mode === "live";
+
+  const refresh = async () => {
+    setBusy(true);
+    try { setSnapshot(await window.owlDesktop.refreshRuntime()); }
+    finally { setBusy(false); }
+  };
+
+  useEffect(() => {
+    Promise.all([
+      window.owlDesktop.environment(),
+      window.owlDesktop.getSettings(),
+      window.owlDesktop.listSecrets(),
+    ]).then(([nextEnv, nextSettings, nextSecrets]) => {
+      setEnv(nextEnv);
+      setSettings(nextSettings);
+      setSecrets(nextSecrets);
+      if (nextSettings.autoConnectRuntime) void refresh();
+    });
+  }, []);
+
+  const runtimeVersion = snapshot?.info?.runtimeVersion ?? "Not connected";
+  const apiVersion = snapshot?.info?.apiVersion ?? "—";
+  const sessionShort = settings?.sessionId ? settings.sessionId.slice(0, 22) + "…" : "—";
+
+  const saveSettings = async (patch: Partial<Settings>) => {
+    if (!settings) return;
+    const next = await window.owlDesktop.updateSettings(patch);
+    setSettings(next);
+    setNotice("Settings saved");
+    window.setTimeout(() => setNotice(""), 1600);
+  };
+
+  const addSecret = async () => {
+    if (!secretDraft.name.trim() || !secretDraft.value) return;
+    await window.owlDesktop.upsertSecret(secretDraft);
+    setSecrets(await window.owlDesktop.listSecrets());
+    setSecretDraft({ name: "", project: "global", value: "" });
+    setNotice("Secret encrypted and saved");
+    window.setTimeout(() => setNotice(""), 1800);
+  };
+
+  const activityRows = useMemo(() => snapshot?.activity ?? [], [snapshot]);
+
+  return <div className="app-shell">
+    <aside className="sidebar">
+      <div className="traffic-spacer" />
+      <div className="brand"><div className="brand-mark">O</div><div><strong>OWL</strong><span>Desktop</span></div></div>
+      <nav>{nav.map((item) => {
+        const Icon = item.icon;
+        return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={17} /><span>{item.label}</span></button>;
+      })}</nav>
+      <div className="sidebar-bottom">
+        <div className="device-card"><div className="device-dot" /><div><strong>This Mac</strong><span>{env ? env.platform + " · " + env.arch : "Loading…"}</span></div></div>
+        <div className="build-meta">OWL Desktop {env?.appVersion ?? "0.1.0"}</div>
+      </div>
+    </aside>
+
+    <main className="main">
+      <header className="topbar">
+        <div className="crumb">LOCAL CONTROL PLANE</div>
+        <div className="top-actions">{notice && <span className="notice">{notice}</span>}<StatusPill online={online} /><button className="icon-button" onClick={refresh} disabled={busy} title="Refresh Runtime"><RefreshCw size={16} className={busy ? "spin" : ""} /></button></div>
+      </header>
+
+      <div className="content">
+        {page === "overview" && <>
+          <SectionHeader title="Good evening." description="Your local OWL execution stack, sessions and operational health in one place." action={<button className="primary" onClick={refresh}><RefreshCw size={15} />Refresh Runtime</button>} />
+          <section className={"hero-status " + (online ? "healthy" : "warning")}>
+            <div className="hero-icon">{online ? <CheckCircle2 size={24} /> : <WifiOff size={24} />}</div>
+            <div className="hero-copy"><span>LOCAL EXECUTION AUTHORITY</span><h2>{online ? "OWL Runtime is ready" : "OWL Runtime is not connected"}</h2><p>{online ? "Desktop is reading canonical execution state through RuntimeClient v" + apiVersion + "." : (snapshot?.error ?? "Start OWL Runtime or update the endpoint in Settings.")}</p></div>
+            <div className="hero-side"><strong>{online ? snapshot?.latencyMs + " ms" : "—"}</strong><span>last probe</span></div>
+          </section>
+          <div className="metrics-grid">
+            <MetricCard label="Persistent tasks" value={snapshot?.metrics.tasks ?? "—"} caption="Runtime-owned" icon={HardDrive} />
+            <MetricCard label="Processes" value={snapshot?.metrics.processes ?? "—"} caption="Active + retained" icon={Cpu} />
+            <MetricCard label="Approvals" value={snapshot?.metrics.approvals ?? "—"} caption="Runtime policy" icon={ShieldCheck} />
+            <MetricCard label="Secrets" value={secrets.length} caption="OS-encrypted" icon={KeyRound} />
+          </div>
+          <div className="two-col">
+            <section className="panel"><div className="panel-heading"><div><span className="eyebrow">COMPONENTS</span><h3>Platform status</h3></div></div>
+              <div className="component-list">
+                <div><span className="component-icon"><Boxes size={17} /></span><p><strong>OWL Runtime</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
+                <div><span className="component-icon"><Terminal size={17} /></span><p><strong>OWL MCP</strong><small>Desktop adapter boundary</small></p><span className="neutral-pill">Phase 1</span></div>
+                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL Cloud Bridge</strong><small>Optional for local execution</small></p><span className="neutral-pill">Not connected</span></div>
+              </div>
+            </section>
+            <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RECENT ACTIVITY</span><h3>Local events</h3></div><button className="text-button" onClick={() => setPage("logs")}>View logs</button></div>
+              <div className="activity-list">{activityRows.slice(0, 5).map((entry) => <div key={entry.id}><span className={"log-dot " + entry.level} /><p><strong>{entry.message}</strong><small>{entry.source} · {formatTime(entry.at)}</small></p></div>)}{activityRows.length === 0 && <div className="empty">No local events yet.</div>}</div>
+            </section>
+          </div>
+        </>}
+
+        {page === "sessions" && <>
+          <SectionHeader title="Sessions" description="Stable logical ownership identities used across Runtime reconnects." />
+          <div className="session-card"><div className="session-title"><span className="avatar">D</span><div><strong>OWL Desktop</strong><span>Primary local consumer session</span></div><StatusPill online={online} /></div>
+            <div className="session-details"><div><span>Session ID</span><code>{settings?.sessionId ?? "—"}</code></div><div><span>Runtime API</span><strong>{apiVersion}</strong></div><div><span>Transport</span><strong>{snapshot?.info?.transport ?? "HTTP"}</strong></div><div><span>Last seen</span><strong>{formatTime(snapshot?.checkedAt)}</strong></div></div>
+          </div>
+          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RUNTIME PROJECTION</span><h3>Processes visible to this consumer</h3></div></div><pre className="code-block">{pretty(snapshot?.processes)}</pre></section>
+          <div className="contract-note"><ShieldCheck size={17} /><div><strong>Cross-session inventory is intentionally not reimplemented here.</strong><p>Desktop currently has no canonical Runtime session-list/event-stream contract. This is tracked as CR-DESKTOP-001/002.</p></div></div>
+        </>}
+
+        {page === "logs" && <>
+          <SectionHeader title="Live Logs" description="Desktop-local activity today; Runtime event streaming will attach through the public contract." action={<button className="secondary" onClick={refresh}><RefreshCw size={15} />Refresh</button>} />
+          <section className="log-console"><div className="console-head"><span /><span /><span /><strong>desktop.activity</strong></div>{activityRows.map((entry) => <div className="console-row" key={entry.id}><time>{formatTime(entry.at)}</time><span className={"level " + entry.level}>{entry.level.toUpperCase()}</span><span className="source">{entry.source}</span><p>{entry.message}</p></div>)}{activityRows.length === 0 && <div className="empty console-empty">No events captured yet.</div>}</section>
+          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RUNTIME DIAGNOSTICS</span><h3>Latest support projection</h3></div></div><pre className="code-block tall">{pretty(snapshot?.diagnostics)}</pre></section>
+        </>}
+
+        {page === "runtime" && <>
+          <SectionHeader title="Runtime" description="Connection, compatibility and canonical execution state from OWL Runtime." action={<StatusPill online={online} />} />
+          <div className="runtime-grid">
+            <section className="panel runtime-summary"><span className="eyebrow">CONNECTION</span><h3>{settings?.runtimeBaseUrl ?? "—"}</h3><p>Stable session: <code>{sessionShort}</code></p><div className="runtime-version"><span>API {apiVersion}</span><span>Runtime {runtimeVersion}</span><span>{snapshot?.latencyMs ?? "—"} ms</span></div></section>
+            <section className="panel"><span className="eyebrow">HEALTH</span><pre className="code-block compact">{pretty(snapshot?.health)}</pre></section>
+          </div>
+          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">COMPATIBILITY</span><h3>Desktop consumer boundary</h3></div></div><div className="compat-row"><span>Minimum Runtime API</span><strong>0.1</strong><span>Preferred / tested</span><strong>0.1</strong><span>Fallback</span><strong>Fail closed</strong></div></section>
+        </>}
+
+        {page === "secrets" && <>
+          <SectionHeader title="Secrets" description="Project credentials are encrypted with the operating system key store; values are never returned to the renderer." />
+          <section className="panel secret-form"><div><label>Secret name</label><input value={secretDraft.name} onChange={(e) => setSecretDraft({ ...secretDraft, name: e.target.value })} placeholder="OPENAI_API_KEY" /></div><div><label>Project / scope</label><input value={secretDraft.project} onChange={(e) => setSecretDraft({ ...secretDraft, project: e.target.value })} placeholder="global" /></div><div className="grow"><label>Value</label><input type="password" value={secretDraft.value} onChange={(e) => setSecretDraft({ ...secretDraft, value: e.target.value })} placeholder="••••••••••••" /></div><button className="primary add-secret" onClick={addSecret}><Plus size={15} />Save</button></section>
+          <section className="panel"><div className="secret-table head"><span>Name</span><span>Scope</span><span>Updated</span><span /></div>{secrets.map((secret) => <div className="secret-table" key={secret.id}><div><KeyRound size={15} /><strong>{secret.name}</strong></div><code>{secret.project}</code><span>{new Date(secret.updatedAt).toLocaleDateString()}</span><button className="danger-icon" onClick={async () => { await window.owlDesktop.deleteSecret(secret.id); setSecrets(await window.owlDesktop.listSecrets()); }}><Trash2 size={15} /></button></div>)}{secrets.length === 0 && <div className="empty table-empty">No secrets stored yet.</div>}</section>
+        </>}
+
+        {page === "settings" && settings && <>
+          <SectionHeader title="Settings" description="Local product preferences and Runtime connectivity." />
+          <section className="panel settings-panel"><div className="setting-row"><div><strong>Runtime endpoint</strong><span>Loopback HTTP endpoint exposed by OWL Runtime.</span></div><input className="setting-input" value={settings.runtimeBaseUrl} onChange={(e) => setSettings({ ...settings, runtimeBaseUrl: e.target.value })} onBlur={() => saveSettings({ runtimeBaseUrl: settings.runtimeBaseUrl })} /></div>
+            <div className="setting-row"><div><strong>Auto-connect Runtime</strong><span>Probe Runtime when OWL Desktop starts.</span></div><Toggle checked={settings.autoConnectRuntime} onChange={(v) => saveSettings({ autoConnectRuntime: v })} /></div>
+            <div className="setting-row"><div><strong>Runtime diagnostics</strong><span>Include Runtime support projections in the Logs screen.</span></div><Toggle checked={settings.diagnosticsEnabled} onChange={(v) => saveSettings({ diagnosticsEnabled: v })} /></div>
+            <div className="setting-row"><div><strong>Launch at login</strong><span>Start OWL Desktop after macOS login in packaged builds.</span></div><Toggle checked={settings.launchAtLogin} onChange={(v) => saveSettings({ launchAtLogin: v })} /></div>
+          </section>
+          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">ABOUT</span><h3>Local installation</h3></div></div><div className="about-grid"><span>Desktop</span><strong>{env?.appVersion}</strong><span>Electron</span><strong>{env?.electronVersion}</strong><span>Platform</span><strong>{env?.platform} / {env?.arch}</strong><span>Session</span><code>{sessionShort}</code></div></section>
+        </>}
+      </div>
+    </main>
+  </div>;
+}
