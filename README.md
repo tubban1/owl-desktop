@@ -33,5 +33,7 @@ See:
 - [Cross-Repo Development Protocol v1](docs/architecture/CROSS_REPO_DEVELOPMENT_PROTOCOL_V1.md)
 - [Runtime Consumer Contract](docs/contracts/RUNTIME_CONSUMER_CONTRACT_V1.md)
 - [Cloud Bridge Contract](docs/contracts/CLOUD_BRIDGE_CONTRACT_V1.md)
+- [Compatibility Matrix](docs/contracts/COMPATIBILITY_MATRIX.md)
 - [Platform Integration](docs/integration/PLATFORM_INTEGRATION.md)
+- [Platform Integration Gates v1](docs/integration/INTEGRATION_GATES_V1.md)
 - [2.0 Dependency Roadmap](docs/roadmap/2.0-dependency-roadmap.md)
