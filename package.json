@@ -72,6 +72,14 @@
         "dmg",
         "zip"
       ]
-    }
+    },
+    "protocols": [
+      {
+        "name": "OWL Desktop",
+        "schemes": [
+          "owl-desktop"
+        ]
+      }
+    ]
   }
 }
