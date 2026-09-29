@@ -53,28 +53,24 @@ function requiredIsoTimestamp(value, label) {
 }
 
 function parsePosition(input) {
-  let sequence;
-  let cursor;
-
-  if (input.sequence !== undefined) {
-    if (!Number.isSafeInteger(input.sequence) || input.sequence < 0) {
-      throw new Error("AgentRequest event sequence must be a non-negative safe integer.");
-    }
-    sequence = input.sequence;
+  if (!Number.isSafeInteger(input.sequence) || input.sequence < 1) {
+    throw new Error(
+      "AGENT_REQUEST_EVENT_POSITION_INVALID: sequence must be a positive safe integer.",
+    );
   }
-
-  if (input.cursor !== undefined) {
-    cursor = requiredString(input.cursor, "AgentRequest event cursor", 220);
+  const sequence = input.sequence;
+  const cursor = requiredString(
+    input.cursor,
+    "AgentRequest event cursor",
+    220,
+  );
+  const match = /^runtime-events:(\d+)$/.exec(cursor);
+  if (!match || Number(match[1]) !== sequence) {
+    throw new Error(
+      "AGENT_REQUEST_EVENT_POSITION_INVALID: cursor must equal runtime-events:<sequence>.",
+    );
   }
-
-  if (sequence === undefined && cursor === undefined) {
-    throw new Error("AgentRequest event requires sequence or cursor.");
-  }
-
-  return {
-    ...(sequence !== undefined ? { sequence } : {}),
-    ...(cursor !== undefined ? { cursor } : {}),
-  };
+  return { sequence, cursor };
 }
 
 function parseSubject(value) {
@@ -150,7 +146,7 @@ function parseCommon(input) {
   };
 }
 
-export function parseRuntimeAgentRequestEvent(value) {
+function parseRuntimeAgentRequestEventUnchecked(value) {
   const input = assertObject(value, "Runtime AgentRequest event");
   const common = parseCommon(input);
 
@@ -265,6 +261,21 @@ export function parseRuntimeAgentRequestEvent(value) {
   };
 }
 
+export function parseRuntimeAgentRequestEvent(value) {
+  try {
+    return parseRuntimeAgentRequestEventUnchecked(value);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith("AGENT_REQUEST_EVENT_")) throw error;
+    const wrapped = new Error(
+      "AGENT_REQUEST_EVENT_INVALID: " + message,
+      { cause: error },
+    );
+    wrapped.code = "AGENT_REQUEST_EVENT_INVALID";
+    throw wrapped;
+  }
+}
+
 function emptyConsumerState() {
   return {
     version: 1,
@@ -330,17 +341,35 @@ export class RuntimeAgentRequestEventConsumer {
   }
 
   readState() {
-    const state = readJson(this.stateFile, emptyConsumerState());
+    let state;
+    try {
+      state = readJson(this.stateFile, emptyConsumerState());
+    } catch (error) {
+      const wrapped = new Error(
+        "AGENT_REQUEST_CONSUMER_STATE_INVALID: " +
+          (error instanceof Error ? error.message : String(error)),
+        { cause: error },
+      );
+      wrapped.code = "AGENT_REQUEST_CONSUMER_STATE_INVALID";
+      throw wrapped;
+    }
     if (
       state?.version !== 1 ||
       !Array.isArray(state.events) ||
       !(
         state.lastSequence === null ||
-        (Number.isSafeInteger(state.lastSequence) && state.lastSequence >= 0)
+        (Number.isSafeInteger(state.lastSequence) && state.lastSequence >= 1)
       ) ||
-      !(state.lastCursor === null || typeof state.lastCursor === "string")
+      !(state.lastCursor === null || typeof state.lastCursor === "string") ||
+      ((state.lastSequence === null) !== (state.lastCursor === null)) ||
+      (state.lastSequence !== null &&
+        state.lastCursor !== `runtime-events:${state.lastSequence}`)
     ) {
-      throw new Error("AGENT_REQUEST_CONSUMER_STATE_INVALID");
+      const error = new Error(
+        "AGENT_REQUEST_CONSUMER_STATE_INVALID: durable sequence/cursor checkpoint is invalid.",
+      );
+      error.code = "AGENT_REQUEST_CONSUMER_STATE_INVALID";
+      throw error;
     }
     return state;
   }
