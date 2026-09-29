@@ -504,6 +504,83 @@ function registerIpc() {
       throw error;
     }
   });
+  ipcMain.handle("skills:discover", async (_event, request) => {
+    return await skillManagerPort().discover(request ?? {});
+  });
+  ipcMain.handle("skills:candidate-submit", async (_event, manifest) => {
+    const result = await skillManagerPort().submitCandidate(manifest);
+    record("info", "skills", "Skill Candidate submitted", {
+      candidateId: result?.candidate?.id ?? null,
+      idempotent: result?.idempotent === true,
+    });
+    return result;
+  });
+  ipcMain.handle("skills:candidate-get", async (_event, candidateId) =>
+    skillManagerPort().getCandidate(candidateId));
+  ipcMain.handle(
+    "skills:candidate-revise",
+    async (_event, candidateId, expectedDigest, manifest) =>
+      skillManagerPort().reviseCandidate(
+        candidateId,
+        expectedDigest,
+        manifest,
+      ),
+  );
+  ipcMain.handle(
+    "skills:candidate-validate",
+    async (_event, candidateId, expectedDigest) =>
+      skillManagerPort().validateCandidate(candidateId, expectedDigest),
+  );
+  ipcMain.handle(
+    "skills:candidate-dismiss",
+    async (_event, candidateId, expectedDigest) =>
+      skillManagerPort().dismissCandidate(candidateId, expectedDigest),
+  );
+  ipcMain.handle(
+    "skills:candidate-compile-test",
+    async (_event, candidateId, expectedDigest, inputs) =>
+      skillManagerPort().compileCandidateTest(
+        candidateId,
+        expectedDigest,
+        inputs ?? {},
+      ),
+  );
+  ipcMain.handle("skills:candidate-run-test", async (_event, taskId) =>
+    skillManagerPort().runCandidateTest(taskId));
+  ipcMain.handle(
+    "skills:candidate-inspect",
+    async (_event, candidateId, testTaskId) =>
+      skillManagerPort().inspectCandidate(candidateId, testTaskId),
+  );
+  ipcMain.handle(
+    "skills:candidate-promote",
+    async (_event, candidateId, expectedDigest, testTaskId, confirm) => {
+      const result = await skillManagerPort().promoteCandidate(
+        candidateId,
+        expectedDigest,
+        testTaskId,
+        confirm === true,
+      );
+      record("info", "skills", "Skill Candidate promotion evaluated", {
+        candidateId,
+        testTaskId,
+        promoted: result?.promoted === true,
+      });
+      return result;
+    },
+  );
+  ipcMain.handle("skills:user-set-enabled", async (_event, skillId, enabled) =>
+    skillManagerPort().setEnabled(skillId, enabled === true));
+  ipcMain.handle(
+    "skills:user-activate-version",
+    async (_event, skillId, version) =>
+      skillManagerPort().activateVersion(skillId, version),
+  );
+  ipcMain.handle("skills:user-rollback", async (_event, skillId, version) =>
+    skillManagerPort().rollback(skillId, version));
+  ipcMain.handle("skills:user-uninstall", async (_event, skillId, version) =>
+    skillManagerPort().uninstall(skillId, version));
+
   ipcMain.handle("host:status", () => runtimeHostSupervisor().status());
   ipcMain.handle("host:restart", () => runtimeHostSupervisor().restartService());
   ipcMain.handle("host:stop", () => runtimeHostSupervisor().stopService());

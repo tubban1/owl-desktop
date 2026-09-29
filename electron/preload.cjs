@@ -17,6 +17,67 @@ contextBridge.exposeInMainWorld("owlDesktop", {
     ipcRenderer.invoke("skills:dry-run", skillId, args),
   skillRun: (skillId, args) =>
     ipcRenderer.invoke("skills:run", skillId, args),
+  skillDiscover: (request) =>
+    ipcRenderer.invoke("skills:discover", request),
+  skillCandidateSubmit: (manifest) =>
+    ipcRenderer.invoke("skills:candidate-submit", manifest),
+  skillCandidateGet: (candidateId) =>
+    ipcRenderer.invoke("skills:candidate-get", candidateId),
+  skillCandidateRevise: (candidateId, expectedDigest, manifest) =>
+    ipcRenderer.invoke(
+      "skills:candidate-revise",
+      candidateId,
+      expectedDigest,
+      manifest,
+    ),
+  skillCandidateValidate: (candidateId, expectedDigest) =>
+    ipcRenderer.invoke(
+      "skills:candidate-validate",
+      candidateId,
+      expectedDigest,
+    ),
+  skillCandidateDismiss: (candidateId, expectedDigest) =>
+    ipcRenderer.invoke(
+      "skills:candidate-dismiss",
+      candidateId,
+      expectedDigest,
+    ),
+  skillCandidateCompileTest: (candidateId, expectedDigest, inputs) =>
+    ipcRenderer.invoke(
+      "skills:candidate-compile-test",
+      candidateId,
+      expectedDigest,
+      inputs,
+    ),
+  skillCandidateRunTest: (taskId) =>
+    ipcRenderer.invoke("skills:candidate-run-test", taskId),
+  skillCandidateInspect: (candidateId, testTaskId) =>
+    ipcRenderer.invoke(
+      "skills:candidate-inspect",
+      candidateId,
+      testTaskId,
+    ),
+  skillCandidatePromote: (
+    candidateId,
+    expectedDigest,
+    testTaskId,
+    confirm,
+  ) =>
+    ipcRenderer.invoke(
+      "skills:candidate-promote",
+      candidateId,
+      expectedDigest,
+      testTaskId,
+      confirm,
+    ),
+  userSkillSetEnabled: (skillId, enabled) =>
+    ipcRenderer.invoke("skills:user-set-enabled", skillId, enabled),
+  userSkillActivateVersion: (skillId, version) =>
+    ipcRenderer.invoke("skills:user-activate-version", skillId, version),
+  userSkillRollback: (skillId, version) =>
+    ipcRenderer.invoke("skills:user-rollback", skillId, version),
+  userSkillUninstall: (skillId, version) =>
+    ipcRenderer.invoke("skills:user-uninstall", skillId, version),
   hostStatus: () => ipcRenderer.invoke("host:status"),
   hostRestart: () => ipcRenderer.invoke("host:restart"),
   hostStop: () => ipcRenderer.invoke("host:stop"),

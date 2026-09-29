@@ -2,21 +2,40 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  Eye,
   FlaskConical,
   Library,
   PackagePlus,
   Play,
   RefreshCw,
+  RotateCcw,
+  Search,
   ShieldCheck,
   Sparkles,
+  Trash2,
+  Zap,
 } from "lucide-react";
-import type { SkillManagerSnapshot, SkillSummary } from "../types";
+import type {
+  SkillCandidateInspection,
+  SkillCandidateRecord,
+  SkillManagerSnapshot,
+  SkillSummary,
+  UserSkillManifest,
+  UserSkillRegistrySummary,
+  WorkflowSkillDiscoveryResult,
+  WorkflowSkillProposal,
+} from "../types";
 import {
   desktopSkillManagerPort,
   type SkillManagerPort,
 } from "./skillManagerPort";
 
-type SkillTab = "overview" | "installed" | "candidates" | "library";
+type SkillTab =
+  | "overview"
+  | "installed"
+  | "discover"
+  | "candidates"
+  | "library";
 
 const pretty = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
 
@@ -48,12 +67,175 @@ function riskTone(
   return "neutral";
 }
 
+function currentCandidateRawManifest(
+  candidate: SkillCandidateRecord,
+): unknown {
+  return candidate.revisions.find(
+    (item) => item.digest === candidate.currentDigest,
+  )?.manifest ?? null;
+}
+
+function isUserSkillManifest(value: unknown): value is UserSkillManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const manifest = value as Record<string, unknown>;
+  return (
+    manifest.schemaVersion === 1 &&
+    manifest.skillAbiVersion === 1 &&
+    typeof manifest.id === "string" &&
+    typeof manifest.version === "string" &&
+    typeof manifest.title === "string" &&
+    typeof manifest.description === "string" &&
+    Array.isArray(manifest.requiredPrimitives) &&
+    manifest.executionMode === "durable" &&
+    Boolean(
+      manifest.inputs &&
+      typeof manifest.inputs === "object" &&
+      !Array.isArray(manifest.inputs),
+    ) &&
+    Boolean(
+      manifest.contract &&
+      typeof manifest.contract === "object" &&
+      !Array.isArray(manifest.contract),
+    ) &&
+    Array.isArray(manifest.steps)
+  );
+}
+
+function currentCandidateManifest(
+  candidate: SkillCandidateRecord,
+): UserSkillManifest | null {
+  const manifest = currentCandidateRawManifest(candidate);
+  return isUserSkillManifest(manifest) ? manifest : null;
+}
+
+function lastCurrentTest(candidate: SkillCandidateRecord) {
+  return [...candidate.tests]
+    .reverse()
+    .find((test) => test.candidateDigest === candidate.currentDigest);
+}
+
+function UserSkillLifecycle({
+  registry,
+  port,
+  onChanged,
+}: {
+  registry: UserSkillRegistrySummary;
+  port: SkillManagerPort;
+  onChanged: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  const action = async (name: string, operation: () => Promise<unknown>) => {
+    setBusy(name);
+    setError("");
+    try {
+      await operation();
+      await onChanged();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <div className="skill-lifecycle">
+      <div>
+        <span className="eyebrow">RUNTIME REGISTRY</span>
+        <strong>Version & activation management</strong>
+      </div>
+
+      <div className="skill-lifecycle-actions">
+        <button
+          className="secondary"
+          disabled={Boolean(busy)}
+          onClick={() =>
+            void action("toggle", () =>
+              port.setUserSkillEnabled(registry.skillId, !registry.enabled),
+            )
+          }
+        >
+          <Zap size={14} />
+          {registry.enabled ? "Disable" : "Enable"}
+        </button>
+
+        <button
+          className="secondary"
+          disabled={Boolean(busy) || registry.versions.length < 2}
+          onClick={() =>
+            void action("rollback", () => port.rollbackUserSkill(registry.skillId))
+          }
+        >
+          <RotateCcw size={14} />
+          Roll Back
+        </button>
+
+        <button
+          className="secondary danger-text"
+          disabled={Boolean(busy)}
+          onClick={() => {
+            if (
+              window.confirm(
+                `Uninstall all versions of ${registry.skillId}? Historical Runtime evidence remains governed separately.`,
+              )
+            ) {
+              void action("uninstall", () =>
+                port.uninstallUserSkill(registry.skillId),
+              );
+            }
+          }}
+        >
+          <Trash2 size={14} />
+          Uninstall
+        </button>
+      </div>
+
+      <div className="skill-version-list">
+        {registry.versions.map((version) => (
+          <div key={version.version}>
+            <div>
+              <code>{version.version}</code>
+              <span>
+                {version.active ? "active" : version.uninstalledAt ? "uninstalled" : "installed"}
+              </span>
+            </div>
+            {!version.active && !version.uninstalledAt && (
+              <button
+                className="text-button"
+                disabled={Boolean(busy)}
+                onClick={() =>
+                  void action("activate", () =>
+                    port.activateUserSkillVersion(
+                      registry.skillId,
+                      version.version,
+                    ),
+                  )
+                }
+              >
+                Activate
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {error && <div className="skill-run-error">{error}</div>}
+      <small>Runtime owns immutable versions, activation history and execution truth.</small>
+    </div>
+  );
+}
+
 function SkillDetail({
   skill,
+  registry,
   port,
+  onChanged,
 }: {
   skill: SkillSummary;
+  registry?: UserSkillRegistrySummary;
   port: SkillManagerPort;
+  onChanged: () => Promise<void>;
 }) {
   const [argsText, setArgsText] = useState("{}");
   const [result, setResult] = useState<unknown>(null);
@@ -103,9 +285,7 @@ function SkillDetail({
           : await port.run(skill.id, args);
       setResult(output);
     } catch (nextError) {
-      const message =
-        nextError instanceof Error ? nextError.message : String(nextError);
-      setError(message);
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
     } finally {
       setBusyAction(null);
     }
@@ -115,14 +295,16 @@ function SkillDetail({
     <section className="panel skill-detail">
       <div className="skill-detail-head">
         <div>
-          <span className="eyebrow">BUILT-IN SKILL</span>
+          <span className="eyebrow">
+            {skill.source === "user" ? "USER SKILL" : "BUILT-IN SKILL"}
+          </span>
           <h2>{skill.title}</h2>
           <code>{skill.id}</code>
         </div>
         <div className="skill-pill-row">
           <Pill tone={availabilityTone(skill.availability)}>
             {skill.availability === "ready"
-              ? "ABI ready"
+              ? "ready"
               : skill.availability.replaceAll("_", " ")}
           </Pill>
           <Pill tone={riskTone(skill.riskLevel)}>
@@ -229,34 +411,553 @@ function SkillDetail({
         {result !== null && <pre className="code-block tall">{pretty(result)}</pre>}
       </div>
 
-      <div className="skill-lifecycle">
-        <div>
-          <span className="eyebrow">LIFECYCLE</span>
-          <strong>Version & activation management</strong>
+      {skill.source === "user" && registry ? (
+        <UserSkillLifecycle
+          registry={registry}
+          port={port}
+          onChanged={onChanged}
+        />
+      ) : (
+        <div className="contract-note">
+          <ShieldCheck size={17} />
+          <div>
+            <strong>Built-in Skill lifecycle follows Runtime releases.</strong>
+            <p>
+              Desktop can inspect and run this Skill, but it does not mutate
+              built-in Runtime capability definitions.
+            </p>
+          </div>
         </div>
-        <div className="skill-lifecycle-actions">
-          {["Disable", "Update", "Roll Back", "Uninstall"].map((action) => (
-            <button
-              key={action}
-              className="secondary"
-              disabled
-              title={skill.lifecycle.reason}
-            >
-              {action}
-            </button>
+      )}
+    </section>
+  );
+}
+
+function ProposalDetail({
+  proposal,
+  port,
+  onCandidateCreated,
+}: {
+  proposal: WorkflowSkillProposal;
+  port: SkillManagerPort;
+  onCandidateCreated: (candidateId: string) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<unknown>(null);
+  const [error, setError] = useState("");
+
+  const createCandidate = async () => {
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      const receipt = await port.submitCandidate(proposal.manifest);
+      setResult(receipt);
+      await onCandidateCreated(receipt.candidate.id);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="panel skill-discovery-detail">
+      <div className="skill-detail-head">
+        <div>
+          <span className="eyebrow">REPEATED WORKFLOW</span>
+          <h2>{proposal.manifest.title}</h2>
+          <code>{proposal.proposalId}</code>
+        </div>
+        <div className="skill-pill-row">
+          <Pill tone={proposal.validation.valid ? "good" : "danger"}>
+            {proposal.validation.valid ? "validation ready" : "validation failed"}
+          </Pill>
+          <Pill
+            tone={
+              proposal.governance.state === "new"
+                ? "good"
+                : proposal.governance.state === "installed"
+                  ? "neutral"
+                  : "warn"
+            }
+          >
+            {proposal.governance.state.replaceAll("_", " ")}
+          </Pill>
+        </div>
+      </div>
+
+      <p className="skill-description">{proposal.manifest.description}</p>
+
+      <div className="skill-facts discovery-evidence-grid">
+        <div><span>Successful runs</span><strong>{proposal.support.successfulRuns}</strong></div>
+        <div><span>Evidence used</span><strong>{proposal.support.sourceRunsUsed}</strong></div>
+        <div><span>Argument sets</span><strong>{proposal.support.distinctArgumentSets}</strong></div>
+        <div><span>Recovery-free</span><strong>{proposal.support.recoveryFreeRuns}</strong></div>
+        <div><span>Inputs inferred</span><strong>{proposal.parameterization.inputNames.length}</strong></div>
+        <div><span>Risk</span><strong>{proposal.manifest.contract.riskLevel}</strong></div>
+      </div>
+
+      <div className="skill-detail-grid">
+        <div>
+          <span className="eyebrow">INFERRED INPUTS</span>
+          <div className="skill-chip-list">
+            {proposal.parameterization.inputNames.length
+              ? proposal.parameterization.inputNames.map((name) => (
+                  <code key={name}>{name}</code>
+                ))
+              : <span className="muted">No varying scalar inputs detected</span>}
+          </div>
+        </div>
+        <div>
+          <span className="eyebrow">VARIABLE PATHS</span>
+          <div className="skill-chip-list">
+            {proposal.parameterization.variablePaths.length
+              ? proposal.parameterization.variablePaths.map((value) => (
+                  <code key={value}>{value}</code>
+                ))
+              : <span className="muted">Stable workflow</span>}
+          </div>
+        </div>
+      </div>
+
+      <div className="candidate-validation">
+        <div className="panel-heading">
+          <div><span className="eyebrow">VALIDATION PREVIEW</span><h3>Runtime deterministic report</h3></div>
+          <Pill tone={proposal.validation.valid ? "good" : "danger"}>
+            {proposal.validation.errors.length} errors · {proposal.validation.warnings.length} warnings
+          </Pill>
+        </div>
+        {proposal.validation.errors.map((issue) => (
+          <div className="candidate-issue error" key={issue.code + issue.path}>
+            <code>{issue.code}</code>
+            <span>{issue.path}</span>
+            <p>{issue.message}</p>
+          </div>
+        ))}
+        {proposal.validation.warnings.map((issue) => (
+          <div className="candidate-issue warning" key={issue.code + issue.path}>
+            <code>{issue.code}</code>
+            <span>{issue.path}</span>
+            <p>{issue.message}</p>
+          </div>
+        ))}
+        {proposal.validation.errors.length === 0 &&
+          proposal.validation.warnings.length === 0 && (
+            <div className="candidate-valid-line">
+              <CheckCircle2 size={15} />
+              Draft passes Runtime validation preview.
+            </div>
+          )}
+      </div>
+
+      <details className="skill-manifest-review">
+        <summary>Review draft manifest and provenance</summary>
+        <pre className="code-block tall">{pretty(proposal.manifest)}</pre>
+      </details>
+
+      <div className="candidate-action-bar">
+        <button
+          className="primary"
+          disabled={busy || !proposal.readyForSubmit}
+          onClick={() => void createCandidate()}
+          title={
+            proposal.readyForSubmit
+              ? "Write this exact manifest into the Runtime Candidate Store"
+              : `Runtime governance state: ${proposal.governance.state}`
+          }
+        >
+          <PackagePlus size={15} />
+          {busy ? "Creating…" : "Create Candidate"}
+        </button>
+
+        {proposal.governance.candidates.length > 0 && (
+          <button
+            className="secondary"
+            disabled={busy}
+            onClick={() =>
+              void onCandidateCreated(
+                proposal.governance.exactLiveCandidateIds[0] ??
+                  proposal.governance.candidates[0].candidateId,
+              )
+            }
+          >
+            <Eye size={15} />
+            Open existing Candidate
+          </button>
+        )}
+
+        <span>
+          This is the first write boundary. Discovery itself remains read-only.
+        </span>
+      </div>
+
+      {proposal.governance.evidenceRefreshAvailable && (
+        <div className="skill-warning">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>New evidence is available.</strong>
+            <p>
+              Runtime found an existing Candidate for this workflow, but the
+              current draft digest changed. Desktop will not auto-revise it.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {error && <div className="skill-run-error">{error}</div>}
+      {result !== null && (
+        <details className="skill-result-details">
+          <summary>Candidate submission receipt</summary>
+          <pre className="code-block">{pretty(result)}</pre>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function CandidateDetail({
+  candidate,
+  port,
+  onChanged,
+}: {
+  candidate: SkillCandidateRecord;
+  port: SkillManagerPort;
+  onChanged: () => Promise<void>;
+}) {
+  const rawManifest = currentCandidateRawManifest(candidate);
+  const manifest = currentCandidateManifest(candidate);
+  const latestTest = lastCurrentTest(candidate);
+  const [inputsText, setInputsText] = useState("{}");
+  const [inspection, setInspection] = useState<SkillCandidateInspection | null>(null);
+  const [result, setResult] = useState<unknown>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+
+  useEffect(() => {
+    setInspection(null);
+    setResult(null);
+    setError("");
+    setInputsText("{}");
+  }, [candidate.id, candidate.currentDigest]);
+
+  const action = async (name: string, operation: () => Promise<unknown>) => {
+    setBusy(name);
+    setError("");
+    setResult(null);
+    try {
+      const output = await operation();
+      setResult(output);
+      await onChanged();
+      return output;
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      return null;
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const parseInputs = () => {
+    const value = JSON.parse(inputsText || "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Test inputs must be a JSON object.");
+    }
+    return value as Record<string, unknown>;
+  };
+
+  const compileTest = async () => {
+    let inputs: Record<string, unknown>;
+    try {
+      inputs = parseInputs();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      return;
+    }
+    await action("compile", () =>
+      port.compileCandidateTest(candidate.id, candidate.currentDigest, inputs),
+    );
+  };
+
+  const inspect = async () => {
+    setBusy("inspect");
+    setError("");
+    try {
+      const output = await port.inspectCandidate(
+        candidate.id,
+        latestTest?.taskId,
+      );
+      setInspection(output);
+      setResult(output);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const promote = async () => {
+    const testTaskId = inspection?.test?.binding.taskId ?? latestTest?.taskId;
+    if (!testTaskId) {
+      setError("Compile and run a Candidate test before promotion.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Promote ${manifest?.id ?? candidate.id}?\n\nThis installs an immutable User Skill version into the canonical Runtime Registry. Runtime will independently re-check validation, M2 evidence, quality, privacy and verification gates.`,
+      )
+    ) {
+      return;
+    }
+    const output = await action("promote", () =>
+      port.promoteCandidate(
+        candidate.id,
+        candidate.currentDigest,
+        testTaskId,
+        true,
+      ),
+    );
+    if (output) {
+      setInspection(
+        await port.inspectCandidate(candidate.id, testTaskId).catch(() => inspection),
+      );
+    }
+  };
+
+  const active = candidate.status === "active";
+
+  return (
+    <section className="panel skill-candidate-detail">
+      <div className="skill-detail-head">
+        <div>
+          <span className="eyebrow">RUNTIME CANDIDATE</span>
+          <h2>{manifest?.title ?? candidate.id}</h2>
+          <code>{candidate.id}</code>
+        </div>
+        <div className="skill-pill-row">
+          <Pill
+            tone={
+              candidate.status === "promoted"
+                ? "good"
+                : candidate.status === "dismissed"
+                  ? "neutral"
+                  : "warn"
+            }
+          >
+            {candidate.status}
+          </Pill>
+          <Pill tone={candidate.validation?.valid ? "good" : "warn"}>
+            revision {candidate.revision}
+          </Pill>
+        </div>
+      </div>
+
+      <div className="candidate-digest-row">
+        <span>Current digest</span>
+        <code>{candidate.currentDigest}</code>
+      </div>
+
+      {manifest && (
+        <>
+          <p className="skill-description">{manifest.description}</p>
+          <div className="skill-facts">
+            <div><span>Skill ID</span><strong>{manifest.id}</strong></div>
+            <div><span>Version</span><strong>{manifest.version}</strong></div>
+            <div><span>Risk</span><strong>{manifest.contract.riskLevel}</strong></div>
+            <div><span>Steps</span><strong>{manifest.steps.length}</strong></div>
+            <div><span>Inputs</span><strong>{Object.keys(manifest.inputs).length}</strong></div>
+            <div><span>Tests bound</span><strong>{candidate.tests.length}</strong></div>
+          </div>
+        </>
+      )}
+
+      <div className="candidate-stepper">
+        <div className={candidate.validation?.valid ? "done" : "current"}>
+          <span>1</span><strong>Validate</strong>
+        </div>
+        <div className={latestTest ? "done" : candidate.validation?.valid ? "current" : ""}>
+          <span>2</span><strong>Compile Test</strong>
+        </div>
+        <div className={inspection?.test ? "done" : latestTest ? "current" : ""}>
+          <span>3</span><strong>Run + Inspect</strong>
+        </div>
+        <div className={candidate.status === "promoted" ? "done" : inspection?.readiness.promotable ? "current" : ""}>
+          <span>4</span><strong>Promote</strong>
+        </div>
+      </div>
+
+      <div className="candidate-actions">
+        <button
+          className="secondary"
+          disabled={Boolean(busy) || !active}
+          onClick={() =>
+            void action("validate", () =>
+              port.validateCandidate(candidate.id, candidate.currentDigest),
+            )
+          }
+        >
+          <CheckCircle2 size={15} />
+          {busy === "validate" ? "Validating…" : "Validate"}
+        </button>
+
+        <button
+          className="secondary"
+          disabled={Boolean(busy) || !active || candidate.validation?.valid !== true}
+          onClick={() => void compileTest()}
+        >
+          <FlaskConical size={15} />
+          {busy === "compile" ? "Compiling…" : "Compile Test"}
+        </button>
+
+        <button
+          className="secondary"
+          disabled={Boolean(busy) || !latestTest}
+          onClick={() =>
+            latestTest &&
+            void action("run", () => port.runCandidateTest(latestTest.taskId))
+          }
+        >
+          <Play size={15} />
+          {busy === "run" ? "Running…" : "Run Test"}
+        </button>
+
+        <button
+          className="secondary"
+          disabled={Boolean(busy)}
+          onClick={() => void inspect()}
+        >
+          <Eye size={15} />
+          {busy === "inspect" ? "Inspecting…" : "Inspect"}
+        </button>
+
+        <button
+          className="primary"
+          disabled={
+            Boolean(busy) ||
+            candidate.status !== "active" ||
+            inspection?.readiness.promotable !== true
+          }
+          onClick={() => void promote()}
+        >
+          <PackagePlus size={15} />
+          {busy === "promote" ? "Promoting…" : "Promote"}
+        </button>
+
+        <button
+          className="secondary danger-text"
+          disabled={Boolean(busy) || candidate.status !== "active"}
+          onClick={() => {
+            if (window.confirm("Dismiss this exact Candidate revision?")) {
+              void action("dismiss", () =>
+                port.dismissCandidate(candidate.id, candidate.currentDigest),
+              );
+            }
+          }}
+        >
+          Dismiss
+        </button>
+      </div>
+
+      <div className="skill-run-box">
+        <div className="skill-run-heading">
+          <div>
+            <span className="eyebrow">TEST INPUTS</span>
+            <strong>Candidate fixture values</strong>
+          </div>
+          <span>JSON object</span>
+        </div>
+        <textarea
+          value={inputsText}
+          onChange={(event) => setInputsText(event.target.value)}
+          spellCheck={false}
+          disabled={!active}
+        />
+        {latestTest && (
+          <div className="candidate-test-binding">
+            <span>Current digest test task</span>
+            <code>{latestTest.taskId}</code>
+          </div>
+        )}
+      </div>
+
+      {candidate.validation && (
+        <div className="candidate-validation">
+          <div className="panel-heading">
+            <div><span className="eyebrow">VALIDATION</span><h3>Machine-readable report</h3></div>
+            <Pill tone={candidate.validation.valid ? "good" : "danger"}>
+              {candidate.validation.valid ? "PASS" : "FAIL"}
+            </Pill>
+          </div>
+          {candidate.validation.errors.map((issue) => (
+            <div className="candidate-issue error" key={issue.code + issue.path}>
+              <code>{issue.code}</code><span>{issue.path}</span><p>{issue.message}</p>
+            </div>
+          ))}
+          {candidate.validation.warnings.map((issue) => (
+            <div className="candidate-issue warning" key={issue.code + issue.path}>
+              <code>{issue.code}</code><span>{issue.path}</span><p>{issue.message}</p>
+            </div>
           ))}
         </div>
-        <small>{skill.lifecycle.reason}</small>
-      </div>
+      )}
+
+      {inspection && (
+        <div className="candidate-readiness">
+          <div>
+            {inspection.readiness.promotable
+              ? <CheckCircle2 size={18} />
+              : <AlertTriangle size={18} />}
+            <div>
+              <strong>
+                {inspection.readiness.promotable
+                  ? "Promotion gates ready"
+                  : "Not promotable yet"}
+              </strong>
+              <span>
+                {inspection.readiness.reasons.length
+                  ? inspection.readiness.reasons.join(" · ")
+                  : "Validation, test, M2, quality, privacy and verification gates passed."}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!manifest && rawManifest !== null && (
+        <div className="skill-warning">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>Manifest is structurally incomplete.</strong>
+            <p>
+              Candidate storage is still canonical in Runtime. Run Validate to
+              get machine-readable schema errors before revising it.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {rawManifest !== null && (
+        <details className="skill-manifest-review">
+          <summary>Review current manifest</summary>
+          <pre className="code-block tall">{pretty(rawManifest)}</pre>
+        </details>
+      )}
+
+      {error && <div className="skill-run-error">{error}</div>}
+      {result !== null && (
+        <details className="skill-result-details">
+          <summary>Latest Runtime receipt</summary>
+          <pre className="code-block tall">{pretty(result)}</pre>
+        </details>
+      )}
 
       <div className="contract-note">
         <ShieldCheck size={17} />
         <div>
-          <strong>User Skill lifecycle is intentionally unavailable.</strong>
+          <strong>Desktop does not decide PASS or promotion readiness.</strong>
           <p>
-            Install, enable/disable, update, rollback and uninstall require the
-            canonical Runtime 1.x Skill Registry. Desktop will not fake these
-            operations locally.
+            Validate, test evidence, M2 provenance, privacy, quality and promotion
+            are all re-checked by Runtime against the exact Candidate digest.
           </p>
         </div>
       </div>
@@ -276,6 +977,13 @@ export function SkillsPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const [discovery, setDiscovery] =
+    useState<WorkflowSkillDiscoveryResult | null>(null);
+  const [selectedProposalId, setSelectedProposalId] = useState("");
+  const [discoveryBusy, setDiscoveryBusy] = useState(false);
+
+  const [selectedCandidateId, setSelectedCandidateId] = useState("");
+
   const refresh = async () => {
     setBusy(true);
     setError("");
@@ -288,6 +996,12 @@ export function SkillsPage({
           next.skills[0];
         setSelectedId(preferred.id);
       }
+      if (
+        next.candidates.length &&
+        !next.candidates.some((candidate) => candidate.id === selectedCandidateId)
+      ) {
+        setSelectedCandidateId(next.candidates[0].id);
+      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
     } finally {
@@ -298,6 +1012,31 @@ export function SkillsPage({
   useEffect(() => {
     void refresh();
   }, []);
+
+  const discover = async () => {
+    setDiscoveryBusy(true);
+    setError("");
+    try {
+      const result = await port.discover({
+        minSuccessfulRuns: 3,
+        scanLimit: 500,
+        limit: 50,
+        includeBlocked: true,
+      });
+      setDiscovery(result);
+      if (result.proposals.length) {
+        setSelectedProposalId((current) =>
+          result.proposals.some((proposal) => proposal.proposalId === current)
+            ? current
+            : result.proposals[0].proposalId,
+        );
+      }
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setDiscoveryBusy(false);
+    }
+  };
 
   const visibleSkills = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -313,6 +1052,28 @@ export function SkillsPage({
 
   const selected =
     snapshot?.skills.find((skill) => skill.id === selectedId) ?? null;
+  const selectedRegistry = selected
+    ? snapshot?.userSkills.find((skill) => skill.skillId === selected.id)
+    : undefined;
+
+  const selectedProposal =
+    discovery?.proposals.find(
+      (proposal) => proposal.proposalId === selectedProposalId,
+    ) ?? null;
+
+  const selectedCandidate =
+    snapshot?.candidates.find(
+      (candidate) => candidate.id === selectedCandidateId,
+    ) ?? null;
+
+  const registrySupported = snapshot?.lifecycle.registrySupported === true;
+  const discoverySupported = snapshot?.lifecycle.discoverySupported === true;
+
+  const openCandidate = async (candidateId: string) => {
+    await refresh();
+    setSelectedCandidateId(candidateId);
+    setTab("candidates");
+  };
 
   return (
     <>
@@ -320,17 +1081,25 @@ export function SkillsPage({
         <div>
           <h1>Skills</h1>
           <p>
-            Runtime-backed reusable capabilities. Catalog and execution are real;
-            lifecycle management stays pending until Runtime 1.x.
+            Discover repeated verified work, review evidence, test governed
+            Candidates, then explicitly promote immutable User Skills.
           </p>
         </div>
         <div className="skill-header-actions">
           <button
             className="secondary"
-            disabled
-            title="Requires Runtime 1.x Candidate + User Skill Registry API"
+            disabled={!discoverySupported}
+            onClick={() => {
+              setTab("discover");
+              if (!discovery) void discover();
+            }}
+            title={
+              discoverySupported
+                ? "Scan verified M2 workflow evidence"
+                : "Requires Runtime workflowSkillDiscovery v1"
+            }
           >
-            <PackagePlus size={15} /> Add Skill
+            <Search size={15} /> Discover
           </button>
           <button className="primary" onClick={() => void refresh()} disabled={busy}>
             <RefreshCw size={15} className={busy ? "spin" : ""} />
@@ -343,6 +1112,7 @@ export function SkillsPage({
         {([
           ["overview", "Overview"],
           ["installed", "Installed"],
+          ["discover", "Discover"],
           ["candidates", "Candidates"],
           ["library", "Library"],
         ] as Array<[SkillTab, string]>).map(([id, label]) => (
@@ -352,6 +1122,9 @@ export function SkillsPage({
             onClick={() => setTab(id)}
           >
             {label}
+            {id === "candidates" && (snapshot?.summary.candidates ?? 0) > 0
+              ? <span className="skill-tab-count">{snapshot?.summary.candidates}</span>
+              : null}
           </button>
         ))}
       </div>
@@ -362,10 +1135,10 @@ export function SkillsPage({
         <>
           <div className="skill-metrics">
             <div><strong>{snapshot?.summary.installed ?? "—"}</strong><span>Installed / built-in</span></div>
-            <div><strong>{snapshot?.summary.ready ?? "—"}</strong><span>ABI-ready</span></div>
+            <div><strong>{snapshot?.summary.ready ?? "—"}</strong><span>Runtime-ready</span></div>
             <div><strong>{snapshot?.summary.needsAttention ?? "—"}</strong><span>Needs attention</span></div>
-            <div><strong>{snapshot?.summary.candidates ?? "—"}</strong><span>Candidates</span></div>
-            <div><strong>{snapshot?.summary.updates ?? "—"}</strong><span>Updates</span></div>
+            <div><strong>{snapshot?.summary.candidates ?? "—"}</strong><span>Active Candidates</span></div>
+            <div><strong>{snapshot?.userSkills.length ?? "—"}</strong><span>User Skills</span></div>
           </div>
 
           <div className="two-col">
@@ -387,31 +1160,49 @@ export function SkillsPage({
 
             <section className="panel">
               <div className="panel-heading">
-                <div><span className="eyebrow">PROVIDERS</span><h3>Execution dependencies</h3></div>
+                <div><span className="eyebrow">SKILL GOVERNANCE</span><h3>Runtime extensions</h3></div>
               </div>
               <div className="skill-provider-list">
-                {snapshot?.providers.map((provider) => (
-                  <div key={provider.id}>
-                    {provider.enabled && provider.available
-                      ? <CheckCircle2 size={15} />
-                      : <AlertTriangle size={15} />}
-                    <p><strong>{provider.label}</strong><small>{provider.capabilities.join(" · ")}</small></p>
-                    <Pill tone={provider.enabled && provider.available ? "good" : "warn"}>
-                      {provider.enabled ? (provider.available ? "ready" : "unavailable") : "disabled"}
-                    </Pill>
-                  </div>
-                ))}
+                <div>
+                  {registrySupported ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+                  <p><strong>User Skill Registry</strong><small>Candidate + immutable version lifecycle</small></p>
+                  <Pill tone={registrySupported ? "good" : "warn"}>
+                    {registrySupported ? "available" : "not supported"}
+                  </Pill>
+                </div>
+                <div>
+                  {discoverySupported ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+                  <p><strong>Workflow Discovery</strong><small>Read-only repeated-work proposals from M2</small></p>
+                  <Pill tone={discoverySupported ? "good" : "warn"}>
+                    {discoverySupported ? "available" : "not supported"}
+                  </Pill>
+                </div>
               </div>
             </section>
+          </div>
+
+          <div className="skill-promotion-pipeline">
+            <span>Repeated work</span>
+            <b>→</b>
+            <span>Review</span>
+            <b>→</b>
+            <span>Candidate</span>
+            <b>→</b>
+            <span>Test Task</span>
+            <b>→</b>
+            <span>M2 Evidence</span>
+            <b>→</b>
+            <span>Promote</span>
           </div>
 
           <div className="contract-note">
             <Sparkles size={17} />
             <div>
-              <strong>Skill Candidates are a post-1.0 capability.</strong>
+              <strong>Discovery can be automatic; trust promotion is not.</strong>
               <p>
-                OWL can later surface repeated verified workflows here, but one
-                successful Task will never silently become an active Skill.
+                Runtime may detect a reusable workflow and draft a manifest.
+                Candidate creation and production promotion remain explicit,
+                digest-bound governance actions.
               </p>
             </div>
           </div>
@@ -447,72 +1238,212 @@ export function SkillsPage({
             </div>
           </section>
           {selected ? (
-            <SkillDetail skill={selected} port={port} />
+            <SkillDetail
+              skill={selected}
+              registry={selectedRegistry}
+              port={port}
+              onChanged={refresh}
+            />
           ) : (
             <section className="panel"><div className="empty">Select a Skill.</div></section>
           )}
         </div>
       )}
 
+      {tab === "discover" && (
+        <>
+          {!discoverySupported ? (
+            <section className="panel skill-empty-state">
+              <Search size={30} />
+              <h2>Workflow discovery is not available on this Runtime</h2>
+              <p>
+                Built-in Skills remain usable. Repeated-work discovery requires
+                the additive Runtime workflowSkillDiscovery v1 extension.
+              </p>
+              <Pill tone="warn">Feature-detected, never emulated by Desktop</Pill>
+            </section>
+          ) : (
+            <>
+              <div className="skill-discovery-toolbar panel">
+                <div>
+                  <span className="eyebrow">M2 WORKFLOW DISCOVERY</span>
+                  <strong>Find repeated verified procedures</strong>
+                  <small>Default threshold: at least 3 independently completed runs.</small>
+                </div>
+                <button
+                  className="primary"
+                  disabled={discoveryBusy}
+                  onClick={() => void discover()}
+                >
+                  <Search size={15} />
+                  {discoveryBusy ? "Scanning…" : "Scan verified work"}
+                </button>
+              </div>
+
+              {discovery && (
+                <div className="skill-metrics">
+                  <div><strong>{discovery.scannedEpisodes}</strong><span>M2 episodes scanned</span></div>
+                  <div><strong>{discovery.eligibleRuns}</strong><span>Eligible runs</span></div>
+                  <div><strong>{discovery.repeatedGroups}</strong><span>Repeated groups</span></div>
+                  <div><strong>{discovery.proposalCount}</strong><span>Proposals</span></div>
+                  <div><strong>{discovery.blocked?.length ?? 0}</strong><span>Blocked patterns</span></div>
+                </div>
+              )}
+
+              {discovery && discovery.proposals.length > 0 ? (
+                <div className="skill-browser">
+                  <section className="panel skill-list-panel">
+                    <div className="panel-heading">
+                      <div><span className="eyebrow">OPPORTUNITIES</span><h3>Repeated workflows</h3></div>
+                    </div>
+                    <div className="skill-list">
+                      {discovery.proposals.map((proposal) => (
+                        <button
+                          key={proposal.proposalId}
+                          className={
+                            selectedProposalId === proposal.proposalId ? "active" : ""
+                          }
+                          onClick={() => setSelectedProposalId(proposal.proposalId)}
+                        >
+                          <span className={"skill-state-dot " + (proposal.readyForSubmit ? "ready" : "needs_attention")} />
+                          <div>
+                            <strong>{proposal.manifest.title}</strong>
+                            <small>
+                              {proposal.support.successfulRuns} runs · {proposal.parameterization.inputNames.length} inputs
+                            </small>
+                          </div>
+                          <Pill tone={proposal.readyForSubmit ? "good" : "warn"}>
+                            {proposal.governance.state}
+                          </Pill>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                  {selectedProposal && (
+                    <ProposalDetail
+                      proposal={selectedProposal}
+                      port={port}
+                      onCandidateCreated={openCandidate}
+                    />
+                  )}
+                </div>
+              ) : discovery ? (
+                <section className="panel skill-empty-state">
+                  <Sparkles size={30} />
+                  <h2>No reusable workflow proposal yet</h2>
+                  <p>
+                    Runtime found no repeated completed Primitive workflow that
+                    currently satisfies its evidence, verification and governance
+                    threshold.
+                  </p>
+                  <Pill tone="neutral">One successful Task is never enough</Pill>
+                </section>
+              ) : (
+                <section className="panel skill-empty-state">
+                  <Search size={30} />
+                  <h2>Scan your verified Runtime history</h2>
+                  <p>
+                    Discovery is read-only. It groups repeated successful M2
+                    evidence and drafts a reviewable User Skill manifest without
+                    writing the Candidate Store.
+                  </p>
+                </section>
+              )}
+            </>
+          )}
+        </>
+      )}
+
       {tab === "candidates" && (
-        <section className="panel skill-candidate-stage">
-          <div className="skill-candidate-hero">
-            <Sparkles size={30} />
-            <div>
-              <h2>No canonical Skill candidates yet</h2>
+        <>
+          {!registrySupported ? (
+            <section className="panel skill-empty-state">
+              <Sparkles size={30} />
+              <h2>User Skill Registry is not available on this Runtime</h2>
               <p>
-                Runtime 1.x will make this the evidence-backed promotion queue.
-                M3 Semantic Memory remains reusable knowledge; it does not
-                silently become an executable Skill.
+                Desktop will not maintain a mock executable Candidate Store.
+                Upgrade to a Runtime exposing userSkillRegistry v1.
               </p>
+              <Pill tone="warn">Canonical Runtime lifecycle required</Pill>
+            </section>
+          ) : snapshot && snapshot.candidates.length > 0 ? (
+            <div className="skill-browser">
+              <section className="panel skill-list-panel">
+                <div className="panel-heading">
+                  <div><span className="eyebrow">CANDIDATE STORE</span><h3>Governed drafts</h3></div>
+                  <span className="neutral-pill">{snapshot.candidates.length}</span>
+                </div>
+                <div className="skill-list">
+                  {snapshot.candidates.map((candidate) => {
+                    const manifest = currentCandidateManifest(candidate);
+                    return (
+                      <button
+                        key={candidate.id}
+                        className={
+                          selectedCandidateId === candidate.id ? "active" : ""
+                        }
+                        onClick={() => setSelectedCandidateId(candidate.id)}
+                      >
+                        <span
+                          className={
+                            "skill-state-dot " +
+                            (candidate.status === "promoted"
+                              ? "ready"
+                              : candidate.status === "dismissed"
+                                ? "disabled"
+                                : candidate.validation?.valid
+                                  ? "ready"
+                                  : "needs_attention")
+                          }
+                        />
+                        <div>
+                          <strong>{manifest?.title ?? candidate.id}</strong>
+                          <small>r{candidate.revision} · {candidate.status}</small>
+                        </div>
+                        <Pill
+                          tone={
+                            candidate.status === "promoted"
+                              ? "good"
+                              : candidate.status === "dismissed"
+                                ? "neutral"
+                                : "warn"
+                          }
+                        >
+                          {candidate.validation?.valid ? "valid" : candidate.status}
+                        </Pill>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+              {selectedCandidate && (
+                <CandidateDetail
+                  candidate={selectedCandidate}
+                  port={port}
+                  onChanged={refresh}
+                />
+              )}
             </div>
-            <Pill tone="warn">
-              {snapshot?.lifecycle.reason ?? "Requires Runtime 1.x Skill Registry"}
-            </Pill>
-          </div>
-
-          <div className="skill-candidate-sources">
-            <div>
-              <strong>ChatGPT import</strong>
-              <span>Normalize or repair an external Skill with an LLM.</span>
-            </div>
-            <div>
-              <strong>Desktop import</strong>
-              <span>Submit a package, folder or repository for Runtime validation.</span>
-            </div>
-            <div>
-              <strong>Repeated work</strong>
-              <span>Propose a Candidate from recurring verified Tasks.</span>
-            </div>
-          </div>
-
-          <div className="skill-promotion-pipeline">
-            <span>Candidate</span>
-            <b>→</b>
-            <span>Validate</span>
-            <b>→</b>
-            <span>Test Task</span>
-            <b>→</b>
-            <span>M2 Evidence</span>
-            <b>→</b>
-            <span>Promotion Gate</span>
-            <b>→</b>
-            <span>User Skill Registry</span>
-          </div>
-
-          <div className="contract-note">
-            <ShieldCheck size={17} />
-            <div>
-              <strong>Runtime decides if a Candidate is valid.</strong>
+          ) : (
+            <section className="panel skill-empty-state">
+              <Sparkles size={30} />
+              <h2>No active Skill Candidates</h2>
               <p>
-                ChatGPT or an AI Worker may modify Candidate content after a
-                machine-readable repair report. Desktop presents review,
-                evidence and promotion controls; it does not embed a hidden LLM
-                or write Runtime Registry state.
+                Run Discover to review repeated work, then explicitly create a
+                Candidate. External/ChatGPT imports can use the same Runtime
+                Candidate lifecycle.
               </p>
-            </div>
-          </div>
-        </section>
+              <button
+                className="secondary"
+                disabled={!discoverySupported}
+                onClick={() => setTab("discover")}
+              >
+                <Search size={15} />
+                Discover repeated work
+              </button>
+            </section>
+          )}
+        </>
       )}
 
       {tab === "library" && (
@@ -521,9 +1452,9 @@ export function SkillsPage({
           <h2>Cloud Skill Library comes later</h2>
           <p>
             Cloud may distribute immutable packages by digest, but every package
-            must still be inspected and installed by the local Runtime.
+            must still be validated and installed by the local Runtime.
           </p>
-          <Pill tone="neutral">Not required for Desktop Phase A</Pill>
+          <Pill tone="neutral">Not required for local Skill governance</Pill>
         </section>
       )}
     </>

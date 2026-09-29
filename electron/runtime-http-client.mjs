@@ -79,4 +79,146 @@ export class RuntimeHttpClient {
       requestId: options.requestId,
     });
   }
+
+  discoverWorkflowSkillCandidates(request = {}) {
+    return this.invoke("skill-candidates.discover-workflows", request, {
+      timeoutMs: 15_000,
+    });
+  }
+
+  submitSkillCandidate(manifest) {
+    return this.invoke("skill-candidates.submit", { manifest }, {
+      timeoutMs: 15_000,
+    });
+  }
+
+  listSkillCandidates() {
+    return this.invoke("skill-candidates.list", undefined, {
+      timeoutMs: 10_000,
+    });
+  }
+
+  getSkillCandidate(candidateId) {
+    return this.invoke("skill-candidates.get", { candidateId }, {
+      timeoutMs: 10_000,
+    });
+  }
+
+  reviseSkillCandidate(candidateId, expectedDigest, manifest) {
+    return this.invoke("skill-candidates.revise", {
+      candidateId,
+      expectedDigest,
+      manifest,
+    }, {
+      timeoutMs: 15_000,
+    });
+  }
+
+  validateSkillCandidate(candidateId, expectedDigest) {
+    return this.invoke("skill-candidates.validate", {
+      candidateId,
+      ...(expectedDigest ? { expectedDigest } : {}),
+    }, {
+      timeoutMs: 15_000,
+    });
+  }
+
+  dismissSkillCandidate(candidateId, expectedDigest) {
+    return this.invoke("skill-candidates.dismiss", {
+      candidateId,
+      ...(expectedDigest ? { expectedDigest } : {}),
+    }, {
+      timeoutMs: 10_000,
+    });
+  }
+
+  compileSkillCandidateTest(candidateId, expectedDigest, inputs = {}) {
+    return this.invoke("skill-candidates.compile-test", {
+      candidateId,
+      expectedDigest,
+      inputs,
+    }, {
+      timeoutMs: 20_000,
+    });
+  }
+
+  inspectSkillCandidate(candidateId, testTaskId) {
+    return this.invoke("skill-candidates.inspect", {
+      candidateId,
+      ...(testTaskId ? { testTaskId } : {}),
+    }, {
+      timeoutMs: 15_000,
+    });
+  }
+
+  promoteSkillCandidate(candidateId, expectedDigest, testTaskId, confirm) {
+    return this.invoke("skill-candidates.promote", {
+      candidateId,
+      expectedDigest,
+      testTaskId,
+      confirm,
+    }, {
+      timeoutMs: 30_000,
+    });
+  }
+
+  listUserSkills() {
+    return this.invoke("user-skills.list", undefined, {
+      timeoutMs: 10_000,
+    });
+  }
+
+  getUserSkill(skillId) {
+    return this.invoke("user-skills.get", { skillId }, {
+      timeoutMs: 10_000,
+    });
+  }
+
+  setUserSkillEnabled(skillId, enabled) {
+    return this.invoke(enabled ? "user-skills.enable" : "user-skills.disable", {
+      skillId,
+    }, {
+      timeoutMs: 10_000,
+    });
+  }
+
+  activateUserSkillVersion(skillId, version) {
+    return this.invoke("user-skills.activate-version", {
+      skillId,
+      version,
+    }, {
+      timeoutMs: 10_000,
+    });
+  }
+
+  rollbackUserSkill(skillId, version) {
+    return this.invoke("user-skills.rollback", {
+      skillId,
+      ...(version ? { version } : {}),
+    }, {
+      timeoutMs: 10_000,
+    });
+  }
+
+  uninstallUserSkill(skillId, version) {
+    return this.invoke("user-skills.uninstall", {
+      skillId,
+      ...(version ? { version } : {}),
+    }, {
+      timeoutMs: 15_000,
+    });
+  }
+
+  runTask(taskId, options = {}) {
+    const { timeoutMs, ...request } = options;
+    return this.invoke("tasks.run", { taskId, ...request }, {
+      timeoutMs: timeoutMs ?? 120_000,
+    });
+  }
+
+  getTask(taskId, includeResults = false) {
+    return this.invoke("tasks.get", { taskId, includeResults }, {
+      timeoutMs: 10_000,
+    });
+  }
 }

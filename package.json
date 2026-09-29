@@ -22,7 +22,8 @@
     "package:mac:release": "npm run stage:runtime && npm run verify:mac:release && npm run build && electron-builder --config electron-builder.release.yml --mac --arm64 --x64",
     "start": "electron .",
     "verify:cloud-bridge-live": "node scripts/verify-cloud-bridge-live-e2e.mjs",
-    "verify:agent-inbox-e2e": "node scripts/verify-agent-inbox-e2e.mjs"
+    "verify:agent-inbox-e2e": "node scripts/verify-agent-inbox-e2e.mjs",
+    "verify:skill-discovery-live": "node scripts/verify-skill-discovery-live-e2e.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",

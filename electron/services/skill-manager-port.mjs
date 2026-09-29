@@ -11,6 +11,12 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
 function normalizeContract(contract = {}) {
   return {
     riskLevel: contract.riskLevel ?? "low",
@@ -23,6 +29,13 @@ function normalizeContract(contract = {}) {
 }
 
 function availabilityFor(skill, primitiveIds, primitiveAbiVersion) {
+  if (typeof skill.availability === "string") {
+    return {
+      state: skill.availability,
+      reasons: asArray(skill.validationErrors),
+    };
+  }
+
   const requiredAbi = Number(skill.requiredPrimitiveAbi ?? 0);
   if (
     Number.isFinite(requiredAbi) &&
@@ -47,7 +60,7 @@ function availabilityFor(skill, primitiveIds, primitiveAbiVersion) {
   }
 
   return {
-    state: "ready",
+    state: skill.enabled === false ? "disabled" : "ready",
     reasons: [],
   };
 }
@@ -59,16 +72,17 @@ function normalizeSkill(skill, context) {
     context.primitiveIds,
     context.primitiveAbiVersion,
   );
+  const source = skill.source === "user" ? "user" : "builtin";
 
   return {
     id: skill.id,
-    title: titleFromId(skill.id),
-    domain: skill.domain ?? "unknown",
+    title: skill.title ?? titleFromId(skill.id),
+    domain: skill.domain ?? (source === "user" ? "user" : "unknown"),
     description: skill.description ?? "",
-    version: skill.skillVersion ?? "unknown",
-    source: "builtin",
-    scope: "runtime",
-    enabled: true,
+    version: skill.skillVersion ?? skill.activeVersion ?? "unknown",
+    source,
+    scope: source === "user" ? "user" : "runtime",
+    enabled: skill.enabled !== false,
     availability: availability.state,
     availabilityReasons: availability.reasons,
     executionMode: skill.executionMode ?? "inline",
@@ -81,16 +95,44 @@ function normalizeSkill(skill, context) {
     requiresVerification: contract.requiresVerification,
     retryPolicy: contract.retryPolicy,
     resources: contract.resources,
-    inputs: skill.inputs ?? {},
+    inputs: asObject(skill.inputs),
     lifecycle: {
       canInstall: false,
-      canEnableDisable: false,
-      canUpdate: false,
-      canRollback: false,
-      canUninstall: false,
-      reason: "Requires Runtime 1.x Skill Registry",
+      canEnableDisable: source === "user" && context.registrySupported,
+      canUpdate: source === "user" && context.registrySupported,
+      canRollback: source === "user" && context.registrySupported,
+      canUninstall: source === "user" && context.registrySupported,
+      reason:
+        source === "user" && context.registrySupported
+          ? "Managed by canonical Runtime User Skill Registry"
+          : "Built-in Runtime Skill",
     },
   };
+}
+
+function extensionVersion(capabilities, name) {
+  const value = capabilities?.extensions?.[name]?.version;
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function normalizeUserSkillRegistryList(value) {
+  return asArray(value?.skills).map((skill) => ({
+    skillId: skill.skillId,
+    enabled: skill.enabled === true,
+    activeVersion: skill.activeVersion ?? null,
+    versions: asArray(skill.versions),
+    createdAt: skill.createdAt ?? null,
+    updatedAt: skill.updatedAt ?? null,
+  }));
+}
+
+function currentCandidateManifest(candidate) {
+  const revisions = asArray(candidate?.revisions);
+  return (
+    revisions.find((revision) => revision?.digest === candidate?.currentDigest)
+      ?.manifest ?? null
+  );
 }
 
 export class RuntimeSkillManagerPort {
@@ -105,12 +147,34 @@ export class RuntimeSkillManagerPort {
       this.client.capabilities(""),
     ]);
 
+    const registrySupported =
+      extensionVersion(capabilities, "userSkillRegistry") >= 1;
+    const discoverySupported =
+      extensionVersion(capabilities, "workflowSkillDiscovery") >= 1;
+
+    const [candidateRecords, userSkillResult] = await Promise.all([
+      registrySupported ? this.client.listSkillCandidates() : Promise.resolve([]),
+      registrySupported
+        ? this.client.listUserSkills()
+        : Promise.resolve({ skills: [] }),
+    ]);
+
     const primitiveList = asArray(primitives);
-    const primitiveIds = new Set(primitiveList.map((item) => item?.id).filter(Boolean));
+    const primitiveIds = new Set(
+      primitiveList.map((item) => item?.id).filter(Boolean),
+    );
     const primitiveAbiVersion =
       Number(capabilities?.architecture?.primitiveAbi?.version ?? 0) || 0;
-    const context = { primitiveIds, primitiveAbiVersion };
-    const skills = asArray(catalog).map((skill) => normalizeSkill(skill, context));
+    const context = {
+      primitiveIds,
+      primitiveAbiVersion,
+      registrySupported,
+    };
+    const skills = asArray(catalog).map((skill) =>
+      normalizeSkill(skill, context),
+    );
+    const candidates = asArray(candidateRecords);
+    const userSkills = normalizeUserSkillRegistryList(userSkillResult);
 
     const providers = asArray(capabilities?.providers).map((provider) => ({
       id: provider.id,
@@ -126,27 +190,41 @@ export class RuntimeSkillManagerPort {
       installed: skills.length,
       ready: skills.filter((skill) => skill.availability === "ready").length,
       needsAttention: skills.filter((skill) =>
-        ["needs_attention", "missing_capability", "missing_permission", "incompatible", "integrity_failed"]
-          .includes(skill.availability),
+        [
+          "needs_attention",
+          "missing_capability",
+          "missing_permission",
+          "incompatible",
+          "integrity_failed",
+        ].includes(skill.availability),
       ).length,
-      disabled: skills.filter((skill) => skill.availability === "disabled").length,
-      candidates: 0,
+      disabled: skills.filter(
+        (skill) => skill.availability === "disabled",
+      ).length,
+      candidates: candidates.filter(
+        (candidate) => candidate?.status === "active",
+      ).length,
       updates: 0,
     };
 
     return {
-      source: "runtime-1.0",
+      source: registrySupported ? "runtime-1.x" : "runtime-1.0",
       fetchedAt: new Date().toISOString(),
       primitiveAbiVersion,
       skills,
       primitives: primitiveList,
       providers,
+      candidates,
+      userSkills,
       summary,
       lifecycle: {
-        registrySupported: false,
-        candidatesSupported: false,
+        registrySupported,
+        candidatesSupported: registrySupported,
+        discoverySupported,
         librarySupported: false,
-        reason: "Requires Runtime 1.x Skill Registry",
+        reason: registrySupported
+          ? "Runtime User Skill Registry v1 available"
+          : "Requires Runtime 1.x User Skill Registry",
       },
     };
   }
@@ -170,5 +248,88 @@ export class RuntimeSkillManagerPort {
       args,
       dryRun: false,
     });
+  }
+
+  async discover(request = {}) {
+    return await this.client.discoverWorkflowSkillCandidates(request);
+  }
+
+  async submitCandidate(manifest) {
+    return await this.client.submitSkillCandidate(manifest);
+  }
+
+  async getCandidate(candidateId) {
+    return await this.client.getSkillCandidate(candidateId);
+  }
+
+  async reviseCandidate(candidateId, expectedDigest, manifest) {
+    return await this.client.reviseSkillCandidate(
+      candidateId,
+      expectedDigest,
+      manifest,
+    );
+  }
+
+  async validateCandidate(candidateId, expectedDigest) {
+    return await this.client.validateSkillCandidate(
+      candidateId,
+      expectedDigest,
+    );
+  }
+
+  async dismissCandidate(candidateId, expectedDigest) {
+    return await this.client.dismissSkillCandidate(
+      candidateId,
+      expectedDigest,
+    );
+  }
+
+  async compileCandidateTest(candidateId, expectedDigest, inputs = {}) {
+    return await this.client.compileSkillCandidateTest(
+      candidateId,
+      expectedDigest,
+      inputs,
+    );
+  }
+
+  async runCandidateTest(taskId) {
+    return await this.client.runTask(taskId, {
+      maxWaves: 100,
+      timeBudgetMs: 120_000,
+      timeoutMs: 130_000,
+    });
+  }
+
+  async inspectCandidate(candidateId, testTaskId) {
+    return await this.client.inspectSkillCandidate(candidateId, testTaskId);
+  }
+
+  async promoteCandidate(candidateId, expectedDigest, testTaskId, confirm) {
+    return await this.client.promoteSkillCandidate(
+      candidateId,
+      expectedDigest,
+      testTaskId,
+      confirm,
+    );
+  }
+
+  async setEnabled(skillId, enabled) {
+    return await this.client.setUserSkillEnabled(skillId, enabled);
+  }
+
+  async activateVersion(skillId, version) {
+    return await this.client.activateUserSkillVersion(skillId, version);
+  }
+
+  async rollback(skillId, version) {
+    return await this.client.rollbackUserSkill(skillId, version);
+  }
+
+  async uninstall(skillId, version) {
+    return await this.client.uninstallUserSkill(skillId, version);
+  }
+
+  currentCandidateManifest(candidate) {
+    return currentCandidateManifest(candidate);
   }
 }
