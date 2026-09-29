@@ -28,6 +28,14 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Electron main/preload syntax
+        run: |
+          node --check electron/main.mjs
+          node --check electron/preload.cjs
+          node --check electron/services/cloud-enrollment-service.mjs
+          node --check electron/services/cloud-bridge-service.mjs
+          node --check electron/services/cloud-bridge-store.mjs
+
       - name: Typecheck and renderer build
         run: npm run build
 
