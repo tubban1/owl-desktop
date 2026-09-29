@@ -89,7 +89,7 @@ for (let index = 1; index <= 3; index += 1) {
     dryRun: false,
   });
 
-  const taskId = compiled?.id;
+  const taskId = compiled?.result?.id ?? compiled?.id;
   assert(taskId, `runtime.compile_task did not return a task id for run ${index}.`, compiled);
 
   const ran = await client.runTask(taskId, {
@@ -211,8 +211,9 @@ const dryRun = await client.runSkill({
   args: inputs,
   dryRun: true,
 });
-assert(dryRun?.dryRun === true, "Promoted User Skill dry-run failed.", dryRun);
-assert(dryRun?.source === "user", "Dry-run did not use Runtime User Skill route.", dryRun);
+const dryRunResult = dryRun?.result ?? dryRun;
+assert(dryRunResult?.dryRun === true, "Promoted User Skill dry-run failed.", dryRun);
+assert(dryRunResult?.source === "user", "Dry-run did not use Runtime User Skill route.", dryRun);
 console.log("PASS promoted User Skill dry-run");
 
 await client.setUserSkillEnabled(proposal.manifest.id, false);
