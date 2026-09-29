@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
@@ -11,6 +12,7 @@ import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
 import { CloudBridgeStore } from "./services/cloud-bridge-store.mjs";
 import { CloudBridgeService } from "./services/cloud-bridge-service.mjs";
+import { CloudEnrollmentService } from "./services/cloud-enrollment-service.mjs";
 import { AgentInboxStore } from "./services/agent-inbox-store.mjs";
 import { RuntimeAgentRequestEventConsumer } from "./services/runtime-agent-request-consumer.mjs";
 import { RuntimeAgentRequestEventBridge } from "./services/runtime-agent-request-event-bridge.mjs";
@@ -27,6 +29,9 @@ let runtimeAgentRequestConsumer;
 let runtimeAgentRequestEventBridge;
 let runtimeAgentRequestConsumerStateFile;
 let runtimeAgentRequestBridgeStateFile;
+let cloudEnrollment;
+let cloudEnrollmentBaseUrl = null;
+let pendingCloudCallbackUrl = null;
 let cloudBridgeState = {
   status: "stopped",
   running: false,
@@ -150,6 +155,116 @@ function cloudDeviceCredential() {
   );
 }
 
+
+function deleteSecretByName(name, project) {
+  const entry = store
+    .listSecrets()
+    .find(
+      (secret) =>
+        secret.name === name &&
+        (!project || secret.project === project),
+    );
+  if (entry) store.deleteSecret(entry.id);
+  return { ok: true };
+}
+
+async function buildCloudDeviceRegistration() {
+  const info = await runtimeClient().info().catch(() => null);
+  return {
+    displayName: `${os.hostname()} · OWL Desktop`,
+    platform: `${process.platform}-${process.arch}`,
+    capabilities: {
+      cloudBridge: "m1-polling-v1",
+      agentInbox: "v1",
+    },
+    runtimeCompatibility: {
+      desktopVersion: app.getVersion(),
+      runtimeApiVersion: info?.apiVersion ?? null,
+      runtimeVersion: info?.runtimeVersion ?? null,
+      platform: process.platform,
+      arch: process.arch,
+    },
+  };
+}
+
+function ensureCloudEnrollment() {
+  const settings = store.getSettings();
+  const baseUrl = settings.cloudBaseUrl?.trim();
+  if (!baseUrl) {
+    const error = new Error("OWL Cloud base URL is not configured.");
+    error.code = "CLOUD_BASE_URL_MISSING";
+    throw error;
+  }
+
+  if (cloudEnrollment && cloudEnrollmentBaseUrl === baseUrl) {
+    return cloudEnrollment;
+  }
+
+  cloudEnrollmentBaseUrl = baseUrl;
+  cloudEnrollment = new CloudEnrollmentService({
+    client: new CloudHttpClient({ baseUrl }),
+    openExternal: (url) => shell.openExternal(url),
+    storeSecret: (input) => store.upsertSecret(input),
+    deleteSecret: (name, project) => deleteSecretByName(name, project),
+    updateSettings: (patch) => store.updateSettings(patch),
+    buildDeviceRegistration: buildCloudDeviceRegistration,
+    initialDeviceId:
+      settings.cloudDeviceId && cloudDeviceCredential()
+        ? settings.cloudDeviceId
+        : null,
+    onEvent(level, message, meta) {
+      record(level, "cloud", message, meta);
+    },
+  });
+  return cloudEnrollment;
+}
+
+function cloudEnrollmentSnapshot() {
+  if (cloudEnrollment) return cloudEnrollment.snapshot();
+  const settings = store.getSettings();
+  const deviceId =
+    settings.cloudDeviceId && cloudDeviceCredential()
+      ? settings.cloudDeviceId
+      : null;
+  return {
+    status: deviceId ? "device_enrolled" : "idle",
+    startedAt: null,
+    completedAt: null,
+    account: null,
+    deviceId,
+    lastErrorCode: null,
+  };
+}
+
+async function beginCloudEnrollment() {
+  const enrollment = ensureCloudEnrollment();
+  const result = await enrollment.begin();
+  mainWindow?.webContents.send("cloud:enrollment-changed", result);
+  return result;
+}
+
+async function handleCloudAuthCallback(url) {
+  const enrollment = ensureCloudEnrollment();
+  const result = await enrollment.handleCallback(url);
+  if (result.status === "ready") {
+    await startCloudBridge();
+  }
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send("cloud:enrollment-changed", result);
+  }
+  return result;
+}
+
+async function logoutCloudAccount() {
+  const enrollment = ensureCloudEnrollment();
+  const result = await enrollment.logoutAccount();
+  mainWindow?.webContents.send("cloud:enrollment-changed", result);
+  return result;
+}
+
 function createAgentRequest(input) {
   if (!agentInbox) return null;
   const result = agentInbox.create(input);
@@ -170,7 +285,9 @@ async function buildCloudPresence() {
     capabilities: {
       cloudBridge: "m1-polling-v1",
       agentInbox: "v1",
+      // Legacy discovery retained during the M1 transition.
       supportedRemoteCommands: ["runtime.task.create"],
+      supportedRemoteCommandContracts: ["runtime.task.create@1"],
       runtimeReachable: Boolean(info),
       mcpAvailable: mcpState.status === "running",
       tunnelAvailable: tunnelSupervisor?.status().state === "running",
@@ -470,6 +587,9 @@ function registerIpc() {
 
   ipcMain.handle("runtime:refresh", () => runtimeSnapshot());
   ipcMain.handle("cloud:status", () => cloudBridgeSnapshot());
+  ipcMain.handle("cloud:enrollment-status", () => cloudEnrollmentSnapshot());
+  ipcMain.handle("cloud:enroll", () => beginCloudEnrollment());
+  ipcMain.handle("cloud:logout-account", () => logoutCloudAccount());
   ipcMain.handle("cloud:probe", () => probeCloud());
   ipcMain.handle("cloud:start", () => startCloudBridge());
   ipcMain.handle("cloud:stop", () => stopCloudBridge());
@@ -710,6 +830,10 @@ function registerIpc() {
         await tunnelSupervisor.stop();
       }
     }
+    if ("cloudBaseUrl" in (patch ?? {})) {
+      cloudEnrollment = undefined;
+      cloudEnrollmentBaseUrl = null;
+    }
     if (
       "cloudEnabled" in (patch ?? {}) ||
       "cloudBaseUrl" in (patch ?? {}) ||
@@ -782,11 +906,43 @@ function registerIpc() {
   });
 }
 
+const CLOUD_PROTOCOL = "owl-desktop";
+
+function cloudCallbackFromArgs(argv = []) {
+  return argv.find(
+    (value) =>
+      typeof value === "string" &&
+      value.startsWith(`${CLOUD_PROTOCOL}://auth/`),
+  );
+}
+
+function dispatchCloudCallback(url) {
+  pendingCloudCallbackUrl = url;
+  if (!store) return;
+  const callback = pendingCloudCallbackUrl;
+  pendingCloudCallbackUrl = null;
+  void handleCloudAuthCallback(callback).catch((error) => {
+    record("error", "cloud", "Cloud auth callback failed", {
+      code: error?.code ?? "CLOUD_AUTH_CALLBACK_FAILED",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  if (url?.startsWith(`${CLOUD_PROTOCOL}://auth/`)) {
+    dispatchCloudCallback(url);
+  }
+});
+
 const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, argv) => {
+    const callback = cloudCallbackFromArgs(argv);
+    if (callback) dispatchCloudCallback(callback);
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
@@ -794,6 +950,16 @@ if (!hasLock) {
   });
 
   app.whenReady().then(async () => {
+    if (process.defaultApp && process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(
+        CLOUD_PROTOCOL,
+        process.execPath,
+        [path.resolve(process.argv[1])],
+      );
+    } else {
+      app.setAsDefaultProtocolClient(CLOUD_PROTOCOL);
+    }
+
     store = new DesktopStore();
     identityVault = new IdentityVault();
     cloudBridgeStore = new CloudBridgeStore({
@@ -823,6 +989,11 @@ if (!hasLock) {
     });
     registerIpc();
     record("info", "desktop", "OWL Desktop started", { version: app.getVersion() });
+    if (pendingCloudCallbackUrl) {
+      const callback = pendingCloudCallbackUrl;
+      pendingCloudCallbackUrl = null;
+      void handleCloudAuthCallback(callback);
+    }
     await startMcp();
     const settings = store.getSettings();
     if (settings.autoConnectRuntime) {
