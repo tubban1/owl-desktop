@@ -32,6 +32,7 @@ export function cloudCommandDigest(command) {
     commandId: command?.commandId ?? null,
     deviceId: command?.deviceId ?? null,
     kind: command?.kind ?? null,
+    kindVersion: command?.kindVersion ?? 1,
     payload: command?.payload ?? {},
     expiresAt: command?.expiresAt ?? null,
   };
@@ -98,6 +99,7 @@ export class CloudBridgeStore {
       commandId: command.commandId,
       deviceId: command.deviceId,
       kind: command.kind,
+      kindVersion: command.kindVersion ?? 1,
       digest,
       status: "processing",
       receivedAt: now,
@@ -145,6 +147,24 @@ export class CloudBridgeStore {
     record.updatedAt = now;
     this.write(state);
     return record;
+  }
+
+  compactTerminalCommands({
+    now = new Date(),
+    retentionMs = 7 * 24 * 60 * 60 * 1000,
+  } = {}) {
+    const state = this.read();
+    const cutoff = now.getTime() - retentionMs;
+    const removed = [];
+    for (const [commandId, record] of Object.entries(state.commands)) {
+      if (!["accepted", "rejected"].includes(record.status)) continue;
+      const updatedAt = new Date(record.updatedAt).getTime();
+      if (!Number.isFinite(updatedAt) || updatedAt > cutoff) continue;
+      delete state.commands[commandId];
+      removed.push(commandId);
+    }
+    if (removed.length) this.write(state);
+    return removed;
   }
 
   enqueueOutbox(kind, payload, id = payload?.eventId ?? randomUUID()) {
