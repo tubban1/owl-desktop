@@ -178,3 +178,28 @@ input:focus { border-color: #41634b; box-shadow: 0 0 0 3px rgba(78,128,92,.08); 
 }
 .transport-list small { color: #586067; font-size: 9px; }
 .transport-list code { color: #59646c; font-size: 9px; }
+
+.account-form {
+  flex-wrap: wrap;
+}
+.account-form select {
+  height: 34px;
+  border: 1px solid #262b30;
+  border-radius: 7px;
+  background: #090b0d;
+  color: #cbd1d5;
+  padding: 0 9px;
+  outline: none;
+}
+.account-form select:focus {
+  border-color: #41634b;
+}
+.secret-table p {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.secret-table p small {
+  color: #586067;
+  font-size: 9px;
+}

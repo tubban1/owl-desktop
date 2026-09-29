@@ -2,17 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity, Boxes, CheckCircle2, Cloud, Cpu, Gauge, HardDrive,
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
-  Terminal, Trash2, Wifi, WifiOff,
+  Terminal, Trash2, Wifi, WifiOff, UserRound, Link2,
 } from "lucide-react";
-import type { DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
+import type { AccountMeta, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 
-type Page = "overview" | "sessions" | "logs" | "runtime" | "secrets" | "settings";
+type Page = "overview" | "sessions" | "logs" | "runtime" | "accounts" | "secrets" | "settings";
 
 const nav = [
   { id: "overview" as Page, label: "Overview", icon: Gauge },
   { id: "sessions" as Page, label: "Sessions", icon: ListTree },
   { id: "logs" as Page, label: "Live Logs", icon: Terminal },
   { id: "runtime" as Page, label: "Runtime", icon: Boxes },
+  { id: "accounts" as Page, label: "Accounts", icon: UserRound },
   { id: "secrets" as Page, label: "Secrets", icon: KeyRound },
   { id: "settings" as Page, label: "Settings", icon: Settings2 },
 ];
@@ -42,8 +43,16 @@ export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
+  const [accounts, setAccounts] = useState<AccountMeta[]>([]);
   const [busy, setBusy] = useState(false);
   const [secretDraft, setSecretDraft] = useState({ name: "", project: "global", value: "" });
+  const [accountDraft, setAccountDraft] = useState({
+    service: "",
+    label: "",
+    identifier: "",
+    authMethod: "password" as AccountMeta["authMethod"],
+    secret: "",
+  });
   const [notice, setNotice] = useState("");
 
   const online = snapshot?.mode === "live";
@@ -59,10 +68,12 @@ export default function App() {
       window.owlDesktop.environment(),
       window.owlDesktop.getSettings(),
       window.owlDesktop.listSecrets(),
-    ]).then(([nextEnv, nextSettings, nextSecrets]) => {
+      window.owlDesktop.listAccounts(),
+    ]).then(([nextEnv, nextSettings, nextSecrets, nextAccounts]) => {
       setEnv(nextEnv);
       setSettings(nextSettings);
       setSecrets(nextSecrets);
+      setAccounts(nextAccounts);
       if (nextSettings.autoConnectRuntime) void refresh();
     });
   }, []);
@@ -78,7 +89,10 @@ export default function App() {
     if (
       "runtimeBaseUrl" in patch ||
       "mcpEnabled" in patch ||
-      "mcpPort" in patch
+      "mcpPort" in patch ||
+      "tunnelEnabled" in patch ||
+      "tunnelBinaryPath" in patch ||
+      "tunnelId" in patch
     ) {
       await refresh();
     }
@@ -92,6 +106,24 @@ export default function App() {
     setSecrets(await window.owlDesktop.listSecrets());
     setSecretDraft({ name: "", project: "global", value: "" });
     setNotice("Secret encrypted and saved");
+    window.setTimeout(() => setNotice(""), 1800);
+  };
+
+  const addAccount = async () => {
+    if (!accountDraft.service.trim() || !accountDraft.label.trim()) return;
+    await window.owlDesktop.upsertAccount({
+      ...accountDraft,
+      secret: accountDraft.secret || undefined,
+    });
+    setAccounts(await window.owlDesktop.listAccounts());
+    setAccountDraft({
+      service: "",
+      label: "",
+      identifier: "",
+      authMethod: "password",
+      secret: "",
+    });
+    setNotice("Account profile saved");
     window.setTimeout(() => setNotice(""), 1800);
   };
 
@@ -169,7 +201,29 @@ export default function App() {
             <section className="panel runtime-summary"><span className="eyebrow">CONNECTION</span><h3>{settings?.runtimeBaseUrl ?? "—"}</h3><p>Stable session: <code>{sessionShort}</code></p><div className="runtime-version"><span>API {apiVersion}</span><span>Runtime {runtimeVersion}</span><span>{snapshot?.latencyMs ?? "—"} ms</span></div></section>
             <section className="panel"><span className="eyebrow">HEALTH</span><pre className="code-block compact">{pretty(snapshot?.health)}</pre></section>
           </div>
+          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RUNTIME HOST</span><h3>Stable macOS permission identity</h3></div><StatusPill online={snapshot?.host?.host.installed === true} /></div>
+            <div className="about-grid"><span>Bundle</span><strong>{snapshot?.host?.host.bundleIdentifier ?? "—"}</strong><span>Host version</span><strong>{snapshot?.host?.host.version ?? "—"}</strong><span>launchd</span><strong>{snapshot?.host?.service.state ?? "not loaded"}</strong><span>Role</span><strong>lifecycle consumer</strong></div>
+            <div className="runtime-version"><button className="secondary" onClick={async () => { await window.owlDesktop.hostRestart(); await refresh(); }}>Restart service</button><button className="secondary" onClick={async () => { await window.owlDesktop.hostStop(); await refresh(); }}>Stop service</button></div>
+          </section>
+          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">OWL TUNNEL</span><h3>Remote transport to local MCP</h3></div><StatusPill online={snapshot?.tunnel.state === "running"} /></div>
+            <div className="about-grid"><span>State</span><strong>{snapshot?.tunnel.state ?? "stopped"}</strong><span>PID</span><strong>{snapshot?.tunnel.pid ?? "—"}</strong><span>MCP target</span><code>{snapshot?.tunnel.mcpUrl ?? "—"}</code><span>Secret</span><strong>{snapshot?.tunnel.secretStorage ?? "OS encrypted"}</strong></div>
+            <div className="runtime-version"><button className="secondary" onClick={async () => { await window.owlDesktop.tunnelStart(); await refresh(); }}>Start tunnel</button><button className="secondary" onClick={async () => { await window.owlDesktop.tunnelStop(); await refresh(); }}>Stop tunnel</button></div>
+          </section>
           <section className="panel"><div className="panel-heading"><div><span className="eyebrow">COMPATIBILITY</span><h3>Desktop consumer boundary</h3></div></div><div className="compat-row"><span>Minimum Runtime API</span><strong>0.1</strong><span>Preferred / tested</span><strong>0.1</strong><span>Fallback</span><strong>Fail closed</strong></div></section>
+        </>}
+
+        {page === "accounts" && <>
+          <SectionHeader title="Accounts" description="Identity & Session Vault for SaaS, social, websites and native apps. Credentials are encrypted locally; interactive factors stay human-in-the-loop." />
+          <section className="panel secret-form account-form">
+            <div><label>Service</label><input value={accountDraft.service} onChange={(e) => setAccountDraft({ ...accountDraft, service: e.target.value })} placeholder="WhatsApp / X / Shopify" /></div>
+            <div><label>Account label</label><input value={accountDraft.label} onChange={(e) => setAccountDraft({ ...accountDraft, label: e.target.value })} placeholder="Main account" /></div>
+            <div><label>Identifier</label><input value={accountDraft.identifier} onChange={(e) => setAccountDraft({ ...accountDraft, identifier: e.target.value })} placeholder="email / phone / @handle" /></div>
+            <div><label>Auth method</label><select value={accountDraft.authMethod} onChange={(e) => setAccountDraft({ ...accountDraft, authMethod: e.target.value as AccountMeta["authMethod"] })}><option value="password">Password</option><option value="oauth">OAuth</option><option value="third_party_oauth">Third-party login</option><option value="qr">QR scan</option><option value="sms_otp">SMS OTP</option><option value="email_otp">Email OTP</option><option value="totp">Authenticator / TOTP</option><option value="authenticator_push">Authenticator push</option><option value="passkey">Passkey</option><option value="device_code">Device code</option><option value="native_app_session">Native app session</option></select></div>
+            <div className="grow"><label>Stored secret (optional)</label><input type="password" value={accountDraft.secret} onChange={(e) => setAccountDraft({ ...accountDraft, secret: e.target.value })} placeholder="Only for credentials you explicitly choose to store" /></div>
+            <button className="primary add-secret" onClick={addAccount}><Plus size={15} />Add</button>
+          </section>
+          <div className="contract-note"><ShieldCheck size={17} /><div><strong>OWL does not bypass MFA.</strong><p>QR, SMS/email codes, passkeys and authenticator approvals become explicit login challenges. Native app sessions and browser profiles are reused without extracting their credentials.</p></div></div>
+          <section className="panel"><div className="secret-table head"><span>Account</span><span>Auth</span><span>Status</span><span /></div>{accounts.map((account) => <div className="secret-table" key={account.id}><div><UserRound size={15} /><p><strong>{account.service} · {account.label}</strong><small>{account.identifier || "No identifier"}</small></p></div><code>{account.authMethod}</code><span>{account.status}</span><button className="danger-icon" onClick={async () => { await window.owlDesktop.deleteAccount(account.id); setAccounts(await window.owlDesktop.listAccounts()); }}><Trash2 size={15} /></button></div>)}{accounts.length === 0 && <div className="empty table-empty">No managed accounts yet.</div>}</section>
         </>}
 
         {page === "secrets" && <>
@@ -183,7 +237,11 @@ export default function App() {
           <section className="panel settings-panel"><div className="setting-row"><div><strong>Runtime endpoint</strong><span>Loopback HTTP endpoint exposed by OWL Runtime.</span></div><input className="setting-input" value={settings.runtimeBaseUrl} onChange={(e) => setSettings({ ...settings, runtimeBaseUrl: e.target.value })} onBlur={() => saveSettings({ runtimeBaseUrl: settings.runtimeBaseUrl })} /></div>
             <div className="setting-row"><div><strong>Auto-connect Runtime</strong><span>Probe Runtime when OWL Desktop starts.</span></div><Toggle checked={settings.autoConnectRuntime} onChange={(v) => saveSettings({ autoConnectRuntime: v })} /></div>
             <div className="setting-row"><div><strong>OWL MCP</strong><span>Run the ChatGPT/MCP compatibility adapter with the Desktop lifecycle.</span></div><Toggle checked={settings.mcpEnabled} onChange={(v) => saveSettings({ mcpEnabled: v })} /></div>
-            <div className="setting-row"><div><strong>MCP port</strong><span>Loopback port used by OWL MCP and the future Tunnel client.</span></div><input className="setting-input" type="number" min="1024" max="65535" value={settings.mcpPort} onChange={(e) => setSettings({ ...settings, mcpPort: Number(e.target.value) })} onBlur={() => saveSettings({ mcpPort: settings.mcpPort })} /></div>
+            <div className="setting-row"><div><strong>MCP port</strong><span>Loopback port used by OWL MCP and OWL Tunnel.</span></div><input className="setting-input" type="number" min="1024" max="65535" value={settings.mcpPort} onChange={(e) => setSettings({ ...settings, mcpPort: Number(e.target.value) })} onBlur={() => saveSettings({ mcpPort: settings.mcpPort })} /></div>
+            <div className="setting-row"><div><strong>OWL Tunnel</strong><span>Run the remote transport to this Desktop's local MCP endpoint.</span></div><Toggle checked={settings.tunnelEnabled} onChange={(v) => saveSettings({ tunnelEnabled: v })} /></div>
+            <div className="setting-row"><div><strong>Tunnel auto-start</strong><span>Start the tunnel after Desktop and MCP are ready.</span></div><Toggle checked={settings.tunnelAutoStart} onChange={(v) => saveSettings({ tunnelAutoStart: v })} /></div>
+            <div className="setting-row"><div><strong>Tunnel binary</strong><span>Versioned OWL Tunnel client executable. Desktop owns lifecycle, not transport semantics.</span></div><input className="setting-input" value={settings.tunnelBinaryPath} onChange={(e) => setSettings({ ...settings, tunnelBinaryPath: e.target.value })} onBlur={() => saveSettings({ tunnelBinaryPath: settings.tunnelBinaryPath })} placeholder="/path/to/tunnel-client-runtime" /></div>
+            <div className="setting-row"><div><strong>Tunnel ID</strong><span>Control-plane tunnel identity. API key belongs in Secrets as OWL_TUNNEL_API_KEY.</span></div><input className="setting-input" value={settings.tunnelId} onChange={(e) => setSettings({ ...settings, tunnelId: e.target.value })} onBlur={() => saveSettings({ tunnelId: settings.tunnelId })} placeholder="tunnel_…" /></div>
             <div className="setting-row"><div><strong>Runtime diagnostics</strong><span>Include Runtime support projections in the Logs screen.</span></div><Toggle checked={settings.diagnosticsEnabled} onChange={(v) => saveSettings({ diagnosticsEnabled: v })} /></div>
             <div className="setting-row"><div><strong>Launch at login</strong><span>Start OWL Desktop after macOS login in packaged builds.</span></div><Toggle checked={settings.launchAtLogin} onChange={(v) => saveSettings({ launchAtLogin: v })} /></div>
           </section>

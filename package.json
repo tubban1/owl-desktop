@@ -11,7 +11,15 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "verify:local-e2e": "node scripts/verify-local-e2e.mjs",
-    "package:mac": "npm run build && electron-builder --mac",
+    "stage:runtime": "node scripts/stage-runtime-component.mjs",
+    "stage:tunnel": "node scripts/stage-tunnel-component.mjs",
+    "package:mac": "npm run package:mac:arm64",
+    "package:mac:arm64": "npm run stage:runtime && npm run build && electron-builder --mac --arm64",
+    "package:mac:x64": "npm run stage:runtime && npm run build && electron-builder --mac --x64",
+    "package:mac:smoke:arm64": "npm run stage:runtime && npm run build && electron-builder --mac --arm64 --dir",
+    "package:mac:smoke:x64": "npm run stage:runtime && npm run build && electron-builder --mac --x64 --dir",
+    "verify:mac:release": "node scripts/verify-macos-release-env.mjs",
+    "package:mac:release": "npm run stage:runtime && npm run verify:mac:release && npm run build && electron-builder --config electron-builder.release.yml --mac --arm64 --x64",
     "start": "electron ."
   },
   "dependencies": {
@@ -37,11 +45,23 @@
   "build": {
     "appId": "ai.owl.desktop",
     "productName": "OWL Desktop",
+    "asar": true,
+    "compression": "maximum",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**/*",
       "electron/**/*",
       "mcp/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/owl-runtime",
+        "to": "owl-runtime"
+      }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",

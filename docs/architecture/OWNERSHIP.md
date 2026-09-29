@@ -10,9 +10,11 @@ OWL Desktop is the **local product and integration boundary**. It is not the exe
 - local Control Panel
 - local settings UX
 - local logs/session visualization
+- local Identity & Session Vault for external services
+- login challenge UX for QR/OTP/passkey/authenticator flows
 - stable macOS packaging and installation
-- OWL Helper / Runtime Host lifecycle
-- OWL Tunnel client packaging
+- OWL Helper / Runtime Host lifecycle UX
+- OWL Tunnel client packaging and lifecycle
 - OWL Cloud Bridge client
 - backend selection and compatibility presentation
 - local product update UX
@@ -29,7 +31,9 @@ OWL Desktop is the **local product and integration boundary**. It is not the exe
 - execution Approval receipts
 - Runtime retry/recovery semantics
 - Account / Organization truth
+- Cloud RBAC/effective-access evaluation
 - Device grants
+- third-party service authentication policy
 - billing/subscription
 - cloud command persistence
 - Worker product state
