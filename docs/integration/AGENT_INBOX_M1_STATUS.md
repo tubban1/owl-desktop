@@ -38,6 +38,8 @@ Implemented behavior:
   - agent_requests_claim
   - agent_requests_release
   - agent_requests_complete
+  - skill_repair_context
+  - skill_repair_apply
 
 ## Security and prompt-injection boundary
 
@@ -136,6 +138,35 @@ a44c5d26636c71faf8a8c146ef43e2af71332b11
 The live gate proves proposal materialization, restart replay, withdrawal,
 CURSOR_EXPIRED reconciliation, blocked polling, same-cursor retry, and
 first-checkpoint truncation protection.
+
+## Skill repair reasoning loop
+
+The first claimed-work execution path is being integrated for Runtime-produced
+`skill.repair` requests.
+
+~~~text
+Runtime semantic Candidate issue
+→ AgentRequest
+→ stable MCP owner claim
+→ privacy-safe repair context
+→ replay-protected Candidate revise
+→ replay-protected Candidate validate
+→ Runtime withdrawal / next proposal
+→ AgentRequest completion
+~~~
+
+Desktop does not expose raw Candidate history or embedded-secret detector
+matches to the model. Repair mutations require Runtime
+`consequentialRequestReplay v1` and never promote/activate the Skill.
+
+Provider target for the live gate:
+
+~~~text
+owl-runtime
+f00ba4f7f5c3fbddc18cf7c04fc0cfccdbb786bd
+~~~
+
+See `docs/contracts/AGENT_SKILL_REPAIR_MCP_V1.md`.
 
 ## Future routing
 
