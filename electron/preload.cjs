@@ -3,6 +3,11 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("owlDesktop", {
   environment: () => ipcRenderer.invoke("desktop:environment"),
   refreshRuntime: () => ipcRenderer.invoke("runtime:refresh"),
+  skillSnapshot: () => ipcRenderer.invoke("skills:snapshot"),
+  skillDryRun: (skillId, args) =>
+    ipcRenderer.invoke("skills:dry-run", skillId, args),
+  skillRun: (skillId, args) =>
+    ipcRenderer.invoke("skills:run", skillId, args),
   hostStatus: () => ipcRenderer.invoke("host:status"),
   hostRestart: () => ipcRenderer.invoke("host:restart"),
   hostStop: () => ipcRenderer.invoke("host:stop"),

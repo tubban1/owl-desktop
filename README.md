@@ -41,6 +41,8 @@ See:
 - [Platform Integration](docs/integration/PLATFORM_INTEGRATION.md)
 - [Platform Integration Gates v1](docs/integration/INTEGRATION_GATES_V1.md)
 - [Local E2E Status](docs/integration/LOCAL_E2E_STATUS.md)
+- [Skill Manager v1](docs/skills/SKILL_MANAGER_V1.md)
+- [Skill Manager Implementation Status](docs/skills/SKILL_MANAGER_IMPLEMENTATION_STATUS.md)
 - [macOS Distribution](docs/integration/MACOS_DISTRIBUTION.md)
 - [2.0 Dependency Roadmap](docs/roadmap/2.0-dependency-roadmap.md)
 

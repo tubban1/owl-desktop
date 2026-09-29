@@ -2,17 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity, Boxes, CheckCircle2, Cloud, Cpu, Gauge, HardDrive,
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
-  Terminal, Trash2, Wifi, WifiOff, UserRound, Link2,
+  Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle,
 } from "lucide-react";
 import type { AccountMeta, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
+import { SkillsPage } from "./skills/SkillsPage";
 
-type Page = "overview" | "sessions" | "logs" | "runtime" | "accounts" | "secrets" | "settings";
+type Page = "overview" | "sessions" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
 
 const nav = [
   { id: "overview" as Page, label: "Overview", icon: Gauge },
   { id: "sessions" as Page, label: "Sessions", icon: ListTree },
   { id: "logs" as Page, label: "Live Logs", icon: Terminal },
   { id: "runtime" as Page, label: "Runtime", icon: Boxes },
+  { id: "skills" as Page, label: "Skills", icon: Puzzle },
   { id: "accounts" as Page, label: "Accounts", icon: UserRound },
   { id: "secrets" as Page, label: "Secrets", icon: KeyRound },
   { id: "settings" as Page, label: "Settings", icon: Settings2 },
@@ -211,6 +213,8 @@ export default function App() {
           </section>
           <section className="panel"><div className="panel-heading"><div><span className="eyebrow">COMPATIBILITY</span><h3>Desktop consumer boundary</h3></div></div><div className="compat-row"><span>Minimum Runtime API</span><strong>0.1</strong><span>Preferred / tested</span><strong>0.1</strong><span>Fallback</span><strong>Fail closed</strong></div></section>
         </>}
+
+        {page === "skills" && <SkillsPage />}
 
         {page === "accounts" && <>
           <SectionHeader title="Accounts" description="Identity & Session Vault for SaaS, social, websites and native apps. Credentials are encrypted locally; interactive factors stay human-in-the-loop." />
