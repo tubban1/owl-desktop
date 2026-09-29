@@ -1199,3 +1199,117 @@ input:focus { border-color: #41634b; box-shadow: 0 0 0 3px rgba(78,128,92,.08); 
     flex-direction: column;
   }
 }
+
+
+.nav-badge.attention {
+  min-width: 18px;
+  background: rgba(165, 96, 54, .24);
+  border: 1px solid rgba(207, 132, 80, .42);
+  color: #e1ae86;
+}
+
+.warning-pill {
+  border-color: rgba(207, 132, 80, .34) !important;
+  color: #d7a57d !important;
+  background: rgba(130, 77, 41, .08) !important;
+}
+
+.runtime-event-feed {
+  display: grid;
+  gap: 12px;
+}
+
+.runtime-event-feed.needs_attention {
+  border-color: rgba(196, 116, 66, .34);
+  box-shadow: inset 0 0 0 1px rgba(196, 116, 66, .05);
+}
+
+.runtime-event-feed.healthy {
+  border-color: rgba(83, 130, 92, .24);
+}
+
+.event-feed-status.healthy {
+  color: #9fc9aa;
+  border-color: rgba(86, 133, 96, .3);
+}
+
+.event-feed-status.degraded,
+.event-feed-status.needs_attention {
+  color: #d6aa80;
+  border-color: rgba(181, 119, 69, .35);
+}
+
+.runtime-event-position {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1.4fr) 105px minmax(90px, .5fr);
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px 11px;
+  border: 1px solid #20262b;
+  border-radius: 9px;
+  background: #090c0e;
+}
+
+.runtime-event-position span {
+  color: #687279;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.runtime-event-position code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #a6b0b5;
+  font-size: 10px;
+}
+
+.runtime-event-position strong {
+  color: #a6b0b5;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.runtime-event-reconciliation {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(196, 116, 66, .3);
+  border-radius: 10px;
+  background: rgba(120, 67, 36, .06);
+  color: #c9946f;
+}
+
+.runtime-event-reconciliation > div {
+  display: grid;
+  gap: 9px;
+}
+
+.runtime-event-reconciliation strong {
+  font-size: 11px;
+}
+
+.runtime-event-reconciliation p {
+  margin: 0;
+  color: #97877c;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.runtime-event-reconciliation small {
+  color: #746b65;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.runtime-event-reconciliation .runtime-event-position {
+  background: rgba(6, 8, 9, .52);
+}
+
+@media (max-width: 1000px) {
+  .runtime-event-position {
+    grid-template-columns: 105px minmax(0, 1fr);
+  }
+}
