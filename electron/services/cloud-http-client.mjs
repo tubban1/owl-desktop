@@ -113,6 +113,14 @@ export class CloudHttpClient {
     return this.request("/health");
   }
 
+  authConfig() {
+    return this.request("/auth/config");
+  }
+
+  remoteCommandRegistry() {
+    return this.request("/contracts/remote-command-kinds/v1");
+  }
+
   bootstrap(userJwt) {
     return this.request("/v1/bootstrap", {
       method: "POST",
