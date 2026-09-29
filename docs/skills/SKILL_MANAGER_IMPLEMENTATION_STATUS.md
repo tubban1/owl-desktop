@@ -83,3 +83,26 @@ Desktop unit suite includes `skill-manager-port.test.mjs` covering:
 - Dry Run forwarding;
 - real Run forwarding;
 - lifecycle state remaining non-canonical/unavailable.
+
+## Empirical lifecycle findings from current AgentOS / Computer MCP
+
+A live experiment against AgentOS Runtime 1.0.4 established the current boundaries:
+
+- submitting an unknown `user.repo_health_check` to `skill_run` is rejected as an unknown Skill;
+- the built-in Skill Registry is currently compiled/static;
+- the same workflow expressed as a Primitive graph can be persisted through `runtime.compile_task`;
+- successful Task execution creates encrypted persistent Task state and an M2 Episodic record;
+- `runtime.memory inspect` applies quality/privacy gates and can mark a procedure promotable;
+- explicit `runtime.memory promote` creates encrypted M3 Semantic Memory;
+- `runtime.recall` can retrieve both the M2 episode and M3 procedure;
+- none of those operations adds a new entry to `skill_catalog`.
+
+Therefore:
+
+```text
+M3 Semantic Memory
+!=
+User Skill Registry
+```
+
+Desktop Candidate UX and CR-DESKTOP-009 now model User Skill promotion as a separate evidence-backed executable-capability lifecycle.

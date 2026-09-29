@@ -325,7 +325,11 @@ export function SkillsPage({
           </p>
         </div>
         <div className="skill-header-actions">
-          <button className="secondary" disabled title="Requires Runtime 1.x Skill Registry">
+          <button
+            className="secondary"
+            disabled
+            title="Requires Runtime 1.x Candidate + User Skill Registry API"
+          >
             <PackagePlus size={15} /> Add Skill
           </button>
           <button className="primary" onClick={() => void refresh()} disabled={busy}>
@@ -451,14 +455,63 @@ export function SkillsPage({
       )}
 
       {tab === "candidates" && (
-        <section className="panel skill-empty-state">
-          <Sparkles size={30} />
-          <h2>No canonical Skill candidates yet</h2>
-          <p>
-            When Runtime 1.x exposes candidate lifecycle, repeated verified work
-            can appear here for review, test and explicit promotion.
-          </p>
-          <Pill tone="warn">{snapshot?.lifecycle.reason ?? "Requires Runtime 1.x Skill Registry"}</Pill>
+        <section className="panel skill-candidate-stage">
+          <div className="skill-candidate-hero">
+            <Sparkles size={30} />
+            <div>
+              <h2>No canonical Skill candidates yet</h2>
+              <p>
+                Runtime 1.x will make this the evidence-backed promotion queue.
+                M3 Semantic Memory remains reusable knowledge; it does not
+                silently become an executable Skill.
+              </p>
+            </div>
+            <Pill tone="warn">
+              {snapshot?.lifecycle.reason ?? "Requires Runtime 1.x Skill Registry"}
+            </Pill>
+          </div>
+
+          <div className="skill-candidate-sources">
+            <div>
+              <strong>ChatGPT import</strong>
+              <span>Normalize or repair an external Skill with an LLM.</span>
+            </div>
+            <div>
+              <strong>Desktop import</strong>
+              <span>Submit a package, folder or repository for Runtime validation.</span>
+            </div>
+            <div>
+              <strong>Repeated work</strong>
+              <span>Propose a Candidate from recurring verified Tasks.</span>
+            </div>
+          </div>
+
+          <div className="skill-promotion-pipeline">
+            <span>Candidate</span>
+            <b>→</b>
+            <span>Validate</span>
+            <b>→</b>
+            <span>Test Task</span>
+            <b>→</b>
+            <span>M2 Evidence</span>
+            <b>→</b>
+            <span>Promotion Gate</span>
+            <b>→</b>
+            <span>User Skill Registry</span>
+          </div>
+
+          <div className="contract-note">
+            <ShieldCheck size={17} />
+            <div>
+              <strong>Runtime decides if a Candidate is valid.</strong>
+              <p>
+                ChatGPT or an AI Worker may modify Candidate content after a
+                machine-readable repair report. Desktop presents review,
+                evidence and promotion controls; it does not embed a hidden LLM
+                or write Runtime Registry state.
+              </p>
+            </div>
+          </div>
         </section>
       )}
 
