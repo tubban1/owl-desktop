@@ -322,10 +322,17 @@ export class RuntimeAgentRequestEventBridge {
       state.supported = supported;
 
       if (!supported) {
-        state.status = "unsupported";
-        state.lastErrorCode = null;
-        state.lastErrorMessage = null;
-        state.reconciliation = null;
+        if (state.reconciliation) {
+          state.status = "needs_attention";
+          state.supported = false;
+          state.lastErrorCode = state.reconciliation.reasonCode;
+          state.lastErrorMessage = state.reconciliation.message;
+          state.reconciliation.lastObservedAt = nowIso();
+        } else {
+          state.status = "unsupported";
+          state.lastErrorCode = null;
+          state.lastErrorMessage = null;
+        }
         this.writeState(state);
         return this.snapshot();
       }
@@ -446,13 +453,21 @@ export class RuntimeAgentRequestEventBridge {
       if (isIntegrityError(code)) {
         return this.markReconciliation(error, state);
       }
-      state.status = "degraded";
-      state.lastErrorCode = code;
-      state.lastErrorMessage = errorMessage(error);
+      if (state.reconciliation) {
+        state.status = "needs_attention";
+        state.lastErrorCode = code;
+        state.lastErrorMessage = errorMessage(error);
+        state.reconciliation.lastObservedAt = nowIso();
+      } else {
+        state.status = "degraded";
+        state.lastErrorCode = code;
+        state.lastErrorMessage = errorMessage(error);
+      }
       this.writeState(state);
       this.onEvent("warn", "Runtime event sync degraded", {
         code,
         message: state.lastErrorMessage,
+        reconciliationPreserved: Boolean(state.reconciliation),
       });
       return this.snapshot();
     }
