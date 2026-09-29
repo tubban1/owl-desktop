@@ -10,6 +10,7 @@ OWL Desktop is the **local product and integration boundary**. It is not the exe
 - local Control Panel
 - local settings UX
 - local logs/session visualization
+- Skill Manager UX: catalog, detail, test-run, install/review, candidates, versions and rollback presentation
 - local Identity & Session Vault for external services
 - login challenge UX for QR/OTP/passkey/authenticator flows
 - stable macOS packaging and installation

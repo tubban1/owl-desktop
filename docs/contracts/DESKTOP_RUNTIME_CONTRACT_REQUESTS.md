@@ -127,3 +127,49 @@ Requested contract:
 - compatibility manifest consumable by OWL Desktop packaging.
 
 Current compatibility binary v0.0.15 accepts `file:` API-key input, so Desktop uses a 0600 ephemeral file only while the process is running. This is transitional and not the preferred production secret transport.
+
+## CR-DESKTOP-009 — User Skill Registry and candidate lifecycle
+
+**Owner:** owl-runtime 1.x.
+
+**Priority:** post-1.0 / non-blocking for Runtime 1.0 stable.
+
+**Need:** OWL Control is adding a first-class Skill Manager. Runtime 1.0 already exposes the built-in Skill catalog and Skill execution, but user-installable Skill lifecycle is not yet a public canonical Runtime capability.
+
+Requested Runtime surface:
+
+- inspect a declarative Skill package without installing it;
+- validate schema, Primitive ABI, required Primitives, execution contract, verification and integrity;
+- install an immutable Skill version;
+- list installed Skills and versions;
+- enable/disable an installed Skill;
+- activate a specific version;
+- roll back to a previous immutable version;
+- uninstall a Skill/version through Runtime;
+- report provenance/digest/integrity/compatibility;
+- list/get/test/dismiss Skill candidates;
+- promote a validated candidate into an installed Skill only with explicit confirmation;
+- expose current availability based on Primitive/provider/policy/permission state.
+
+Required invariants:
+
+- Desktop never writes Runtime Skill Registry files directly;
+- Cloud distribution does not bypass local Runtime validation;
+- user Skills execute through the same Approval, Resource Arbiter, Primitive ABI and Verifier boundaries as built-ins;
+- declarative user Skills cannot call provider internals or L0.5 Actions directly;
+- one successful Task cannot silently auto-activate a new Skill;
+- Skill versions are immutable and reversible;
+- candidate provenance links back to evidence without embedding user secrets in catalog metadata.
+
+Acceptance:
+
+1. Desktop imports a valid declarative Skill package and receives a Runtime inspection result.
+2. Incompatible ABI/Primitive dependencies are rejected before install.
+3. User confirmation installs exactly one immutable version.
+4. Installed Skill appears in canonical Runtime catalog/registry and can execute under normal policy.
+5. Update installs a new version without mutating the old one.
+6. Rollback reactivates the old version.
+7. Duplicate/retried install requests do not create ambiguous duplicate state.
+8. A repeated-work candidate can be reviewed/tested and explicitly promoted, but never auto-activated solely from one success.
+
+See docs/skills/SKILL_MANAGER_V1.md for the Desktop product contract and Runtime docs/skills/USER_SKILL_LIFECYCLE_V1.md on the platform contract branch.
