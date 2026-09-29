@@ -111,6 +111,7 @@ export class CloudEnrollmentService {
     client,
     openExternal,
     storeSecret,
+    readSecret = () => null,
     deleteSecret,
     updateSettings,
     buildDeviceRegistration,
@@ -122,6 +123,7 @@ export class CloudEnrollmentService {
     this.client = client;
     this.openExternal = openExternal;
     this.storeSecret = storeSecret;
+    this.readSecret = readSecret;
     this.deleteSecret = deleteSecret;
     this.updateSettings = updateSettings;
     this.buildDeviceRegistration = buildDeviceRegistration;
@@ -142,6 +144,111 @@ export class CloudEnrollmentService {
 
   snapshot() {
     return structuredClone(this.state);
+  }
+
+  async resume() {
+    const refreshToken = await this.readSecret(
+      ACCOUNT_REFRESH_SECRET,
+      SECRET_SCOPE,
+    );
+    if (!refreshToken) return this.snapshot();
+
+    try {
+      const config = requireAuthConfig(await this.client.authConfig());
+      this.config = config;
+      this.state = {
+        ...this.state,
+        status: "bootstrapping",
+        lastErrorCode: null,
+      };
+      const form = new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: config.clientId,
+        refresh_token: refreshToken,
+      });
+      const response = await this.fetchImpl(config.tokenEndpoint, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: form.toString(),
+      });
+      const tokens = await parseJsonResponse(
+        response,
+        "CLOUD_AUTH_REFRESH_FAILED",
+      );
+      if (typeof tokens.id_token !== "string" || !tokens.id_token) {
+        throw Object.assign(new Error("Cognito refresh omitted id_token."), {
+          code: "CLOUD_AUTH_ID_TOKEN_MISSING",
+        });
+      }
+      if (typeof tokens.refresh_token === "string" && tokens.refresh_token) {
+        await this.storeSecret({
+          name: ACCOUNT_REFRESH_SECRET,
+          project: SECRET_SCOPE,
+          value: tokens.refresh_token,
+        });
+      }
+      const account = await this.client.bootstrap(tokens.id_token);
+      let deviceId = this.state.deviceId;
+      if (!deviceId) {
+        this.state = { ...this.state, status: "registering_device" };
+        const registration = await this.buildDeviceRegistration(account);
+        const enrolled = await this.client.registerDevice(
+          tokens.id_token,
+          registration,
+        );
+        if (
+          typeof enrolled?.deviceId !== "string" ||
+          typeof enrolled?.deviceCredential !== "string"
+        ) {
+          throw Object.assign(
+            new Error("Cloud device registration returned no device identity."),
+            { code: "CLOUD_DEVICE_REGISTRATION_INVALID" },
+          );
+        }
+        await this.storeSecret({
+          name: DEVICE_CREDENTIAL_SECRET,
+          project: SECRET_SCOPE,
+          value: enrolled.deviceCredential,
+        });
+        await this.updateSettings({
+          cloudDeviceId: enrolled.deviceId,
+          cloudEnabled: true,
+        });
+        deviceId = enrolled.deviceId;
+      }
+      const completedAt = this.now().toISOString();
+      this.state = {
+        status: "ready",
+        startedAt: this.state.startedAt,
+        completedAt,
+        account: {
+          userId: account.userId ?? null,
+          organizationId: account.organizationId ?? null,
+          membershipId: account.membershipId ?? null,
+          role: account.role ?? null,
+          email: account.email ?? null,
+        },
+        deviceId,
+        lastErrorCode: null,
+      };
+      this.onEvent("info", "OWL LAB Cloud account session restored", {
+        deviceId,
+        role: account.role ?? null,
+      });
+      return this.snapshot();
+    } catch (error) {
+      await this.deleteSecret(
+        ACCOUNT_REFRESH_SECRET,
+        SECRET_SCOPE,
+      ).catch(() => undefined);
+      return this.fail(
+        error?.code ?? "CLOUD_AUTH_RESUME_FAILED",
+        error,
+      );
+    }
   }
 
   async begin() {
