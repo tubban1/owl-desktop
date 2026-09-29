@@ -259,6 +259,14 @@ export type RuntimeEventBridgeStatus = {
   };
 };
 
+export type DesktopAccessStatus = {
+  version: 1;
+  state: "locked" | "ready";
+  reasonCode: string | null;
+  account: CloudEnrollmentStatus["account"];
+  deviceId: string | null;
+};
+
 export type RuntimeSnapshot = {
   mode: "live" | "offline";
   checkedAt: string;
@@ -272,7 +280,7 @@ export type RuntimeSnapshot = {
   error: string | null;
   metrics: { tasks: number; approvals: number; processes: number };
   mcp: {
-    status: "stopped" | "starting" | "running" | "error";
+    status: "stopped" | "starting" | "running" | "error" | "locked";
     url: string | null;
     error: string | null;
     sessionCount: number;
@@ -288,6 +296,7 @@ export type RuntimeSnapshot = {
   host: HostStatus | null;
   tunnel: TunnelStatus;
   cloud: CloudBridgeStatus;
+  access: DesktopAccessStatus;
   agentInbox: AgentInboxSummary;
   runtimeEvents: RuntimeEventBridgeStatus;
   accounts: AccountMeta[];
