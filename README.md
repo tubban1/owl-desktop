@@ -76,6 +76,7 @@ npm run build
 npm run verify:local-e2e
 npm run verify:cloud-bridge-live
 npm run verify:agent-inbox-e2e
+npm run verify:skill-discovery-live
 ```
 
 The Local E2E verifier expects Runtime to allow the target repository through `ALLOWED_DIRECTORIES`.
