@@ -28,6 +28,9 @@ export class RuntimeHttpClient {
           "content-type": "application/json",
           "x-owl-session-id": this.sessionId,
           "x-owl-request-id": requestId,
+          ...(normalized.idempotencyKey
+            ? { "x-owl-idempotency-key": normalized.idempotencyKey }
+            : {}),
           ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
         },
         body: JSON.stringify({
@@ -75,6 +78,7 @@ export class RuntimeHttpClient {
       timeoutMs: options.timeoutMs ?? 30_000,
       signal: options.signal,
       requestId: options.requestId,
+      idempotencyKey: options.idempotencyKey,
     });
   }
   createTask(request, options = {}) {
@@ -82,6 +86,7 @@ export class RuntimeHttpClient {
       timeoutMs: options.timeoutMs ?? 15_000,
       signal: options.signal,
       requestId: options.requestId,
+      idempotencyKey: options.idempotencyKey,
     });
   }
 
