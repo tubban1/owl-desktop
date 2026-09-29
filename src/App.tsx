@@ -215,7 +215,7 @@ export default function App() {
               <span>Status</span><strong>{cloudEnrollment.status.replaceAll("_", " ")}</strong>
               <span>Reason</span><strong>{cloudEnrollment.lastErrorCode ?? "CLOUD_LOGIN_REQUIRED"}</strong>
             </div>
-            {!settings.cloudBaseUrl && <div className="setting-row">
+            <div className="setting-row">
               <div><strong>OWL LAB Cloud endpoint</strong><span>Configure the Cloud API before signing in.</span></div>
               <input
                 className="setting-input"
@@ -224,7 +224,7 @@ export default function App() {
                 onBlur={() => saveSettings({ cloudBaseUrl: settings.cloudBaseUrl })}
                 placeholder="https://…execute-api…amazonaws.com"
               />
-            </div>}
+            </div>
             <div className="runtime-version cloud-actions">
               <button className="primary" onClick={beginCloudEnrollment}>
                 <KeyRound size={15} />
