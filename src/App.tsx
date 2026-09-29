@@ -167,14 +167,14 @@ export default function App() {
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="traffic-spacer" />
-      <div className="brand"><div className="brand-mark">O</div><div><strong>OWL</strong><span>Desktop</span></div></div>
+      <div className="brand"><div className="brand-mark">O</div><div><strong>OWL LAB</strong><span>Desktop</span></div></div>
       <nav>{nav.map((item) => {
         const Icon = item.icon;
         return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={17} /><span>{item.label}</span>{item.id === "agent-inbox" && runtimeEventNeedsAttention ? <span className="nav-badge attention">!</span> : item.id === "agent-inbox" && pendingAgentRequests.length > 0 ? <span className="nav-badge">{pendingAgentRequests.length}</span> : null}</button>;
       })}</nav>
       <div className="sidebar-bottom">
         <div className="device-card"><div className="device-dot" /><div><strong>This Mac</strong><span>{env ? env.platform + " · " + env.arch : "Loading…"}</span></div></div>
-        <div className="build-meta">OWL Desktop {env?.appVersion ?? "0.1.0"}</div>
+        <div className="build-meta">OWL LAB Desktop {env?.appVersion ?? "0.1.0"}</div>
       </div>
     </aside>
 
@@ -186,7 +186,7 @@ export default function App() {
 
       <div className="content">
         {page === "overview" && <>
-          <SectionHeader title="Good evening." description="Your local OWL execution stack, sessions and operational health in one place." action={<button className="primary" onClick={refresh}><RefreshCw size={15} />Refresh Runtime</button>} />
+          <SectionHeader title="Good evening." description="Your local OWL LAB execution stack, sessions and operational health in one place." action={<button className="primary" onClick={refresh}><RefreshCw size={15} />Refresh Runtime</button>} />
           <section className={"hero-status " + (online ? "healthy" : "warning")}>
             <div className="hero-icon">{online ? <CheckCircle2 size={24} /> : <WifiOff size={24} />}</div>
             <div className="hero-copy"><span>LOCAL EXECUTION AUTHORITY</span><h2>{online ? "OWL Runtime is ready" : "OWL Runtime is not connected"}</h2><p>{online ? "Desktop is reading canonical execution state through RuntimeClient v" + apiVersion + "." : (snapshot?.error ?? "Start OWL Runtime or update the endpoint in Settings.")}</p></div>
@@ -201,9 +201,9 @@ export default function App() {
           <div className="two-col">
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">COMPONENTS</span><h3>Platform status</h3></div></div>
               <div className="component-list">
-                <div><span className="component-icon"><Boxes size={17} /></span><p><strong>OWL Runtime</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
+                <div><span className="component-icon"><Boxes size={17} /></span><p><strong>OWL LAB Runtime</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
                 <div><span className="component-icon"><Terminal size={17} /></span><p><strong>OWL MCP</strong><small>{snapshot?.mcp.url ?? snapshot?.mcp.error ?? "Desktop adapter boundary"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
-                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL Cloud Bridge</strong><small>{snapshot?.cloud.deviceId ?? "Optional for local execution"}</small></p>{cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}</div>
+                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL LAB Cloud Bridge</strong><small>{snapshot?.cloud.deviceId ?? "Account/device connection"}</small></p>{cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}</div>
                 <div><span className="component-icon"><Inbox size={17} /></span><p><strong>Agent Inbox</strong><small>{runtimeEventNeedsAttention ? "Runtime event reconciliation required" : "Structured work waiting for an LLM/agent"}</small></p><span className={runtimeEventNeedsAttention ? "neutral-pill warning-pill" : "neutral-pill"}>{runtimeEventNeedsAttention ? "needs attention" : pendingAgentRequests.length + " pending"}</span></div>
               </div>
             </section>
@@ -215,7 +215,7 @@ export default function App() {
 
         {page === "sessions" && <>
           <SectionHeader title="Sessions" description="Stable logical ownership identities used across Runtime reconnects." />
-          <div className="session-card"><div className="session-title"><span className="avatar">D</span><div><strong>OWL Desktop</strong><span>Primary local consumer session</span></div><StatusPill online={online} /></div>
+          <div className="session-card"><div className="session-title"><span className="avatar">D</span><div><strong>OWL LAB Desktop</strong><span>Primary local consumer session</span></div><StatusPill online={online} /></div>
             <div className="session-details"><div><span>Session ID</span><code>{settings?.sessionId ?? "—"}</code></div><div><span>Runtime API</span><strong>{apiVersion}</strong></div><div><span>Transport</span><strong>{snapshot?.info?.transport ?? "HTTP"}</strong></div><div><span>Last seen</span><strong>{formatTime(snapshot?.checkedAt)}</strong></div></div>
           </div>
           <section className="panel"><div className="panel-heading"><div><span className="eyebrow">MCP TRANSPORT</span><h3>Connected transport sessions</h3></div><span className="neutral-pill">{snapshot?.mcp.sessionCount ?? 0} open</span></div>
@@ -482,7 +482,7 @@ export default function App() {
         {page === "settings" && settings && <>
           <SectionHeader title="Settings" description="Local product preferences and Runtime connectivity." />
           <section className="panel settings-panel"><div className="setting-row"><div><strong>Runtime endpoint</strong><span>Loopback HTTP endpoint exposed by OWL Runtime.</span></div><input className="setting-input" value={settings.runtimeBaseUrl} onChange={(e) => setSettings({ ...settings, runtimeBaseUrl: e.target.value })} onBlur={() => saveSettings({ runtimeBaseUrl: settings.runtimeBaseUrl })} /></div>
-            <div className="setting-row"><div><strong>Auto-connect Runtime</strong><span>Probe Runtime when OWL Desktop starts.</span></div><Toggle checked={settings.autoConnectRuntime} onChange={(v) => saveSettings({ autoConnectRuntime: v })} /></div>
+            <div className="setting-row"><div><strong>Auto-connect Runtime</strong><span>Probe Runtime when OWL LAB Desktop starts.</span></div><Toggle checked={settings.autoConnectRuntime} onChange={(v) => saveSettings({ autoConnectRuntime: v })} /></div>
             <div className="setting-row"><div><strong>OWL MCP</strong><span>Run the ChatGPT/MCP compatibility adapter with the Desktop lifecycle.</span></div><Toggle checked={settings.mcpEnabled} onChange={(v) => saveSettings({ mcpEnabled: v })} /></div>
             <div className="setting-row"><div><strong>MCP port</strong><span>Loopback port used by OWL MCP and OWL Tunnel.</span></div><input className="setting-input" type="number" min="1024" max="65535" value={settings.mcpPort} onChange={(e) => setSettings({ ...settings, mcpPort: Number(e.target.value) })} onBlur={() => saveSettings({ mcpPort: settings.mcpPort })} /></div>
             <div className="setting-row"><div><strong>OWL Tunnel</strong><span>Run the remote transport to this Desktop's local MCP endpoint.</span></div><Toggle checked={settings.tunnelEnabled} onChange={(v) => saveSettings({ tunnelEnabled: v })} /></div>
