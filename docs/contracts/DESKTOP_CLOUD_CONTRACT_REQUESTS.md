@@ -64,7 +64,9 @@ Security invariants:
 - Renderer never receives PKCE verifier, JWTs, refresh token or device credential;
 - refresh token and device credential use OS-backed encrypted storage;
 - logout clears the human account session but does not silently revoke the enrolled device;
-- local-only mode remains usable without Cloud enrollment.
+- normal OWL LAB Desktop/Runtime use requires an authenticated account plus enrolled device;
+- before authorization, Desktop exposes only the LOCKED enrollment/recovery shell and Runtime health/version/diagnostics;
+- a bounded offline execution lease may preserve previously authorized local work during temporary Cloud loss; this must not become an implicit permanent local-only mode.
 
 Remaining acceptance item: execute the flow on the real Mac against Frankfurt and capture live product evidence.
 
