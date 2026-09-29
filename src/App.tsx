@@ -3,6 +3,7 @@ import {
   Activity, Boxes, CheckCircle2, Cloud, Cpu, Gauge, HardDrive,
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
   Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
+  AlertTriangle,
 } from "lucide-react";
 import type { AccountMeta, AgentRequest, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
@@ -68,6 +69,7 @@ export default function App() {
   const refresh = async () => {
     setBusy(true);
     try {
+      await window.owlDesktop.runtimeEventSync().catch(() => undefined);
       const [nextSnapshot, nextAgentRequests] = await Promise.all([
         window.owlDesktop.refreshRuntime(),
         window.owlDesktop.listAgentRequests({ limit: 100 }),
@@ -158,6 +160,9 @@ export default function App() {
     () => agentRequests.filter((request) => request.status === "claimed"),
     [agentRequests],
   );
+  const runtimeEventStatus = snapshot?.runtimeEvents;
+  const runtimeEventNeedsAttention =
+    runtimeEventStatus?.status === "needs_attention";
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -165,7 +170,7 @@ export default function App() {
       <div className="brand"><div className="brand-mark">O</div><div><strong>OWL</strong><span>Desktop</span></div></div>
       <nav>{nav.map((item) => {
         const Icon = item.icon;
-        return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={17} /><span>{item.label}</span>{item.id === "agent-inbox" && pendingAgentRequests.length > 0 ? <span className="nav-badge">{pendingAgentRequests.length}</span> : null}</button>;
+        return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={17} /><span>{item.label}</span>{item.id === "agent-inbox" && runtimeEventNeedsAttention ? <span className="nav-badge attention">!</span> : item.id === "agent-inbox" && pendingAgentRequests.length > 0 ? <span className="nav-badge">{pendingAgentRequests.length}</span> : null}</button>;
       })}</nav>
       <div className="sidebar-bottom">
         <div className="device-card"><div className="device-dot" /><div><strong>This Mac</strong><span>{env ? env.platform + " · " + env.arch : "Loading…"}</span></div></div>
@@ -199,7 +204,7 @@ export default function App() {
                 <div><span className="component-icon"><Boxes size={17} /></span><p><strong>OWL Runtime</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
                 <div><span className="component-icon"><Terminal size={17} /></span><p><strong>OWL MCP</strong><small>{snapshot?.mcp.url ?? snapshot?.mcp.error ?? "Desktop adapter boundary"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
                 <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL Cloud Bridge</strong><small>{snapshot?.cloud.deviceId ?? "Optional for local execution"}</small></p>{cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}</div>
-                <div><span className="component-icon"><Inbox size={17} /></span><p><strong>Agent Inbox</strong><small>Structured work waiting for an LLM/agent</small></p><span className="neutral-pill">{pendingAgentRequests.length} pending</span></div>
+                <div><span className="component-icon"><Inbox size={17} /></span><p><strong>Agent Inbox</strong><small>{runtimeEventNeedsAttention ? "Runtime event reconciliation required" : "Structured work waiting for an LLM/agent"}</small></p><span className={runtimeEventNeedsAttention ? "neutral-pill warning-pill" : "neutral-pill"}>{runtimeEventNeedsAttention ? "needs attention" : pendingAgentRequests.length + " pending"}</span></div>
               </div>
             </section>
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RECENT ACTIVITY</span><h3>Local events</h3></div><button className="text-button" onClick={() => setPage("logs")}>View logs</button></div>
@@ -226,6 +231,106 @@ export default function App() {
             description="Structured reasoning work waiting for ChatGPT or another AI agent. Requests never override user intent or Runtime policy."
             action={<button className="secondary" onClick={refresh}><RefreshCw size={15} />Refresh</button>}
           />
+
+          <section className={"panel runtime-event-feed " + (runtimeEventStatus?.status ?? "stopped")}>
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">RUNTIME DURABLE EVENT FEED</span>
+                <h3>
+                  {runtimeEventStatus?.status === "healthy"
+                    ? "AgentRequest event replay is healthy"
+                    : runtimeEventStatus?.status === "needs_attention"
+                      ? "Reconciliation required"
+                      : runtimeEventStatus?.status === "degraded"
+                        ? "Event feed temporarily degraded"
+                        : runtimeEventStatus?.status === "unsupported"
+                          ? "Runtime event extension unavailable"
+                          : "Event feed stopped"}
+                </h3>
+              </div>
+              <span className={"neutral-pill event-feed-status " + (runtimeEventStatus?.status ?? "stopped")}>
+                {(runtimeEventStatus?.status ?? "stopped").replaceAll("_", " ")}
+              </span>
+            </div>
+
+            {runtimeEventNeedsAttention ? (
+              <div className="runtime-event-reconciliation">
+                <AlertTriangle size={20} />
+                <div>
+                  <strong>
+                    {runtimeEventStatus?.reconciliation?.reasonCode ?? "RECONCILIATION_REQUIRED"}
+                  </strong>
+                  <p>
+                    {runtimeEventStatus?.reconciliation?.message ??
+                      "Desktop can no longer prove contiguous replay from its durable cursor."}
+                  </p>
+                  <div className="runtime-event-position">
+                    <span>Saved cursor</span>
+                    <code>{runtimeEventStatus?.reconciliation?.savedCursor ?? "none"}</code>
+                    <span>Saved sequence</span>
+                    <strong>{runtimeEventStatus?.reconciliation?.savedSequence ?? "—"}</strong>
+                    <span>Oldest retained</span>
+                    <strong>
+                      {runtimeEventStatus?.reconciliation?.oldestRetainedSequence ??
+                        runtimeEventStatus?.retention?.oldestSequence ??
+                        "—"}
+                    </strong>
+                  </div>
+                  <button
+                    className="secondary"
+                    onClick={async () => {
+                      await window.owlDesktop.runtimeEventRetrySavedCursor();
+                      await refresh();
+                    }}
+                  >
+                    <RefreshCw size={14} />
+                    Retry saved cursor
+                  </button>
+                  <small>
+                    Desktop will not jump to Runtime's newest cursor. Replay stays blocked until the saved checkpoint can be reconciled.
+                  </small>
+                </div>
+              </div>
+            ) : (
+              <div className="runtime-event-position">
+                <span>Durable cursor</span>
+                <code>{runtimeEventStatus?.consumer.lastCursor ?? "not established"}</code>
+                <span>Sequence</span>
+                <strong>{runtimeEventStatus?.consumer.lastSequence ?? "—"}</strong>
+                <span>Runtime retained</span>
+                <strong>
+                  {runtimeEventStatus?.retention
+                    ? `${runtimeEventStatus.retention.oldestSequence ?? "—"} → ${runtimeEventStatus.retention.newestSequence ?? "—"}`
+                    : "—"}
+                </strong>
+                <span>Last success</span>
+                <strong>{formatTime(runtimeEventStatus?.lastSuccessAt ?? undefined)}</strong>
+              </div>
+            )}
+
+            {runtimeEventStatus?.status === "degraded" && (
+              <div className="skill-warning">
+                <AlertTriangle size={16} />
+                <div>
+                  <strong>{runtimeEventStatus.lastErrorCode ?? "EVENT_SYNC_DEGRADED"}</strong>
+                  <p>{runtimeEventStatus.lastErrorMessage ?? "Desktop will retry without moving the durable cursor."}</p>
+                </div>
+              </div>
+            )}
+
+            {runtimeEventStatus?.status === "unsupported" && (
+              <div className="contract-note compact-note">
+                <ShieldCheck size={17} />
+                <div>
+                  <strong>Legacy Runtime compatibility mode.</strong>
+                  <p>
+                    This Runtime does not expose publicEventJournal v1 + agentRequestProducer v1. Desktop keeps the local Inbox but does not scrape diagnostics or Task files to invent events.
+                  </p>
+                </div>
+              </div>
+            )}
+          </section>
+
           <div className="metrics-grid agent-inbox-metrics">
             <MetricCard label="Pending" value={pendingAgentRequests.length} caption="Available to agents" icon={Inbox} />
             <MetricCard label="Claimed" value={claimedAgentRequests.length} caption="Lease-owned" icon={Activity} />
