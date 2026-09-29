@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   cloudStop: () => ipcRenderer.invoke("cloud:stop"),
   cloudSync: () => ipcRenderer.invoke("cloud:sync"),
   agentInboxSummary: () => ipcRenderer.invoke("agent-inbox:summary"),
+  runtimeEventStatus: () => ipcRenderer.invoke("runtime-events:status"),
+  runtimeEventSync: () => ipcRenderer.invoke("runtime-events:sync"),
+  runtimeEventRetrySavedCursor: () =>
+    ipcRenderer.invoke("runtime-events:retry-saved-cursor"),
   listAgentRequests: (input) => ipcRenderer.invoke("agent-inbox:list", input),
   cancelAgentRequest: (requestId) =>
     ipcRenderer.invoke("agent-inbox:cancel", requestId),

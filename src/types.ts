@@ -193,6 +193,49 @@ export type AgentInboxSummary = {
   byType: Record<string, number>;
 };
 
+export type RuntimeEventBridgeStatus = {
+  version: 1;
+  status:
+    | "stopped"
+    | "healthy"
+    | "degraded"
+    | "unsupported"
+    | "needs_attention";
+  supported: boolean | null;
+  running: boolean;
+  pollIntervalMs: number;
+  lastPollAt: string | null;
+  lastSuccessAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  acceptedEvents: number;
+  acceptedPages: number;
+  retention: null | {
+    strategy: "count";
+    maxEvents: number;
+    oldestSequence: number | null;
+    newestSequence: number | null;
+    oldestCursor: string | null;
+    newestCursor: string | null;
+  };
+  reconciliation: null | {
+    reasonCode: string;
+    message: string;
+    detectedAt: string;
+    lastObservedAt?: string;
+    savedCursor: string | null;
+    savedSequence: number | null;
+    requestedSequence?: number;
+    oldestRetainedSequence?: number;
+    pageNextCursor?: string;
+  };
+  consumer: {
+    lastSequence: number | null;
+    lastCursor: string | null;
+    error?: string;
+  };
+};
+
 export type RuntimeSnapshot = {
   mode: "live" | "offline";
   checkedAt: string;
@@ -223,6 +266,7 @@ export type RuntimeSnapshot = {
   tunnel: TunnelStatus;
   cloud: CloudBridgeStatus;
   agentInbox: AgentInboxSummary;
+  runtimeEvents: RuntimeEventBridgeStatus;
   accounts: AccountMeta[];
   activity: ActivityEntry[];
 };

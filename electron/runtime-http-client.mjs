@@ -58,6 +58,11 @@ export class RuntimeHttpClient {
     return { ...info, transport: "http" };
   }
   health() { return this.invoke("health", { op: "status" }); }
+  listEvents(request = {}) {
+    return this.invoke("events.list", request, {
+      timeoutMs: 10_000,
+    });
+  }
   tasks() { return this.invoke("tasks.list"); }
   approvals() { return this.invoke("approvals.list", {}); }
   processes() { return this.invoke("process", { op: "list" }); }

@@ -69,13 +69,17 @@ This asks an agent to inspect/reconcile the ambiguity. It never authorizes autom
 
 ## Validation
 
-Current evidence:
+Current PR evidence:
 
 ~~~text
-43 / 43 unit tests PASS
+13 test files PASS
+71 / 71 unit tests PASS
 npm run build PASS
 npm run verify:agent-inbox-e2e PASS
-npm run verify:local-e2e PASS
+npm run verify:runtime-agent-request-consumer PASS
+npm run verify:runtime-agent-request-live PASS
+runtime-agent-request-integration PASS
+runtime-1x-skill-integration PASS
 ~~~
 
 Agent Inbox E2E proves:
@@ -86,20 +90,52 @@ Agent Inbox E2E proves:
 - claim survives transport reconnect;
 - completion persists durably.
 
-## Runtime coordination pending
+## Runtime AgentRequest coordination
 
-Runtime should not create its own Agent Inbox.
+Runtime does not create a second Agent Inbox.
 
-CR-DESKTOP-010 requests durable/replayable Runtime producer events:
+The Runtime → Desktop path is now implemented through the public durable event
+journal:
+
+~~~text
+Runtime canonical Candidate state
+→ transactional AgentRequest outbox
+→ durable public event journal
+→ events.list
+→ Desktop durable cursor
+→ local Agent Inbox
+~~~
+
+Consumed event types:
 
 ~~~text
 agent_request.proposed
 agent_request.withdrawn
 ~~~
 
-Desktop materializes those events into its one canonical local Inbox.
+Desktop feature-detects publicEventJournal v1 and agentRequestProducer v1.
 
-This depends on the canonical Runtime event-stream work in CR-DESKTOP-002.
+The event bridge is restart-safe and at-least-once/idempotent. It requests both
+AgentRequest event types as one contiguous channel.
+
+If replay continuity can no longer be proven, Desktop enters persistent
+needs_attention instead of skipping forward. This includes retention gaps,
+cursor-ahead conditions, sequence gaps/conflicts, malformed event positions,
+lost local checkpoints, and a first replay whose retained history already
+starts above sequence 1.
+
+There is no skip-to-latest path. The current operator action only retries the
+same saved cursor.
+
+Live cross-repository acceptance passed against Runtime commit:
+
+~~~text
+a44c5d26636c71faf8a8c146ef43e2af71332b11
+~~~
+
+The live gate proves proposal materialization, restart replay, withdrawal,
+CURSOR_EXPIRED reconciliation, blocked polling, same-cursor retry, and
+first-checkpoint truncation protection.
 
 ## Future routing
 

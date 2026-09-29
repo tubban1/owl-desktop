@@ -6,6 +6,7 @@ import type {
   CloudBridgeStatus,
   DesktopEnvironment,
   HostStatus,
+  RuntimeEventBridgeStatus,
   RuntimeSnapshot,
   SecretMeta,
   Settings,
@@ -30,6 +31,9 @@ declare global {
       cloudStop(): Promise<CloudBridgeStatus>;
       cloudSync(): Promise<CloudBridgeStatus>;
       agentInboxSummary(): Promise<AgentInboxSummary>;
+      runtimeEventStatus(): Promise<RuntimeEventBridgeStatus>;
+      runtimeEventSync(): Promise<RuntimeEventBridgeStatus>;
+      runtimeEventRetrySavedCursor(): Promise<RuntimeEventBridgeStatus>;
       listAgentRequests(input?: {
         statuses?: AgentRequestStatus[];
         limit?: number;

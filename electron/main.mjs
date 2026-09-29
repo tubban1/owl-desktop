@@ -12,6 +12,8 @@ import { CloudHttpClient } from "./services/cloud-http-client.mjs";
 import { CloudBridgeStore } from "./services/cloud-bridge-store.mjs";
 import { CloudBridgeService } from "./services/cloud-bridge-service.mjs";
 import { AgentInboxStore } from "./services/agent-inbox-store.mjs";
+import { RuntimeAgentRequestEventConsumer } from "./services/runtime-agent-request-consumer.mjs";
+import { RuntimeAgentRequestEventBridge } from "./services/runtime-agent-request-event-bridge.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow;
@@ -21,6 +23,10 @@ let tunnelSupervisor;
 let cloudBridgeStore;
 let agentInbox;
 let cloudBridge;
+let runtimeAgentRequestConsumer;
+let runtimeAgentRequestEventBridge;
+let runtimeAgentRequestConsumerStateFile;
+let runtimeAgentRequestBridgeStateFile;
 let cloudBridgeState = {
   status: "stopped",
   running: false,
@@ -72,6 +78,55 @@ function runtimeClient() {
 
 function skillManagerPort() {
   return new RuntimeSkillManagerPort({ client: runtimeClient() });
+}
+
+function runtimeEventBridgeSnapshot() {
+  return runtimeAgentRequestEventBridge?.snapshot() ?? {
+    version: 1,
+    status: "stopped",
+    supported: null,
+    running: false,
+    pollIntervalMs: 3000,
+    lastPollAt: null,
+    lastSuccessAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    acceptedEvents: 0,
+    acceptedPages: 0,
+    retention: null,
+    reconciliation: null,
+    consumer: {
+      lastSequence: null,
+      lastCursor: null,
+    },
+  };
+}
+
+function createRuntimeEventBridge() {
+  runtimeAgentRequestEventBridge?.stop();
+  runtimeAgentRequestEventBridge = new RuntimeAgentRequestEventBridge({
+    client: runtimeClient(),
+    consumer: runtimeAgentRequestConsumer,
+    inbox: agentInbox,
+    stateFile: runtimeAgentRequestBridgeStateFile,
+    pollIntervalMs: 3000,
+    pageLimit: 100,
+    onEvent(level, message, meta) {
+      record(level, "runtime-events", message, meta);
+    },
+  });
+  return runtimeAgentRequestEventBridge;
+}
+
+async function startRuntimeEventBridge() {
+  if (!runtimeAgentRequestConsumer) return runtimeEventBridgeSnapshot();
+  const bridge = createRuntimeEventBridge();
+  return await bridge.start();
+}
+
+function stopRuntimeEventBridge() {
+  runtimeAgentRequestEventBridge?.stop();
+  return runtimeEventBridgeSnapshot();
 }
 
 function mcpToken() {
@@ -362,6 +417,7 @@ async function runtimeSnapshot() {
       highestPriority: null,
       byType: {},
     },
+    runtimeEvents: runtimeEventBridgeSnapshot(),
     accounts: identityVault?.list() ?? [],
     activity: activity.slice(0, 50),
   };
@@ -439,6 +495,22 @@ function registerIpc() {
       ],
       limit: input?.limit ?? 100,
     }) ?? []);
+  ipcMain.handle("runtime-events:status", () =>
+    runtimeEventBridgeSnapshot());
+  ipcMain.handle("runtime-events:sync", async () => {
+    if (!runtimeAgentRequestEventBridge) {
+      const settings = store.getSettings();
+      if (!settings.autoConnectRuntime) return runtimeEventBridgeSnapshot();
+      await startRuntimeEventBridge();
+    }
+    return await runtimeAgentRequestEventBridge.syncOnce();
+  });
+  ipcMain.handle("runtime-events:retry-saved-cursor", async () => {
+    if (!runtimeAgentRequestEventBridge) {
+      await startRuntimeEventBridge();
+    }
+    return await runtimeAgentRequestEventBridge.retrySavedCursor();
+  });
   ipcMain.handle("agent-inbox:cancel", (_event, requestId) => {
     const request = agentInbox?.cancel(requestId, {
       reasonCode: "CANCELLED_BY_USER",
@@ -608,6 +680,16 @@ function registerIpc() {
       await startMcp();
     }
     if (
+      "runtimeBaseUrl" in (patch ?? {}) ||
+      "autoConnectRuntime" in (patch ?? {})
+    ) {
+      if (next.autoConnectRuntime) {
+        await startRuntimeEventBridge();
+      } else {
+        stopRuntimeEventBridge();
+      }
+    }
+    if (
       "tunnelEnabled" in (patch ?? {}) ||
       "tunnelBinaryPath" in (patch ?? {}) ||
       "tunnelId" in (patch ?? {}) ||
@@ -655,6 +737,10 @@ function registerIpc() {
     ) {
       await startMcp();
     }
+    if (meta.name === "OWL_RUNTIME_API_TOKEN") {
+      const settings = store.getSettings();
+      if (settings.autoConnectRuntime) await startRuntimeEventBridge();
+    }
     if (meta.name === "OWL_TUNNEL_API_KEY") {
       const settings = store.getSettings();
       if (settings.tunnelEnabled) {
@@ -681,6 +767,10 @@ function registerIpc() {
       existing?.name === "OWL_MCP_API_TOKEN"
     ) {
       await startMcp();
+    }
+    if (existing?.name === "OWL_RUNTIME_API_TOKEN") {
+      const settings = store.getSettings();
+      if (settings.autoConnectRuntime) await startRuntimeEventBridge();
     }
     if (existing?.name === "OWL_TUNNEL_API_KEY") {
       await tunnelSupervisor.stop();
@@ -713,6 +803,19 @@ if (!hasLock) {
       file: path.join(app.getPath("userData"), "agent-inbox.json"),
     });
     agentInbox.recoverExpiredClaims();
+    runtimeAgentRequestConsumerStateFile = path.join(
+      app.getPath("userData"),
+      "runtime-agent-request-consumer.json",
+    );
+    runtimeAgentRequestBridgeStateFile = path.join(
+      app.getPath("userData"),
+      "runtime-agent-request-event-bridge.json",
+    );
+    runtimeAgentRequestConsumer = new RuntimeAgentRequestEventConsumer({
+      inbox: agentInbox,
+      stateFile: runtimeAgentRequestConsumerStateFile,
+    });
+    createRuntimeEventBridge();
     tunnelSupervisor = new TunnelSupervisor({
       onEvent(level, message, meta) {
         record(level, "tunnel", message, meta);
@@ -722,6 +825,14 @@ if (!hasLock) {
     record("info", "desktop", "OWL Desktop started", { version: app.getVersion() });
     await startMcp();
     const settings = store.getSettings();
+    if (settings.autoConnectRuntime) {
+      await startRuntimeEventBridge().catch((error) => {
+        record("error", "runtime-events", "Runtime event bridge start failed", {
+          code: error?.code ?? null,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
     if (settings.tunnelEnabled && settings.tunnelAutoStart) {
       await startTunnel().catch((error) => {
         record("error", "tunnel", "Tunnel auto-start failed", {
@@ -746,6 +857,7 @@ if (!hasLock) {
 
   app.on("before-quit", () => {
     void cloudBridge?.stop();
+    runtimeAgentRequestEventBridge?.stop();
     void tunnelSupervisor?.stop();
     void stopMcp();
   });

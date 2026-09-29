@@ -38,6 +38,7 @@ See:
 - [Runtime Host + Tunnel Consumer v1](docs/contracts/RUNTIME_HOST_TUNNEL_CONSUMER_V1.md)
 - [Cloud Bridge Contract](docs/contracts/CLOUD_BRIDGE_CONTRACT_V1.md)
 - [AgentRequest v1](docs/contracts/AGENT_REQUEST_V1.md)
+- [Runtime AgentRequest Consumer v1](docs/contracts/RUNTIME_AGENT_REQUEST_CONSUMER_V1.md)
 - [Agent Inbox M1 Status](docs/integration/AGENT_INBOX_M1_STATUS.md)
 - [Cloud Bridge M1 Status](docs/integration/CLOUD_BRIDGE_M1_STATUS.md)
 - [Desktop → Cloud Contract Requests](docs/contracts/DESKTOP_CLOUD_CONTRACT_REQUESTS.md)
@@ -76,6 +77,8 @@ npm run build
 npm run verify:local-e2e
 npm run verify:cloud-bridge-live
 npm run verify:agent-inbox-e2e
+npm run verify:runtime-agent-request-consumer
+npm run verify:runtime-agent-request-live
 npm run verify:skill-discovery-live
 ```
 

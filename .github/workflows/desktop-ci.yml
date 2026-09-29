@@ -34,6 +34,9 @@ jobs:
       - name: Agent Inbox MCP contract
         run: npm run verify:agent-inbox-e2e
 
+      - name: Runtime AgentRequest consumer contract
+        run: npm run verify:runtime-agent-request-consumer
+
   runtime-1x-skill-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -99,4 +102,73 @@ jobs:
         run: |
           if [ -f "$RUNNER_TEMP/owl-runtime.pid" ]; then
             kill "$(cat "$RUNNER_TEMP/owl-runtime.pid")" 2>/dev/null || true
+          fi
+
+
+  runtime-agent-request-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Desktop
+        uses: actions/checkout@v4
+
+      - name: Checkout Runtime public event producer
+        uses: actions/checkout@v4
+        with:
+          repository: tubban1/owl-runtime
+          ref: a44c5d26636c71faf8a8c146ef43e2af71332b11
+          path: owl-runtime
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Desktop dependencies
+        run: npm ci
+
+      - name: Install Runtime dependencies
+        working-directory: owl-runtime
+        run: npm ci
+
+      - name: Start Runtime public event API
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd owl-runtime
+            export PORT=8788
+            export AGENTOS_STATE_ROOT="$RUNNER_TEMP/owl-runtime-agent-event-state"
+            export ALLOWED_DIRECTORIES="$GITHUB_WORKSPACE/owl-runtime"
+            export RUNTIME_PUBLIC_EVENT_RETENTION_MAX=2
+            npm run start:source
+          ) > "$RUNNER_TEMP/owl-runtime-agent-events.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/owl-runtime-agent-events.pid"
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8788/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          cat "$RUNNER_TEMP/owl-runtime-agent-events.log"
+          exit 1
+
+      - name: Desktop → Runtime AgentRequest durable event E2E
+        env:
+          OWL_RUNTIME_URL: http://127.0.0.1:8788
+          OWL_RUNTIME_FIXTURE_REPO: ${{ github.workspace }}/owl-runtime
+        run: npm run verify:runtime-agent-request-live
+
+      - name: Runtime event log
+        if: always()
+        run: cat "$RUNNER_TEMP/owl-runtime-agent-events.log" || true
+
+      - name: Stop Runtime
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/owl-runtime-agent-events.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/owl-runtime-agent-events.pid")" 2>/dev/null || true
           fi

@@ -1,0 +1,83 @@
+[
+  {
+    "eventType": "agent_request.proposed",
+    "eventId": "evt_agent_100",
+    "proposalId": "proposal_skill_123_r2",
+    "sequence": 100,
+    "cursor": "runtime-events:100",
+    "requestType": "skill.repair",
+    "priority": "high",
+    "subject": {
+      "kind": "skill_candidate",
+      "id": "candidate_123",
+      "revision": "2"
+    },
+    "reasonCode": "VALIDATION_FAILED",
+    "errorCodes": [
+      "USER_SKILL_PRIMITIVE_ABI_UNSUPPORTED"
+    ],
+    "contextRefs": [
+      {
+        "kind": "skill_candidate",
+        "id": "candidate_123",
+        "revision": "2"
+      }
+    ],
+    "allowedActions": [
+      "candidate.inspect",
+      "candidate.revise",
+      "candidate.validate"
+    ],
+    "requiresUserConfirmation": true,
+    "dedupeKey": "runtime:agent_request_v1:skill_candidate:candidate_123:r2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:validation_failed",
+    "occurredAt": "2026-09-29T17:00:00.000Z"
+  },
+  {
+    "eventType": "agent_request.withdrawn",
+    "eventId": "evt_agent_101",
+    "proposalId": "proposal_skill_123_r2",
+    "sequence": 101,
+    "cursor": "runtime-events:101",
+    "subject": {
+      "kind": "skill_candidate",
+      "id": "candidate_123",
+      "revision": "2"
+    },
+    "reasonCode": "ISSUE_RESOLVED",
+    "dedupeKey": "runtime:agent_request_v1:skill_candidate:candidate_123:r2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:validation_failed",
+    "occurredAt": "2026-09-29T17:01:00.000Z"
+  },
+  {
+    "eventType": "agent_request.proposed",
+    "eventId": "evt_agent_102",
+    "proposalId": "proposal_skill_123_r3",
+    "sequence": 102,
+    "cursor": "runtime-events:102",
+    "requestType": "skill.repair",
+    "priority": "normal",
+    "subject": {
+      "kind": "skill_candidate",
+      "id": "candidate_123",
+      "revision": "3"
+    },
+    "reasonCode": "VALIDATION_FAILED",
+    "errorCodes": [
+      "USER_SKILL_EMBEDDED_SECRET_BLOCKED"
+    ],
+    "contextRefs": [
+      {
+        "kind": "skill_candidate",
+        "id": "candidate_123",
+        "revision": "3"
+      }
+    ],
+    "allowedActions": [
+      "candidate.inspect",
+      "candidate.revise",
+      "candidate.validate"
+    ],
+    "requiresUserConfirmation": true,
+    "dedupeKey": "runtime:agent_request_v1:skill_candidate:candidate_123:r3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:validation_failed",
+    "occurredAt": "2026-09-29T17:02:00.000Z"
+  }
+]

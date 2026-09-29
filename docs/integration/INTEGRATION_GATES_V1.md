@@ -60,6 +60,15 @@ Desktop tests against the minimum and preferred Runtime API versions.
 
 Must not import Runtime source or state.
 
+Current additive consumer gates include:
+
+- User Skill discovery/Candidate/Registry through public Runtime RPC;
+- durable AgentRequest producer events through events.list;
+- exact sequence/cursor replay;
+- restart-safe consumer checkpoint;
+- explicit needs_attention on retention/cursor gaps;
+- no skip-to-latest recovery path.
+
 Owner: **owl-desktop**.
 
 ### OWL Desktop ↔ Cloud
