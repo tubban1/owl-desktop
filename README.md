@@ -1,4 +1,4 @@
-# OWL Desktop
+# OWL LAB Desktop
 
 OWL Desktop is the local product shell for the OWL platform.
 
@@ -85,3 +85,6 @@ npm run verify:skill-discovery-live
 The Local E2E verifier expects Runtime to allow the target repository through `ALLOWED_DIRECTORIES`.
 
 The Electron renderer has no Node integration. Runtime credentials and project secrets remain in the Electron main process and are persisted only through OS-backed encryption.
+## OWL LAB product governance
+
+OWL LAB is the parent brand. This repository is the shipped local integration host. See [Product Governance](docs/platform/OWL_LAB_PRODUCT_GOVERNANCE_V1.md), [Brand Standard](docs/platform/OWL_LAB_BRAND_STANDARD_V1.md), and [Desktop Account & Runtime Access](docs/platform/OWL_LAB_DESKTOP_ACCESS_V1.md).
