@@ -218,3 +218,74 @@ Acceptance:
 10. Repeated-work discovery may propose Candidates, but M2/M3 memory alone never silently becomes an installed Skill.
 
 See `docs/skills/SKILL_MANAGER_V1.md` for the Desktop product contract.
+
+## CR-DESKTOP-010 — Runtime AgentRequest producer events
+
+**Owner:** owl-runtime 1.x.
+
+**Depends on:** CR-DESKTOP-002 durable/replayable Runtime event streaming.
+
+**Need:** Runtime must be able to surface deterministic states that require semantic reasoning without embedding an LLM and without creating a second Agent Inbox.
+
+Runtime remains the owner of the underlying Task / Skill Candidate / verification / execution truth. Desktop remains the owner of local AgentRequest coordination state.
+
+Recommended event model:
+
+~~~text
+Runtime canonical state
+  -> agent_request.proposed
+  -> Desktop Agent Inbox
+
+Runtime issue resolved independently
+  -> agent_request.withdrawn
+  -> Desktop cancels matching pending request
+~~~
+
+A proposal should contain only structured coordination metadata:
+
+- stable proposal ID;
+- event ID / sequence / cursor;
+- request type;
+- priority;
+- subject reference (kind, id, optional revision);
+- reason code;
+- bounded error codes;
+- context references to canonical Runtime objects;
+- allowed coordination actions;
+- whether later consequential work still requires user confirmation;
+- deterministic dedupe key;
+- created/updated timestamp.
+
+It must not contain arbitrary prompt text, hidden instructions, secrets, raw document/message bodies, copied source code when a canonical Runtime reference exists, or permission grants.
+
+Candidate producer examples:
+
+- Skill Candidate validation requires semantic repair/generalization;
+- repeated verified workflows are strong enough to propose Skill generalization;
+- a Task failed in a way that deterministic retry cannot resolve;
+- a verification mismatch needs explanation/replanning;
+- an unresolved ambiguity needs an LLM but is safe to defer.
+
+Do not propose AgentRequests for deterministic retries, normal approval decisions, permission escalation, or cases Runtime can resolve itself.
+
+Required invariants:
+
+1. Runtime does not persist Desktop claim/lease/completion state.
+2. Desktop does not mutate Runtime canonical Task/Candidate state when an AgentRequest is claimed/completed.
+3. Runtime events are durable/replayable so Desktop restart does not lose a proposal.
+4. Duplicate/replayed proposal events materialize one Desktop AgentRequest.
+5. A Runtime withdrawal cancels only the matching still-pending request; it must not erase audit history.
+6. Agent completion does not imply Runtime success; Runtime state must independently confirm the result.
+7. AgentRequest never bypasses Runtime policy, Approval, Resource Arbiter, Verifier, Skill promotion gate, or user confirmation.
+
+Acceptance:
+
+- Runtime can emit one deterministic proposal from a test Task/Candidate condition.
+- Desktop can materialize it once through event replay.
+- ChatGPT can discover/claim it through OWL MCP.
+- ChatGPT can use normal Runtime APIs to repair/replan.
+- Runtime independently validates the result.
+- Desktop marks coordination complete only after the referenced work is actually handled.
+- Restart/reconnect/replay does not duplicate the request.
+
+See docs/contracts/AGENT_REQUEST_V1.md.

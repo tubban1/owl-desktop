@@ -11,6 +11,7 @@ export async function startOwlMcpHttpServer({
   runtimeBaseUrl = "http://127.0.0.1:8788",
   runtimeToken,
   mcpToken,
+  agentInbox,
   onEvent = () => {},
 } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -124,6 +125,7 @@ export async function startOwlMcpHttpServer({
             transportSessionId,
             runtimeRequestId,
             signal: requestAbort.signal,
+            agentInbox,
             onEvent,
           },
           () => active.transport.handleRequest(req, res, req.body),
@@ -161,6 +163,12 @@ export async function startOwlMcpHttpServer({
         runtimeUrl: runtimeBaseUrl,
         transportSessions: sessions.size,
         ownerHeader: "x-owl-owner-id",
+        agentRequests: agentInbox?.summary() ?? {
+          pending: 0,
+          claimed: 0,
+          highestPriority: null,
+          byType: {},
+        },
       });
     } catch (error) {
       res.status(503).json({

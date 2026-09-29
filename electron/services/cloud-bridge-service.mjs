@@ -212,6 +212,7 @@ export class CloudBridgeService {
     telemetryEnabled = true,
     buildPresence = async () => ({}),
     onEvent = () => {},
+    onAgentRequest = () => {},
   }) {
     this.client = client;
     this.runtimeClient = runtimeClient;
@@ -227,6 +228,7 @@ export class CloudBridgeService {
     this.telemetryEnabled = telemetryEnabled !== false;
     this.buildPresence = buildPresence;
     this.onEvent = onEvent;
+    this.onAgentRequest = onAgentRequest;
     this.running = false;
     this.timer = null;
     this.syncing = false;
@@ -266,6 +268,23 @@ export class CloudBridgeService {
         { reason: "desktop_restart_during_runtime_request" },
         `uncertain:${commandId}`,
       );
+      this.onAgentRequest({
+        type: "cloud.command.reconcile",
+        producer: "desktop",
+        priority: "high",
+        subject: { kind: "cloud_command", id: commandId },
+        reasonCode: "DESKTOP_RESTART_DURING_RUNTIME_REQUEST",
+        errorCodes: ["COMMAND_COMPLETION_UNCERTAIN"],
+        contextRefs: [{ kind: "cloud_command", id: commandId }],
+        allowedActions: [
+          "agent.inspect",
+          "runtime.diagnostics",
+          "cloud.command.reconcile",
+        ],
+        requiresUserConfirmation: true,
+        correlationId: commandId,
+        dedupeKey: `cloud-command:${commandId}:uncertain`,
+      });
     }
 
     this.running = true;
@@ -509,6 +528,23 @@ export class CloudBridgeService {
         }
 
         this.store.markUncertain(commandId, errorCode(error));
+        this.onAgentRequest({
+          type: "cloud.command.reconcile",
+          producer: "desktop",
+          priority: "high",
+          subject: { kind: "cloud_command", id: commandId },
+          reasonCode: "RUNTIME_COMPLETION_UNCERTAIN",
+          errorCodes: [errorCode(error)],
+          contextRefs: [{ kind: "cloud_command", id: commandId }],
+          allowedActions: [
+            "agent.inspect",
+            "runtime.diagnostics",
+            "cloud.command.reconcile",
+          ],
+          requiresUserConfirmation: true,
+          correlationId: commandId,
+          dedupeKey: `cloud-command:${commandId}:uncertain`,
+        });
         this.queueIntegrationEvent(
           "desktop.cloud.command.uncertain",
           commandId,

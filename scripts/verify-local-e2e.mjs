@@ -40,10 +40,20 @@ try {
     "primitive_call",
     "skill_run",
     "git_status",
+    "agent_requests_status",
+    "agent_requests_list",
+    "agent_requests_claim",
+    "agent_requests_release",
+    "agent_requests_complete",
   ]) {
     if (!names.has(required)) {
       throw new Error(`Missing MCP tool: ${required}`);
     }
+  }
+
+  const instructions = first.client.getInstructions();
+  if (!instructions?.includes("AgentRequests")) {
+    throw new Error("OWL MCP server instructions do not describe Agent Inbox.");
   }
 
   const info = await first.client.callTool({
@@ -51,6 +61,16 @@ try {
     arguments: {},
   });
   if (info.isError) throw new Error(textResult(info));
+
+  const inbox = await first.client.callTool({
+    name: "agent_requests_status",
+    arguments: {},
+  });
+  if (inbox.isError) throw new Error(textResult(inbox));
+  const inboxStatus = JSON.parse(textResult(inbox));
+  if (inboxStatus.available !== true) {
+    throw new Error("Agent Inbox is not available through OWL MCP.");
+  }
 
   const status = await first.client.callTool({
     name: "git_status",
@@ -78,6 +98,7 @@ try {
 
   console.log("PASS tool discovery");
   console.log("PASS RuntimeClient info");
+  console.log("PASS MCP Agent Inbox discovery");
   console.log("PASS MCP → Runtime git.query → local repository");
   console.log("PASS deterministic read-only retry");
 } finally {

@@ -66,11 +66,13 @@ function createService({
     createTask: vi.fn(async () => ({ id: "task_1" })),
   },
   store = createStore(),
+  onAgentRequest = vi.fn(),
 } = {}) {
   return {
     client,
     runtimeClient,
     store,
+    onAgentRequest,
     service: new CloudBridgeService({
       client,
       runtimeClient,
@@ -83,6 +85,7 @@ function createService({
         capabilities: { cloudBridge: "m1-polling-v1" },
         runtimeCompatibility: { runtimeApiVersion: "0.1" },
       }),
+      onAgentRequest,
     }),
   };
 }
@@ -301,6 +304,17 @@ describe("CloudBridgeService", () => {
       status: "uncertain",
       lastErrorCode: "ECONNRESET",
     });
+    expect(setup.onAgentRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "cloud.command.reconcile",
+        producer: "desktop",
+        priority: "high",
+        subject: { kind: "cloud_command", id: "cmd_runtime_unknown" },
+        reasonCode: "RUNTIME_COMPLETION_UNCERTAIN",
+        errorCodes: ["ECONNRESET"],
+        dedupeKey: "cloud-command:cmd_runtime_unknown:uncertain",
+      }),
+    );
   });
 
   it("rejects an explicit Runtime response and does not retry it as uncertain", async () => {

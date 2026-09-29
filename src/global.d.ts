@@ -1,5 +1,8 @@
 import type {
   AccountMeta,
+  AgentInboxSummary,
+  AgentRequest,
+  AgentRequestStatus,
   CloudBridgeStatus,
   DesktopEnvironment,
   HostStatus,
@@ -20,6 +23,12 @@ declare global {
       cloudStart(): Promise<CloudBridgeStatus>;
       cloudStop(): Promise<CloudBridgeStatus>;
       cloudSync(): Promise<CloudBridgeStatus>;
+      agentInboxSummary(): Promise<AgentInboxSummary>;
+      listAgentRequests(input?: {
+        statuses?: AgentRequestStatus[];
+        limit?: number;
+      }): Promise<AgentRequest[]>;
+      cancelAgentRequest(requestId: string): Promise<AgentRequest | null>;
       skillSnapshot(): Promise<SkillManagerSnapshot>;
       skillDryRun(skillId: string, args: Record<string, unknown>): Promise<unknown>;
       skillRun(skillId: string, args: Record<string, unknown>): Promise<unknown>;

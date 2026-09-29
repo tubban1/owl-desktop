@@ -17,6 +17,8 @@ OWL Desktop is the **local product and integration boundary**. It is not the exe
 - OWL Helper / Runtime Host lifecycle UX
 - OWL Tunnel client packaging and lifecycle
 - OWL Cloud Bridge client
+- canonical local Agent Inbox coordination state: persistence, dedupe, claim leases and completion status
+- MCP AgentRequest discovery/claim UX for ChatGPT/AI consumers
 - backend selection and compatibility presentation
 - local product update UX
 - local integration tests across MCP → Runtime
@@ -31,6 +33,8 @@ OWL Desktop is the **local product and integration boundary**. It is not the exe
 - Observation / Verifier semantics
 - execution Approval receipts
 - Runtime retry/recovery semantics
+- Runtime canonical issue/task/candidate truth that may produce AgentRequest proposals
+- LLM semantic repair/reasoning itself
 - Account / Organization truth
 - Cloud RBAC/effective-access evaluation
 - Device grants

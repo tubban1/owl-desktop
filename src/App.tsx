@@ -2,16 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity, Boxes, CheckCircle2, Cloud, Cpu, Gauge, HardDrive,
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
-  Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle,
+  Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
 } from "lucide-react";
-import type { AccountMeta, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
+import type { AccountMeta, AgentRequest, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
 
-type Page = "overview" | "sessions" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
+type Page = "overview" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
 
 const nav = [
   { id: "overview" as Page, label: "Overview", icon: Gauge },
   { id: "sessions" as Page, label: "Sessions", icon: ListTree },
+  { id: "agent-inbox" as Page, label: "Agent Inbox", icon: Inbox },
   { id: "logs" as Page, label: "Live Logs", icon: Terminal },
   { id: "runtime" as Page, label: "Runtime", icon: Boxes },
   { id: "skills" as Page, label: "Skills", icon: Puzzle },
@@ -46,6 +47,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [accounts, setAccounts] = useState<AccountMeta[]>([]);
+  const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
   const [busy, setBusy] = useState(false);
   const [secretDraft, setSecretDraft] = useState({ name: "", project: "global", value: "" });
   const [accountDraft, setAccountDraft] = useState({
@@ -65,8 +67,16 @@ export default function App() {
 
   const refresh = async () => {
     setBusy(true);
-    try { setSnapshot(await window.owlDesktop.refreshRuntime()); }
-    finally { setBusy(false); }
+    try {
+      const [nextSnapshot, nextAgentRequests] = await Promise.all([
+        window.owlDesktop.refreshRuntime(),
+        window.owlDesktop.listAgentRequests({ limit: 100 }),
+      ]);
+      setSnapshot(nextSnapshot);
+      setAgentRequests(nextAgentRequests);
+    } finally {
+      setBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -75,11 +85,13 @@ export default function App() {
       window.owlDesktop.getSettings(),
       window.owlDesktop.listSecrets(),
       window.owlDesktop.listAccounts(),
-    ]).then(([nextEnv, nextSettings, nextSecrets, nextAccounts]) => {
+      window.owlDesktop.listAgentRequests({ limit: 100 }),
+    ]).then(([nextEnv, nextSettings, nextSecrets, nextAccounts, nextAgentRequests]) => {
       setEnv(nextEnv);
       setSettings(nextSettings);
       setSecrets(nextSecrets);
       setAccounts(nextAccounts);
+      setAgentRequests(nextAgentRequests);
       if (nextSettings.autoConnectRuntime) void refresh();
     });
   }, []);
@@ -138,6 +150,14 @@ export default function App() {
   };
 
   const activityRows = useMemo(() => snapshot?.activity ?? [], [snapshot]);
+  const pendingAgentRequests = useMemo(
+    () => agentRequests.filter((request) => request.status === "pending"),
+    [agentRequests],
+  );
+  const claimedAgentRequests = useMemo(
+    () => agentRequests.filter((request) => request.status === "claimed"),
+    [agentRequests],
+  );
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -145,7 +165,7 @@ export default function App() {
       <div className="brand"><div className="brand-mark">O</div><div><strong>OWL</strong><span>Desktop</span></div></div>
       <nav>{nav.map((item) => {
         const Icon = item.icon;
-        return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={17} /><span>{item.label}</span></button>;
+        return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={17} /><span>{item.label}</span>{item.id === "agent-inbox" && pendingAgentRequests.length > 0 ? <span className="nav-badge">{pendingAgentRequests.length}</span> : null}</button>;
       })}</nav>
       <div className="sidebar-bottom">
         <div className="device-card"><div className="device-dot" /><div><strong>This Mac</strong><span>{env ? env.platform + " · " + env.arch : "Loading…"}</span></div></div>
@@ -179,6 +199,7 @@ export default function App() {
                 <div><span className="component-icon"><Boxes size={17} /></span><p><strong>OWL Runtime</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
                 <div><span className="component-icon"><Terminal size={17} /></span><p><strong>OWL MCP</strong><small>{snapshot?.mcp.url ?? snapshot?.mcp.error ?? "Desktop adapter boundary"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
                 <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL Cloud Bridge</strong><small>{snapshot?.cloud.deviceId ?? "Optional for local execution"}</small></p>{cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}</div>
+                <div><span className="component-icon"><Inbox size={17} /></span><p><strong>Agent Inbox</strong><small>Structured work waiting for an LLM/agent</small></p><span className="neutral-pill">{pendingAgentRequests.length} pending</span></div>
               </div>
             </section>
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RECENT ACTIVITY</span><h3>Local events</h3></div><button className="text-button" onClick={() => setPage("logs")}>View logs</button></div>
@@ -197,6 +218,91 @@ export default function App() {
           </section>
           <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RUNTIME PROJECTION</span><h3>Processes visible to this consumer</h3></div></div><pre className="code-block">{pretty(snapshot?.processes)}</pre></section>
           <div className="contract-note"><ShieldCheck size={17} /><div><strong>Transport sessions are not Runtime session truth.</strong><p>Desktop can show its own MCP connections, but canonical cross-session execution inventory and event streaming remain CR-DESKTOP-001/002.</p></div></div>
+        </>}
+
+        {page === "agent-inbox" && <>
+          <SectionHeader
+            title="Agent Inbox"
+            description="Structured reasoning work waiting for ChatGPT or another AI agent. Requests never override user intent or Runtime policy."
+            action={<button className="secondary" onClick={refresh}><RefreshCw size={15} />Refresh</button>}
+          />
+          <div className="metrics-grid agent-inbox-metrics">
+            <MetricCard label="Pending" value={pendingAgentRequests.length} caption="Available to agents" icon={Inbox} />
+            <MetricCard label="Claimed" value={claimedAgentRequests.length} caption="Lease-owned" icon={Activity} />
+            <MetricCard label="Completed" value={agentRequests.filter((request) => request.status === "completed").length} caption="Coordination resolved" icon={CheckCircle2} />
+            <MetricCard label="Needs confirmation" value={agentRequests.filter((request) => request.status === "pending" && request.requiresUserConfirmation).length} caption="Consequential boundary" icon={ShieldCheck} />
+          </div>
+
+          <section className="panel agent-inbox-panel">
+            <div className="panel-heading">
+              <div><span className="eyebrow">LOCAL AGENT QUEUE</span><h3>Requests</h3></div>
+              <span className="neutral-pill">{agentRequests.length} retained</span>
+            </div>
+            <div className="agent-request-list">
+              {agentRequests.map((request) => (
+                <article className={"agent-request " + request.status} key={request.requestId}>
+                  <div className="agent-request-head">
+                    <div>
+                      <span className="eyebrow">{request.producer.toUpperCase()} · {request.status.toUpperCase()}</span>
+                      <h3>{request.type}</h3>
+                    </div>
+                    <div className="agent-request-badges">
+                      <span className={"agent-priority " + request.priority}>{request.priority}</span>
+                      <span className="neutral-pill">{request.reasonCode}</span>
+                    </div>
+                  </div>
+                  <div className="agent-request-subject">
+                    <span>Subject</span>
+                    <code>{request.subject.kind}:{request.subject.id}{request.subject.revision ? "@" + request.subject.revision : ""}</code>
+                  </div>
+                  {request.errorCodes.length > 0 && (
+                    <div className="agent-chip-row">
+                      {request.errorCodes.map((code) => <code key={code}>{code}</code>)}
+                    </div>
+                  )}
+                  {request.allowedActions.length > 0 && (
+                    <div className="agent-request-actions-view">
+                      <span>Allowed coordination actions</span>
+                      <div className="agent-chip-row">
+                        {request.allowedActions.map((action) => <code key={action}>{action}</code>)}
+                      </div>
+                    </div>
+                  )}
+                  <div className="agent-request-foot">
+                    <span>Created {formatTime(request.createdAt)}</span>
+                    {request.claim && <span>Lease until {formatTime(request.claim.leaseExpiresAt)}</span>}
+                    {request.resolution && <span>Outcome: {request.resolution.outcome}</span>}
+                    {(request.status === "pending" || request.status === "claimed") && (
+                      <button
+                        className="text-button danger-text"
+                        onClick={async () => {
+                          await window.owlDesktop.cancelAgentRequest(request.requestId);
+                          setAgentRequests(await window.owlDesktop.listAgentRequests({ limit: 100 }));
+                        }}
+                      >
+                        Cancel request
+                      </button>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {agentRequests.length === 0 && (
+                <div className="agent-inbox-empty">
+                  <Inbox size={28} />
+                  <strong>No AgentRequests</strong>
+                  <span>OWL will place structured reasoning work here when a subsystem needs an LLM.</span>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <div className="contract-note">
+            <ShieldCheck size={17} />
+            <div>
+              <strong>AgentRequest is not a prompt and not an approval.</strong>
+              <p>It stores typed work references, reason/error codes and allowed coordination actions. ChatGPT claims work through MCP, then uses normal Runtime/Desktop tools to inspect and resolve it. Runtime remains the execution/validation authority.</p>
+            </div>
+          </div>
         </>}
 
         {page === "logs" && <>
