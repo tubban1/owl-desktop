@@ -1,3 +1,5 @@
+Provider telemetry transport is defined in [Provider Telemetry Consumer v1](../contracts/PROVIDER_TELEMETRY_CONSUMER_V1.md). Desktop owns Cloud transport; Runtime never receives the Cloud device credential.
+
 # OWL Platform Integration
 
 Status: **Normative integration model**.
