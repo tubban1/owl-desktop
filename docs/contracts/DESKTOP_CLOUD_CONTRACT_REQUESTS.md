@@ -1,12 +1,30 @@
 # Desktop -> OWL Cloud contract requests
 
-Status: **Active integration backlog**.
+Status: **Cloud provider contracts ready; Desktop consumer integration backlog**.
 
 These requests belong to the Cloud control-plane provider. Desktop must not patch around them by inventing Cloud semantics.
 
 ## CR-CLOUD-001 — Versioned RemoteCommand kind registry
 
-**Need:** Cloud currently models `RemoteCommand.kind` as an open string. Desktop needs a frozen mapping from Cloud command kinds to versioned payload schemas before enabling additional Runtime adapters.
+**Provider status: READY — Desktop consumer integration pending.**
+
+Cloud now publishes:
+
+- live registry: `GET /contracts/remote-command-kinds/v1`;
+- repository fixture: `owl-cloud/docs/contracts/remote-command-kinds-v1.json`;
+- normative contract: `owl-cloud/docs/contracts/REMOTE_COMMAND_PROTOCOL_V1.md`.
+
+Cloud no longer treats `RemoteCommand.kind` as an arbitrary Runtime RPC mapping. Commands carry `kind + kindVersion`, and unsupported contracts are rejected before queueing.
+
+Current frozen mapping:
+
+```text
+runtime.task.create@1
+requiredCloudAccess: run
+runtimeMapping: tasks.create
+```
+
+**Desktop remaining work:** pin/consume v1 in compatibility tests, validate `kindVersion` before touching Runtime, and reject unsupported versions without execution.
 
 Requested contract:
 
@@ -39,7 +57,37 @@ Acceptance:
 
 ## CR-CLOUD-002 — Device enrollment handoff for Desktop
 
-**Need:** Desktop needs a product-safe Cognito sign-in/bootstrap/device-registration handoff without handling provider secrets manually.
+**Provider status: READY — highest-priority Desktop implementation.**
+
+Frankfurt Cloud now exposes:
+
+- `GET /auth/config`;
+- Cognito Authorization Code flow;
+- PKCE S256;
+- public app client with no client secret;
+- callback `owl-desktop://auth/callback`;
+- logout callback `owl-desktop://auth/logout`;
+- `POST /v1/bootstrap`;
+- `POST /v1/devices`;
+- credential rotate/revoke APIs.
+
+Normative provider contract: `owl-cloud/docs/contracts/DESKTOP_ENROLLMENT_V1.md`.
+
+**Desktop remaining work:**
+
+```text
+/auth/config
+→ generate state + PKCE verifier/challenge
+→ system browser
+→ deep-link callback
+→ exchange code + verifier
+→ bootstrap
+→ register device
+→ persist deviceId as non-secret config
+→ atomically store one-time device credential in OS Vault
+```
+
+Renderer must never receive the persisted device credential after enrollment. Account logout must not implicitly revoke the enrolled device.
 
 Requested semantics:
 
@@ -62,7 +110,20 @@ Acceptance:
 
 ## CR-CLOUD-003 — Terminal command replay horizon
 
-**Need:** Desktop must retain `commandId -> Runtime identity` mappings long enough to prevent duplicate consequential execution, but an unbounded local journal is not a production retention policy.
+**Provider status: READY — Desktop journal compaction may now be implemented.**
+
+Cloud v1 freezes:
+
+- at-least-once redelivery only while a command is non-terminal;
+- after `accepted/rejected/expired/cancelled_before_accept` is committed, subsequent Cloud pulls never return that command;
+- `commandId` is globally unique and never reused;
+- re-enrollment creates a new deviceId and never retargets historical commands;
+- minimum Desktop terminal mapping retention = **604800 seconds / 7 days**;
+- `uncertain` mappings must never be automatically pruned solely because of age.
+
+The live machine-readable policy is returned by `GET /contracts/remote-command-kinds/v1`.
+
+**Desktop remaining work:** compact terminal mappings only after the 7-day minimum plus any chosen local safety margin; preserve uncertain records until reconciled/resolved.
 
 Cloud should define:
 
