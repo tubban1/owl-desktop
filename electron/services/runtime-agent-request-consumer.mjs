@@ -59,11 +59,16 @@ function parsePosition(input) {
     );
   }
   const sequence = input.sequence;
-  const cursor = requiredString(
-    input.cursor,
-    "AgentRequest event cursor",
-    220,
-  );
+  if (
+    typeof input.cursor !== "string" ||
+    !input.cursor.trim() ||
+    input.cursor.trim().length > 220
+  ) {
+    throw new Error(
+      "AGENT_REQUEST_EVENT_POSITION_INVALID: cursor must be a non-empty string up to 220 characters.",
+    );
+  }
+  const cursor = input.cursor.trim();
   const match = /^runtime-events:(\d+)$/.exec(cursor);
   if (!match || Number(match[1]) !== sequence) {
     throw new Error(
