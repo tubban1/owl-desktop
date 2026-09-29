@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
-const SUPPORTED_COMMAND_KINDS = new Set([
-  "runtime.task.create",
+const SUPPORTED_COMMAND_CONTRACTS = new Set([
+  "runtime.task.create@1",
 ]);
 
 function isObject(value) {
@@ -248,7 +248,7 @@ export class CloudBridgeService {
       ...this.state,
       running: this.running,
       deviceId: this.deviceId,
-      supportedCommandKinds: [...SUPPORTED_COMMAND_KINDS],
+      supportedCommandContracts: [...SUPPORTED_COMMAND_CONTRACTS],
       ...this.store.snapshot(),
     };
   }
@@ -259,6 +259,7 @@ export class CloudBridgeService {
       throw new Error("OWL Cloud deviceId is not configured.");
     }
 
+    const compacted = this.store.compactTerminalCommands();
     const recovered = this.store.recoverProcessingAsUncertain();
     this.state.recoveredUncertain += recovered.length;
     for (const commandId of recovered) {
@@ -292,6 +293,7 @@ export class CloudBridgeService {
     this.onEvent("info", "Cloud Bridge starting", {
       deviceId: this.deviceId,
       recoveredUncertain: recovered.length,
+      compactedTerminalMappings: compacted.length,
     });
 
     await this.syncOnce({ forceHeartbeat: true }).catch((error) => {
@@ -435,14 +437,18 @@ export class CloudBridgeService {
       return await this.rejectNewCommand(commandId, "COMMAND_EXPIRED_LOCAL");
     }
 
-    if (!SUPPORTED_COMMAND_KINDS.has(command.kind)) {
+    const kindVersion = Number.isInteger(command.kindVersion)
+      ? command.kindVersion
+      : 1;
+    const commandContract = `${command.kind}@${kindVersion}`;
+    if (!SUPPORTED_COMMAND_CONTRACTS.has(commandContract)) {
       return await this.rejectNewCommand(
         commandId,
-        `UNSUPPORTED_COMMAND_KIND:${boundedString(command.kind, 80)}`,
+        `UNSUPPORTED_COMMAND_CONTRACT:${boundedString(commandContract, 96)}`,
       );
     }
 
-    if (command.kind === "runtime.task.create") {
+    if (command.kind === "runtime.task.create" && kindVersion === 1) {
       let request;
       try {
         request = validateTaskCreatePayload(command.payload);
