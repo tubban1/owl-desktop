@@ -143,6 +143,56 @@ export type CloudBridgeStatus = {
   commands: CloudBridgeCommandRecord[];
 };
 
+
+export type AgentRequestPriority = "low" | "normal" | "high" | "urgent";
+export type AgentRequestStatus = "pending" | "claimed" | "completed" | "cancelled";
+
+export type AgentRequest = {
+  requestId: string;
+  type: string;
+  producer: "desktop" | "runtime" | "cloud" | "worker";
+  priority: AgentRequestPriority;
+  subject: {
+    kind: string;
+    id: string;
+    revision?: string;
+  };
+  reasonCode: string;
+  errorCodes: string[];
+  contextRefs: Array<{
+    kind: string;
+    id: string;
+    revision?: string;
+  }>;
+  allowedActions: string[];
+  requiresUserConfirmation: boolean;
+  correlationId?: string;
+  dedupeKey?: string;
+  availableAt?: string;
+  expiresAt?: string;
+  status: AgentRequestStatus;
+  claim: null | {
+    ownerId: string;
+    ownerStable: boolean;
+    claimedAt: string;
+    leaseExpiresAt: string;
+  };
+  resolution: null | {
+    outcome: string;
+    resultRef?: string;
+    completedAt: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentInboxSummary = {
+  pending: number;
+  claimed: number;
+  highestPriority: AgentRequestPriority | null;
+  byType: Record<string, number>;
+};
+
 export type RuntimeSnapshot = {
   mode: "live" | "offline";
   checkedAt: string;
@@ -172,6 +222,7 @@ export type RuntimeSnapshot = {
   host: HostStatus | null;
   tunnel: TunnelStatus;
   cloud: CloudBridgeStatus;
+  agentInbox: AgentInboxSummary;
   accounts: AccountMeta[];
   activity: ActivityEntry[];
 };

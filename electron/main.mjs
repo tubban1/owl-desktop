@@ -11,6 +11,7 @@ import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
 import { CloudBridgeStore } from "./services/cloud-bridge-store.mjs";
 import { CloudBridgeService } from "./services/cloud-bridge-service.mjs";
+import { AgentInboxStore } from "./services/agent-inbox-store.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow;
@@ -18,6 +19,7 @@ let store;
 let identityVault;
 let tunnelSupervisor;
 let cloudBridgeStore;
+let agentInbox;
 let cloudBridge;
 let cloudBridgeState = {
   status: "stopped",
@@ -93,11 +95,26 @@ function cloudDeviceCredential() {
   );
 }
 
+function createAgentRequest(input) {
+  if (!agentInbox) return null;
+  const result = agentInbox.create(input);
+  if (result.created) {
+    record("info", "agent-inbox", "AgentRequest created", {
+      requestId: result.request.requestId,
+      type: result.request.type,
+      priority: result.request.priority,
+      producer: result.request.producer,
+    });
+  }
+  return result.request;
+}
+
 async function buildCloudPresence() {
   const info = await runtimeClient().info().catch(() => null);
   return {
     capabilities: {
       cloudBridge: "m1-polling-v1",
+      agentInbox: "v1",
       supportedRemoteCommands: ["runtime.task.create"],
       runtimeReachable: Boolean(info),
       mcpAvailable: mcpState.status === "running",
@@ -193,6 +210,9 @@ async function startCloudBridge() {
     onEvent(level, message, meta) {
       record(level, "cloud", message, meta);
     },
+    onAgentRequest(input) {
+      createAgentRequest(input);
+    },
   });
 
   try {
@@ -282,6 +302,7 @@ async function startMcp() {
       runtimeBaseUrl: settings.runtimeBaseUrl,
       runtimeToken: runtimeToken(),
       mcpToken: mcpToken(),
+      agentInbox,
       onEvent(level, message, meta) {
         record(level, "mcp", message, meta);
       },
@@ -335,6 +356,12 @@ async function runtimeSnapshot() {
     host: host.status === "fulfilled" ? host.value : null,
     tunnel: tunnelSupervisor?.status() ?? { state: "stopped" },
     cloud: cloudBridgeSnapshot(),
+    agentInbox: agentInbox?.summary() ?? {
+      pending: 0,
+      claimed: 0,
+      highestPriority: null,
+      byType: {},
+    },
     accounts: identityVault?.list() ?? [],
     activity: activity.slice(0, 50),
   };
@@ -394,6 +421,35 @@ function registerIpc() {
     if (!cloudBridge) return await startCloudBridge();
     await cloudBridge.syncOnce({ forceHeartbeat: true });
     return cloudBridgeSnapshot();
+  });
+  ipcMain.handle("agent-inbox:summary", () =>
+    agentInbox?.summary() ?? {
+      pending: 0,
+      claimed: 0,
+      highestPriority: null,
+      byType: {},
+    });
+  ipcMain.handle("agent-inbox:list", (_event, input) =>
+    agentInbox?.list({
+      statuses: input?.statuses ?? [
+        "pending",
+        "claimed",
+        "completed",
+        "cancelled",
+      ],
+      limit: input?.limit ?? 100,
+    }) ?? []);
+  ipcMain.handle("agent-inbox:cancel", (_event, requestId) => {
+    const request = agentInbox?.cancel(requestId, {
+      reasonCode: "CANCELLED_BY_USER",
+    });
+    if (request) {
+      record("warn", "agent-inbox", "AgentRequest cancelled by user", {
+        requestId: request.requestId,
+        type: request.type,
+      });
+    }
+    return request ?? null;
   });
   ipcMain.handle("skills:snapshot", async () => {
     const started = Date.now();
@@ -576,6 +632,10 @@ if (!hasLock) {
     cloudBridgeStore = new CloudBridgeStore({
       file: path.join(app.getPath("userData"), "cloud-bridge-state.json"),
     });
+    agentInbox = new AgentInboxStore({
+      file: path.join(app.getPath("userData"), "agent-inbox.json"),
+    });
+    agentInbox.recoverExpiredClaims();
     tunnelSupervisor = new TunnelSupervisor({
       onEvent(level, message, meta) {
         record(level, "tunnel", message, meta);

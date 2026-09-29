@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   cloudStart: () => ipcRenderer.invoke("cloud:start"),
   cloudStop: () => ipcRenderer.invoke("cloud:stop"),
   cloudSync: () => ipcRenderer.invoke("cloud:sync"),
+  agentInboxSummary: () => ipcRenderer.invoke("agent-inbox:summary"),
+  listAgentRequests: (input) => ipcRenderer.invoke("agent-inbox:list", input),
+  cancelAgentRequest: (requestId) =>
+    ipcRenderer.invoke("agent-inbox:cancel", requestId),
   skillSnapshot: () => ipcRenderer.invoke("skills:snapshot"),
   skillDryRun: (skillId, args) =>
     ipcRenderer.invoke("skills:dry-run", skillId, args),
