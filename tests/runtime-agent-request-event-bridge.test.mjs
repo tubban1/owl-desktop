@@ -283,6 +283,37 @@ describe("RuntimeAgentRequestEventBridge", () => {
     expect(retry.reconciliation.savedCursor).toBe("runtime-events:1");
   });
 
+  it("treats malformed Runtime event positions as replay-integrity needs-attention", async () => {
+    const malformed = {
+      ...proposal(1),
+      cursor: "runtime-events:999",
+    };
+    const setupState = setup({
+      listEvents: vi.fn(async () =>
+        page([malformed], {
+          nextCursor: "runtime-events:999",
+          oldestSequence: 1,
+          newestSequence: 1,
+        }),
+      ),
+    });
+
+    const result = await setupState.bridge.syncOnce();
+
+    expect(result.status).toBe("needs_attention");
+    expect(result.reconciliation).toMatchObject({
+      reasonCode: "AGENT_REQUEST_EVENT_POSITION_INVALID",
+      savedCursor: null,
+      savedSequence: null,
+      pageNextCursor: "runtime-events:999",
+    });
+    expect(setupState.consumer.readState()).toMatchObject({
+      lastSequence: null,
+      lastCursor: null,
+    });
+    expect(setupState.inbox.summary().pending).toBe(0);
+  });
+
   it("does not call events.list when Runtime does not expose both optional extensions", async () => {
     const setupState = setup({
       capabilities: vi.fn(async () => capabilities(false)),
