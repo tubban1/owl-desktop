@@ -67,16 +67,45 @@ function riskTone(
   return "neutral";
 }
 
+function currentCandidateRawManifest(
+  candidate: SkillCandidateRecord,
+): unknown {
+  return candidate.revisions.find(
+    (item) => item.digest === candidate.currentDigest,
+  )?.manifest ?? null;
+}
+
+function isUserSkillManifest(value: unknown): value is UserSkillManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const manifest = value as Record<string, unknown>;
+  return (
+    manifest.schemaVersion === 1 &&
+    manifest.skillAbiVersion === 1 &&
+    typeof manifest.id === "string" &&
+    typeof manifest.version === "string" &&
+    typeof manifest.title === "string" &&
+    typeof manifest.description === "string" &&
+    Array.isArray(manifest.requiredPrimitives) &&
+    manifest.executionMode === "durable" &&
+    Boolean(
+      manifest.inputs &&
+      typeof manifest.inputs === "object" &&
+      !Array.isArray(manifest.inputs),
+    ) &&
+    Boolean(
+      manifest.contract &&
+      typeof manifest.contract === "object" &&
+      !Array.isArray(manifest.contract),
+    ) &&
+    Array.isArray(manifest.steps)
+  );
+}
+
 function currentCandidateManifest(
   candidate: SkillCandidateRecord,
 ): UserSkillManifest | null {
-  const revision = candidate.revisions.find(
-    (item) => item.digest === candidate.currentDigest,
-  );
-  const manifest = revision?.manifest;
-  return manifest && typeof manifest === "object"
-    ? (manifest as UserSkillManifest)
-    : null;
+  const manifest = currentCandidateRawManifest(candidate);
+  return isUserSkillManifest(manifest) ? manifest : null;
 }
 
 function lastCurrentTest(candidate: SkillCandidateRecord) {
@@ -541,6 +570,23 @@ function ProposalDetail({
           <PackagePlus size={15} />
           {busy ? "Creating…" : "Create Candidate"}
         </button>
+
+        {proposal.governance.candidates.length > 0 && (
+          <button
+            className="secondary"
+            disabled={busy}
+            onClick={() =>
+              void onCandidateCreated(
+                proposal.governance.exactLiveCandidateIds[0] ??
+                  proposal.governance.candidates[0].candidateId,
+              )
+            }
+          >
+            <Eye size={15} />
+            Open existing Candidate
+          </button>
+        )}
+
         <span>
           This is the first write boundary. Discovery itself remains read-only.
         </span>
@@ -579,6 +625,7 @@ function CandidateDetail({
   port: SkillManagerPort;
   onChanged: () => Promise<void>;
 }) {
+  const rawManifest = currentCandidateRawManifest(candidate);
   const manifest = currentCandidateManifest(candidate);
   const latestTest = lastCurrentTest(candidate);
   const [inputsText, setInputsText] = useState("{}");
@@ -876,10 +923,23 @@ function CandidateDetail({
         </div>
       )}
 
-      {manifest && (
+      {!manifest && rawManifest !== null && (
+        <div className="skill-warning">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>Manifest is structurally incomplete.</strong>
+            <p>
+              Candidate storage is still canonical in Runtime. Run Validate to
+              get machine-readable schema errors before revising it.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {rawManifest !== null && (
         <details className="skill-manifest-review">
           <summary>Review current manifest</summary>
-          <pre className="code-block tall">{pretty(manifest)}</pre>
+          <pre className="code-block tall">{pretty(rawManifest)}</pre>
         </details>
       )}
 
