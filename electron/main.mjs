@@ -574,13 +574,15 @@ async function runtimeSnapshot() {
   const client = runtimeClient({ allowLocked: true });
 
   const started = Date.now();
+  const access = desktopAccessSnapshot();
+  const authorized = access.state === "ready";
   const [info, health, tasks, approvals, processes, diagnostics, host] =
     await Promise.allSettled([
       client.info(),
       client.health(),
-      client.tasks(),
-      client.approvals(),
-      client.processes(),
+      authorized ? client.tasks() : Promise.resolve(null),
+      authorized ? client.approvals() : Promise.resolve(null),
+      authorized ? client.processes() : Promise.resolve(null),
       settings.diagnosticsEnabled ? client.diagnostics(40) : Promise.resolve(null),
       runtimeHostSupervisor().status(),
     ]);
@@ -609,7 +611,7 @@ async function runtimeSnapshot() {
     host: host.status === "fulfilled" ? host.value : null,
     tunnel: tunnelSupervisor?.status() ?? { state: "stopped" },
     cloud: cloudBridgeSnapshot(),
-    access: desktopAccessSnapshot(),
+    access,
     agentInbox: agentInbox?.summary() ?? {
       pending: 0,
       claimed: 0,
