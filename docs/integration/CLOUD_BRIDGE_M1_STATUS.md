@@ -140,9 +140,11 @@ It proves:
 
 ### Product enrollment
 
-Desktop does not yet implement the normal human Cognito sign-in + bootstrap + device registration UX.
+**Cloud provider READY; Desktop implementation pending.**
 
-The HTTP client already exposes account-authenticated bootstrap and registration methods, but no credentials are fabricated or scraped.
+Frankfurt Cloud now exposes public `/auth/config` and a Cognito Authorization Code + PKCE S256 flow with callback `owl-desktop://auth/callback`, plus the existing bootstrap/register/rotate/revoke APIs.
+
+Desktop must now implement the system-browser login, deep-link callback, PKCE code exchange, account-token handling, bootstrap, device registration, and atomic OS Vault persistence of the one-time device credential.
 
 ### Runtime event producer
 
@@ -150,11 +152,19 @@ CR-DESKTOP-002 remains relevant. Desktop has a durable Cloud event transport/out
 
 ### RemoteCommand kind registry
 
-Cloud needs a frozen versioned RemoteCommand kind/payload contract. Until then Desktop supports only the one proven adapter above.
+**Cloud provider READY; Desktop compatibility update pending.**
+
+Cloud publishes `GET /contracts/remote-command-kinds/v1` and freezes `runtime.task.create@1 → Runtime tasks.create`. Unsupported kind/version pairs are rejected before queueing.
+
+Desktop should pin v1, verify `kindVersion`, and keep fail-closed behavior for unknown contracts.
 
 ### Retention gate
 
-Terminal command mappings are intentionally not auto-pruned yet. Cloud must define the maximum terminal replay horizon before Desktop can compact the dedupe journal safely. This is tracked as CR-CLOUD-003.
+**Cloud provider READY; Desktop compaction update pending.**
+
+Cloud freezes: no pull redelivery after terminal commit, no historical replay across re-enrollment, commandId is never reused, minimum terminal dedupe retention is 7 days, and uncertain records are never age-pruned automatically.
+
+Desktop may now implement bounded terminal journal compaction using that contract.
 
 ### Cloud E2E
 
