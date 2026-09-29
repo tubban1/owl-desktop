@@ -17,9 +17,15 @@ Desktop/Tunnel should emit operational events for:
 - OS permission/capability problems;
 - command delivery/dedupe/reconciliation failures.
 
-Runtime execution telemetry remains Runtime-owned.
+Runtime execution telemetry remains Runtime-owned semantically. Desktop is the transporter/adapter.
+
+For Runtime 1.0, Desktop should derive the initial Runtime-origin telemetry from existing public Runtime surfaces such as diagnostics, health, Task/Process/Workspace summaries, provider status, privacy-aware audit summaries, Runtime version and lifecycle state. This avoids adding a new Runtime 1.0 protocol solely for Cloud telemetry.
+
+This adapter is snapshot-oriented. Absence of a telemetry event is not proof that no execution occurred, and Desktop must not pretend these snapshots form a canonical real-time Runtime event stream.
 
 ## Delivery
+
+Desktop is the Cloud HTTP sender for both Desktop-origin and Runtime-origin telemetry.
 
 Desktop batches 1–100 sanitized events and sends them with the device credential to:
 
