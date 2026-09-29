@@ -74,6 +74,14 @@
         "dmg",
         "zip"
       ]
-    }
+    },
+    "protocols": [
+      {
+        "name": "OWL LAB Desktop",
+        "schemes": [
+          "owl-desktop"
+        ]
+      }
+    ]
   }
 }
