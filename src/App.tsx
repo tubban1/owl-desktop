@@ -379,7 +379,7 @@ export default function App() {
             </div>
             <div className="contract-note compact-note">
               <ShieldCheck size={17} />
-              <div><strong>Cloud controls delivery; Runtime controls execution.</strong><p>Remote commands are deduplicated by commandId. Unknown command kinds are rejected. An uncertain Runtime completion is never replayed through another backend.</p></div>
+              <div><strong>Cloud controls delivery; Runtime controls execution.</strong><p>Remote commands are deduplicated by commandId. Unknown command kind/version contracts are rejected. An uncertain Runtime completion is never replayed through another backend.</p></div>
             </div>
           </section>
           <section className="panel"><div className="panel-heading"><div><span className="eyebrow">COMPATIBILITY</span><h3>Desktop consumer boundary</h3></div></div><div className="compat-row"><span>Minimum Runtime API</span><strong>0.1</strong><span>Preferred / tested</span><strong>0.1</strong><span>Fallback</span><strong>Fail closed</strong></div></section>
