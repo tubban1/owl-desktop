@@ -2,7 +2,7 @@
   "name": "@owl-platform/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "OWL Desktop — local control plane and product shell for OWL Runtime",
+  "description": "OWL LAB Desktop — local integration host and product shell for OWL LAB Runtime",
   "type": "module",
   "main": "electron/main.mjs",
   "scripts": {
@@ -49,7 +49,7 @@
   },
   "build": {
     "appId": "ai.owl.desktop",
-    "productName": "OWL Desktop",
+    "productName": "OWL LAB Desktop",
     "asar": true,
     "compression": "maximum",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
