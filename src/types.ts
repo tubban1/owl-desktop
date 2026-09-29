@@ -234,6 +234,200 @@ export type DesktopEnvironment = {
   electronVersion: string;
 };
 
+
+export type UserSkillInputSpec = {
+  type: "string" | "number" | "boolean";
+  required?: boolean;
+  default?: string | number | boolean;
+  description?: string;
+};
+
+export type UserSkillManifest = {
+  schemaVersion: 1;
+  skillAbiVersion: 1;
+  id: string;
+  version: string;
+  title: string;
+  description: string;
+  requiredPrimitiveAbi: number;
+  requiredPrimitives: string[];
+  executionMode: "durable";
+  inputs: Record<string, UserSkillInputSpec>;
+  contract: {
+    riskLevel: "low" | "medium" | "high" | "critical";
+    idempotent: boolean;
+    sideEffects: string[];
+    retryPolicy: "automatic" | "manual" | "never";
+    requiresVerification: boolean;
+    resources?: Array<{ key: string; mode: "shared" | "exclusive" }>;
+  };
+  steps: Array<{
+    id: string;
+    primitive: string;
+    op: string;
+    args?: Record<string, unknown>;
+    dependsOn?: string[];
+    verify?: unknown;
+  }>;
+  provenance?: {
+    origin?: "external" | "workflow" | "semantic" | "user";
+    sourceTaskIds?: string[];
+    sourceMemoryIds?: string[];
+  };
+};
+
+export type SkillValidationIssue = {
+  code: string;
+  file?: string;
+  path: string;
+  message: string;
+  actual?: unknown;
+  required?: unknown;
+  allowed?: unknown;
+};
+
+export type SkillCandidateValidationReport = {
+  reportVersion: 1;
+  candidateId: string;
+  candidateDigest: string;
+  valid: boolean;
+  targetSkillAbi: 1;
+  primitiveAbi: {
+    runtime: number;
+    required: number | null;
+  };
+  requiredPrimitives: string[];
+  allowedPrimitives: string[];
+  derivedContract: Record<string, unknown> | null;
+  effectiveContract: Record<string, unknown> | null;
+  errors: SkillValidationIssue[];
+  warnings: SkillValidationIssue[];
+  validatedAt: string;
+};
+
+export type SkillCandidateRecord = {
+  version: 1;
+  id: string;
+  status: "active" | "dismissed" | "promoted";
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+  currentDigest: string;
+  revisions: Array<{
+    revision: number;
+    digest: string;
+    createdAt: string;
+    manifest: unknown;
+  }>;
+  validation?: SkillCandidateValidationReport;
+  tests: Array<{
+    candidateDigest: string;
+    inputDigest: string;
+    taskId: string;
+    compiledAt: string;
+  }>;
+  promotion?: Record<string, unknown>;
+  dismissedAt?: string;
+};
+
+export type UserSkillRegistrySummary = {
+  skillId: string;
+  enabled: boolean;
+  activeVersion: string | null;
+  versions: Array<{
+    version: string;
+    candidateDigest: string;
+    installedAt: string;
+    uninstalledAt: string | null;
+    active: boolean;
+  }>;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type WorkflowSkillProposal = {
+  version: 1;
+  proposalId: string;
+  structuralDigest: string;
+  source: "m2_episodic_evidence";
+  support: {
+    successfulRuns: number;
+    sourceRunsUsed: number;
+    distinctArgumentSets: number;
+    recoveryFreeRuns: number;
+    taskIds: string[];
+    episodeIds: string[];
+    evidenceDigests: string[];
+  };
+  parameterization: {
+    inputNames: string[];
+    variablePaths: string[];
+  };
+  manifestDigest: string;
+  manifest: UserSkillManifest;
+  validation: SkillCandidateValidationReport;
+  governance: {
+    state: "new" | "dismissed" | "candidate_exists" | "installed";
+    evidenceRefreshAvailable: boolean;
+    exactDigestCandidateIds: string[];
+    exactLiveCandidateIds: string[];
+    exactDismissedCandidateIds: string[];
+    candidates: Array<{
+      candidateId: string;
+      status: string;
+      currentDigest: string;
+      exactDigest: boolean;
+    }>;
+    installed: null | {
+      enabled: boolean;
+      activeVersion: string | null;
+      versions: string[];
+    };
+  };
+  readyForSubmit: boolean;
+  requiresExplicitSubmit: true;
+  requiresTestBeforePromotion: true;
+  autoPromoted: false;
+};
+
+export type WorkflowSkillDiscoveryResult = {
+  version: 1;
+  policy: Record<string, unknown>;
+  scannedEpisodes: number;
+  eligibleRuns: number;
+  repeatedGroups: number;
+  proposalCount: number;
+  proposals: WorkflowSkillProposal[];
+  blocked?: Array<Record<string, unknown>>;
+};
+
+export type SkillCandidateInspection = {
+  candidate: SkillCandidateRecord;
+  validation: SkillCandidateValidationReport;
+  test: null | {
+    binding: {
+      candidateDigest: string;
+      inputDigest: string;
+      taskId: string;
+      compiledAt: string;
+    };
+    task: Record<string, unknown>;
+    provenanceValid: boolean;
+    evidence: Record<string, unknown>;
+    m2: null | {
+      episodeId: string;
+      contentDigest: string;
+      evidenceDigest: string | null;
+    };
+    qualityGate: unknown;
+    privacyGate: unknown;
+  };
+  readiness: {
+    promotable: boolean;
+    reasons: string[];
+  };
+};
+
 export type SkillAvailability =
   | "ready"
   | "disabled"
@@ -293,12 +487,14 @@ export type SkillProviderStatus = {
 };
 
 export type SkillManagerSnapshot = {
-  source: "runtime-1.0";
+  source: "runtime-1.0" | "runtime-1.x";
   fetchedAt: string;
   primitiveAbiVersion: number;
   skills: SkillSummary[];
   primitives: Array<Record<string, unknown> & { id?: string }>;
   providers: SkillProviderStatus[];
+  candidates: SkillCandidateRecord[];
+  userSkills: UserSkillRegistrySummary[];
   summary: {
     installed: number;
     ready: number;
@@ -310,6 +506,7 @@ export type SkillManagerSnapshot = {
   lifecycle: {
     registrySupported: boolean;
     candidatesSupported: boolean;
+    discoverySupported: boolean;
     librarySupported: boolean;
     reason: string;
   };
