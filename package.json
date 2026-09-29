@@ -24,7 +24,8 @@
     "verify:cloud-bridge-live": "node scripts/verify-cloud-bridge-live-e2e.mjs",
     "verify:agent-inbox-e2e": "node scripts/verify-agent-inbox-e2e.mjs",
     "verify:skill-discovery-live": "node scripts/verify-skill-discovery-live-e2e.mjs",
-    "verify:runtime-agent-request-consumer": "node scripts/verify-runtime-agent-request-consumer.mjs"
+    "verify:runtime-agent-request-consumer": "node scripts/verify-runtime-agent-request-consumer.mjs",
+    "verify:runtime-agent-request-live": "node scripts/verify-runtime-agent-request-live-e2e.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
