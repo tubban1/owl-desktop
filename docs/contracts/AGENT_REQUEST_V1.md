@@ -1,6 +1,6 @@
 # AgentRequest v1
 
-Status: **Desktop M1 implemented / Runtime producer contract pending**
+Status: **Desktop M1 + Runtime durable producer/consumer implemented; Skill repair MCP integration candidate**
 
 ## Purpose
 
@@ -160,9 +160,16 @@ agent_requests_list
 agent_requests_claim
 agent_requests_release
 agent_requests_complete
+skill_repair_context
+skill_repair_apply
 ```
 
-Existing tool response payloads remain unchanged for compatibility.
+The two Skill repair tools are narrower than generic Runtime Candidate access:
+they require a claimed Runtime-produced `skill.repair` request, stable logical
+owner identity and the corresponding allowedActions. They expose a
+privacy-filtered repair projection rather than raw Candidate state.
+
+Existing Agent Inbox tool response payloads remain unchanged for compatibility.
 
 ## Producer rules
 
@@ -196,10 +203,25 @@ The request asks an agent to inspect/reconcile; it does not authorize command re
 
 ## Runtime producer
 
-Runtime producer support is intentionally pending.
+Runtime now emits durable/replayable structured AgentRequest events through
+its public event journal.
 
-Runtime should emit durable/replayable structured proposal events through its public event contract. Desktop then materializes them into its Agent Inbox with deterministic dedupe.
+Desktop consumes:
 
-Runtime must not write Desktop's Agent Inbox file directly.
+```text
+agent_request.proposed
+agent_request.withdrawn
+```
 
-See CR-DESKTOP-010.
+through `events.list`, persists its own durable cursor, and enters explicit
+`needs_attention` when replay continuity cannot be proven. It never jumps to
+Runtime's newest cursor to hide a retention gap.
+
+Runtime still does not write Desktop's Agent Inbox file directly.
+
+The first Runtime producer is deliberately narrow: semantic User Skill
+Candidate repair conditions. Desktop's MCP repair path then uses normal public
+Candidate APIs and Runtime's consequential-request replay contract.
+
+See CR-DESKTOP-002, CR-DESKTOP-010 and
+`AGENT_SKILL_REPAIR_MCP_V1.md`.
