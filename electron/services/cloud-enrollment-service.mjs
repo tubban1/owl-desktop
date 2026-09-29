@@ -114,6 +114,7 @@ export class CloudEnrollmentService {
     deleteSecret,
     updateSettings,
     buildDeviceRegistration,
+    initialDeviceId = null,
     fetchImpl = fetch,
     onEvent = () => {},
     now = () => new Date(),
@@ -130,11 +131,11 @@ export class CloudEnrollmentService {
     this.pending = null;
     this.config = null;
     this.state = {
-      status: "idle",
+      status: initialDeviceId ? "device_enrolled" : "idle",
       startedAt: null,
       completedAt: null,
       account: null,
-      deviceId: null,
+      deviceId: initialDeviceId,
       lastErrorCode: null,
     };
   }
