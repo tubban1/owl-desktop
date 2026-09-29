@@ -1,6 +1,6 @@
 # AgentRequest v1
 
-Status: **Desktop M1 + Runtime durable producer/consumer implemented; Skill repair MCP integration candidate**
+Status: **Desktop M1 + Runtime durable producer/consumer implemented; Skill repair MCP live accepted on stacked integration**
 
 ## Purpose
 
