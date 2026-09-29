@@ -66,7 +66,7 @@ describe("RuntimeAgentRequestEventConsumer", () => {
         status: "pending",
         correlationId: "proposal_skill_123_r2",
         dedupeKey:
-          "runtime:skill_candidate:candidate_123:r2:validation_failed",
+          "runtime:agent_request_v1:skill_candidate:candidate_123:r2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:validation_failed",
         subject: {
           kind: "skill_candidate",
           id: "candidate_123",
@@ -98,7 +98,7 @@ describe("RuntimeAgentRequestEventConsumer", () => {
       ...proposal,
       eventId: "evt_agent_101_replay",
       sequence: 101,
-      cursor: "runtime-events:101-replay",
+      cursor: "runtime-events:101",
     };
 
     const result = setup.consumer.consume(replay);
@@ -271,13 +271,39 @@ describe("RuntimeAgentRequestEventConsumer", () => {
       eventId: "evt_agent_101_collision",
       proposalId: "proposal_other",
       sequence: 101,
-      cursor: "runtime-events:101-collision",
+      cursor: "runtime-events:101",
     };
 
     expect(() => setup.consumer.consume(collision)).toThrow(
       "AGENT_REQUEST_DEDUPE_COLLISION",
     );
     expect(setup.inbox.summary().pending).toBe(1);
+  });
+
+  it("rejects missing or inconsistent Runtime sequence/cursor positions", () => {
+    const [proposal] = loadFixture();
+
+    expect(() =>
+      parseRuntimeAgentRequestEvent({
+        ...proposal,
+        cursor: undefined,
+      }),
+    ).toThrow("AGENT_REQUEST_EVENT_POSITION_INVALID");
+
+    expect(() =>
+      parseRuntimeAgentRequestEvent({
+        ...proposal,
+        cursor: "runtime-events:999",
+      }),
+    ).toThrow("AGENT_REQUEST_EVENT_POSITION_INVALID");
+
+    expect(() =>
+      parseRuntimeAgentRequestEvent({
+        ...proposal,
+        sequence: 0,
+        cursor: "runtime-events:0",
+      }),
+    ).toThrow("AGENT_REQUEST_EVENT_POSITION_INVALID");
   });
 
   it("rejects prompt-like or uncontracted payload fields instead of persisting them", () => {
