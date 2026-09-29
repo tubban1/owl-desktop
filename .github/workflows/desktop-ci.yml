@@ -1,4 +1,4 @@
-name: OWL Desktop CI
+name: OWL LAB Desktop CI
 
 on:
   pull_request:
@@ -180,3 +180,71 @@ jobs:
           if [ -f "$RUNNER_TEMP/owl-runtime-agent-events.pid" ]; then
             kill "$(cat "$RUNNER_TEMP/owl-runtime-agent-events.pid")" 2>/dev/null || true
           fi
+
+  runtime-request-replay-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Desktop
+        uses: actions/checkout@v4
+
+      - name: Checkout Runtime R1 consequential replay provider
+        uses: actions/checkout@v4
+        with:
+          repository: tubban1/owl-runtime
+          ref: f00ba4f7f5c3fbddc18cf7c04fc0cfccdbb786bd
+          path: owl-runtime
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Desktop dependencies
+        run: npm ci
+
+      - name: Install Runtime dependencies
+        working-directory: owl-runtime
+        run: npm ci
+
+      - name: Start Runtime R1 public HTTP API
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd owl-runtime
+            export PORT=8788
+            export AGENTOS_STATE_ROOT="$RUNNER_TEMP/owl-runtime-request-replay-state"
+            export ALLOWED_DIRECTORIES="$GITHUB_WORKSPACE/owl-runtime"
+            npm run start:source
+          ) > "$RUNNER_TEMP/owl-runtime-request-replay.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/owl-runtime-request-replay.pid"
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8788/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          cat "$RUNNER_TEMP/owl-runtime-request-replay.log"
+          exit 1
+
+      - name: Desktop → Runtime consequential replay live E2E
+        env:
+          OWL_RUNTIME_URL: http://127.0.0.1:8788
+          OWL_RUNTIME_FIXTURE_REPO: ${{ github.workspace }}/owl-runtime
+        run: npm run verify:runtime-replay-live
+
+      - name: Runtime replay log
+        if: always()
+        run: cat "$RUNNER_TEMP/owl-runtime-request-replay.log" || true
+
+      - name: Stop Runtime
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/owl-runtime-request-replay.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/owl-runtime-request-replay.pid")" 2>/dev/null || true
+          fi
+
