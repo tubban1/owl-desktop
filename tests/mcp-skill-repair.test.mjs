@@ -16,6 +16,16 @@ import {
 
 const scratch = [];
 
+function expectErrorCode(fn, code) {
+  let caught;
+  try {
+    fn();
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toMatchObject({ code });
+}
+
 function makeInbox() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-skill-repair-"));
   scratch.push(dir);
@@ -298,15 +308,17 @@ describe("AgentRequest Skill repair authority binding", () => {
     const { inbox } = makeInbox();
     const request = createRepairRequest(inbox);
 
-    expect(() =>
-      requireClaimedSkillRepair({
-        agentInbox: inbox,
-        requestId: request.requestId,
-        ownerId: "owl-owner:a",
-        ownerStable: true,
-        action: "candidate.inspect",
-      }),
-    ).toThrow("SKILL_REPAIR_CLAIM_REQUIRED");
+    expectErrorCode(
+      () =>
+        requireClaimedSkillRepair({
+          agentInbox: inbox,
+          requestId: request.requestId,
+          ownerId: "owl-owner:a",
+          ownerStable: true,
+          action: "candidate.inspect",
+        }),
+      "SKILL_REPAIR_CLAIM_REQUIRED",
+    );
 
     inbox.claim(request.requestId, {
       ownerId: "owl-owner:a",
@@ -314,15 +326,17 @@ describe("AgentRequest Skill repair authority binding", () => {
       leaseSeconds: 600,
     });
 
-    expect(() =>
-      requireClaimedSkillRepair({
-        agentInbox: inbox,
-        requestId: request.requestId,
-        ownerId: "owl-owner:b",
-        ownerStable: true,
-        action: "candidate.inspect",
-      }),
-    ).toThrow("SKILL_REPAIR_CLAIM_REQUIRED");
+    expectErrorCode(
+      () =>
+        requireClaimedSkillRepair({
+          agentInbox: inbox,
+          requestId: request.requestId,
+          ownerId: "owl-owner:b",
+          ownerStable: true,
+          action: "candidate.inspect",
+        }),
+      "SKILL_REPAIR_CLAIM_REQUIRED",
+    );
 
     expect(
       requireClaimedSkillRepair({
@@ -346,15 +360,17 @@ describe("AgentRequest Skill repair authority binding", () => {
       leaseSeconds: 600,
     });
 
-    expect(() =>
-      requireClaimedSkillRepair({
-        agentInbox: inbox,
-        requestId: request.requestId,
-        ownerId: "transport:fallback",
-        ownerStable: false,
-        action: "candidate.inspect",
-      }),
-    ).toThrow("SKILL_REPAIR_STABLE_OWNER_REQUIRED");
+    expectErrorCode(
+      () =>
+        requireClaimedSkillRepair({
+          agentInbox: inbox,
+          requestId: request.requestId,
+          ownerId: "transport:fallback",
+          ownerStable: false,
+          action: "candidate.inspect",
+        }),
+      "SKILL_REPAIR_STABLE_OWNER_REQUIRED",
+    );
 
     const { inbox: secondInbox } = makeInbox();
     const second = createRepairRequest(secondInbox, {
@@ -366,15 +382,17 @@ describe("AgentRequest Skill repair authority binding", () => {
       leaseSeconds: 600,
     });
 
-    expect(() =>
-      requireClaimedSkillRepair({
-        agentInbox: secondInbox,
-        requestId: second.requestId,
-        ownerId: "owl-owner:stable",
-        ownerStable: true,
-        action: "candidate.revise",
-      }),
-    ).toThrow("SKILL_REPAIR_ACTION_NOT_ALLOWED");
+    expectErrorCode(
+      () =>
+        requireClaimedSkillRepair({
+          agentInbox: secondInbox,
+          requestId: second.requestId,
+          ownerId: "owl-owner:stable",
+          ownerStable: true,
+          action: "candidate.revise",
+        }),
+      "SKILL_REPAIR_ACTION_NOT_ALLOWED",
+    );
   });
 
   it("rejects stale read context but permits immutable source binding for replay", () => {
@@ -385,9 +403,10 @@ describe("AgentRequest Skill repair authority binding", () => {
       currentDigest: "digest_r2",
     });
 
-    expect(() =>
-      assertCandidateMatchesRepairRequest(request, advanced),
-    ).toThrow("SKILL_REPAIR_REQUEST_STALE");
+    expectErrorCode(
+      () => assertCandidateMatchesRepairRequest(request, advanced),
+      "SKILL_REPAIR_REQUEST_STALE",
+    );
 
     expect(
       assertRepairSourceRevision(
@@ -400,13 +419,15 @@ describe("AgentRequest Skill repair authority binding", () => {
       digest: "digest_r1",
     });
 
-    expect(() =>
-      assertRepairSourceRevision(
-        request,
-        advanced,
-        "digest_wrong",
-      ),
-    ).toThrow("SKILL_REPAIR_EXPECTED_DIGEST_MISMATCH");
+    expectErrorCode(
+      () =>
+        assertRepairSourceRevision(
+          request,
+          advanced,
+          "digest_wrong",
+        ),
+      "SKILL_REPAIR_EXPECTED_DIGEST_MISMATCH",
+    );
   });
 
   it("keeps logical repair idempotency stable while transport attempts remain unique", () => {
