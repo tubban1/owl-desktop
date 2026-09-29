@@ -28,6 +28,36 @@ describe("RuntimeHttpClient", () => {
     expect(options.headers.authorization).toBe("Bearer test-token");
   });
 
+  it("reads the Runtime telemetry feed without sending a Cloud credential", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        result: {
+          version: 1,
+          events: [{ cursor: 7, event: { eventId: "rtel-7" } }],
+          nextCursor: 7,
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new RuntimeHttpClient({
+      baseUrl: "http://127.0.0.1:8788",
+      sessionId: "owl-desktop:test-session",
+      token: "runtime-token",
+    });
+    const result = await client.telemetry({ after: 4, limit: 25 });
+
+    expect(result.nextCursor).toBe(7);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "http://127.0.0.1:8788/runtime/v0.1/telemetry?after=4&limit=25",
+    );
+    expect(options.headers.authorization).toBe("Bearer runtime-token");
+    expect(JSON.stringify(options.headers)).not.toContain("owldev1.");
+  });
+
   it("propagates external cancellation to the Runtime HTTP request", async () => {
     const fetchMock = vi.fn().mockImplementation((_url, options) =>
       new Promise((_resolve, reject) => {
