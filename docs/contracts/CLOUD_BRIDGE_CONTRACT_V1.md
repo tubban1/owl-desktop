@@ -4,6 +4,8 @@ Status: **Normative consumer contract**.
 
 Canonical provider: **owl-cloud**.
 
+Account/role/device authorization consumption is defined in [Cloud Access Consumer Contract v1](CLOUD_ACCESS_CONSUMER_V1.md).
+
 OWL Cloud Bridge connects the local device to OWL Cloud's control plane. It never turns Cloud state into a second Runtime state machine.
 
 ## Control-plane entities
