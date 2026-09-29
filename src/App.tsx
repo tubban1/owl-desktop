@@ -5,7 +5,7 @@ import {
   Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
   AlertTriangle,
 } from "lucide-react";
-import type { AccountMeta, AgentRequest, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
+import type { AccountMeta, AgentRequest, CloudEnrollmentStatus, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
 
 type Page = "overview" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
@@ -46,6 +46,7 @@ export default function App() {
   const [env, setEnv] = useState<DesktopEnvironment | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
+  const [cloudEnrollment, setCloudEnrollment] = useState<CloudEnrollmentStatus | null>(null);
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [accounts, setAccounts] = useState<AccountMeta[]>([]);
   const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
@@ -88,14 +89,22 @@ export default function App() {
       window.owlDesktop.listSecrets(),
       window.owlDesktop.listAccounts(),
       window.owlDesktop.listAgentRequests({ limit: 100 }),
-    ]).then(([nextEnv, nextSettings, nextSecrets, nextAccounts, nextAgentRequests]) => {
+      window.owlDesktop.cloudEnrollmentStatus(),
+    ]).then(([nextEnv, nextSettings, nextSecrets, nextAccounts, nextAgentRequests, nextCloudEnrollment]) => {
       setEnv(nextEnv);
       setSettings(nextSettings);
       setSecrets(nextSecrets);
       setAccounts(nextAccounts);
       setAgentRequests(nextAgentRequests);
+      setCloudEnrollment(nextCloudEnrollment);
       if (nextSettings.autoConnectRuntime) void refresh();
     });
+    const disposeEnrollment = window.owlDesktop.onCloudEnrollmentChanged((state) => {
+      setCloudEnrollment(state);
+      void window.owlDesktop.getSettings().then(setSettings);
+      void refresh();
+    });
+    return () => disposeEnrollment();
   }, []);
 
   const runtimeVersion = snapshot?.info?.runtimeVersion ?? "Not connected";
@@ -122,6 +131,24 @@ export default function App() {
     }
     setNotice("Settings saved");
     window.setTimeout(() => setNotice(""), 1600);
+  };
+
+  const beginCloudEnrollment = async () => {
+    try {
+      const state = await window.owlDesktop.cloudEnroll();
+      setCloudEnrollment(state);
+      setNotice("Continue sign-in in your browser");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Cloud enrollment failed");
+    }
+    window.setTimeout(() => setNotice(""), 2400);
+  };
+
+  const logoutCloudAccount = async () => {
+    const state = await window.owlDesktop.cloudLogoutAccount();
+    setCloudEnrollment(state);
+    setNotice("Account signed out; enrolled device remains active");
+    window.setTimeout(() => setNotice(""), 2400);
   };
 
   const addSecret = async () => {
@@ -436,7 +463,10 @@ export default function App() {
               {cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}
             </div>
             <div className="about-grid">
-              <span>Device</span><code>{snapshot?.cloud.deviceId ?? "Not enrolled"}</code>
+              <span>Account</span><strong>{cloudEnrollment?.account?.email ?? (cloudEnrollment?.status === "waiting_for_browser" ? "Waiting for browser…" : "Signed out")}</strong>
+              <span>Role</span><strong>{cloudEnrollment?.account?.role ?? "—"}</strong>
+              <span>Device</span><code>{snapshot?.cloud.deviceId ?? cloudEnrollment?.deviceId ?? "Not enrolled"}</code>
+              <span>Enrollment</span><strong>{cloudEnrollment?.status?.replaceAll("_", " ") ?? "idle"}</strong>
               <span>Last heartbeat</span><strong>{formatTime(snapshot?.cloud.lastHeartbeatAt ?? undefined)}</strong>
               <span>Last command poll</span><strong>{formatTime(snapshot?.cloud.lastPollAt ?? undefined)}</strong>
               <span>Outbox</span><strong>{snapshot?.cloud.outboxPending ?? 0} pending</strong>
@@ -444,6 +474,9 @@ export default function App() {
               <span>Uncertain</span><strong>{snapshot?.cloud.commandCounts.uncertain ?? 0}</strong>
             </div>
             <div className="runtime-version cloud-actions">
+              {!cloudEnrollment?.deviceId && <button className="primary" onClick={beginCloudEnrollment}>Sign in & enroll</button>}
+              {cloudEnrollment?.deviceId && !cloudEnrollment?.account && <button className="secondary" onClick={beginCloudEnrollment}>Sign in account</button>}
+              {cloudEnrollment?.account && <button className="secondary" onClick={logoutCloudAccount}>Sign out account</button>}
               <button className="secondary" onClick={async () => { try { const result = await window.owlDesktop.cloudProbe(); setNotice(`Cloud ${result.contractVersion ?? "v1"} reachable`); } catch { setNotice("Cloud probe failed"); } window.setTimeout(() => setNotice(""), 1800); }}>Probe Cloud</button>
               <button className="secondary" onClick={async () => { await window.owlDesktop.cloudStart(); await refresh(); }}>Start bridge</button>
               <button className="secondary" onClick={async () => { await window.owlDesktop.cloudSync(); await refresh(); }}>Sync now</button>
@@ -451,7 +484,7 @@ export default function App() {
             </div>
             <div className="contract-note compact-note">
               <ShieldCheck size={17} />
-              <div><strong>Cloud controls delivery; Runtime controls execution.</strong><p>Remote commands are deduplicated by commandId. Unknown command kinds are rejected. An uncertain Runtime completion is never replayed through another backend.</p></div>
+              <div><strong>Cloud controls delivery; Runtime controls execution.</strong><p>Remote commands are deduplicated by commandId. Unknown command kind/version contracts are rejected. An uncertain Runtime completion is never replayed through another backend.</p></div>
             </div>
           </section>
           <section className="panel"><div className="panel-heading"><div><span className="eyebrow">COMPATIBILITY</span><h3>Desktop consumer boundary</h3></div></div><div className="compat-row"><span>Minimum Runtime API</span><strong>0.1</strong><span>Preferred / tested</span><strong>0.1</strong><span>Fallback</span><strong>Fail closed</strong></div></section>
@@ -495,7 +528,7 @@ export default function App() {
             <div className="setting-row"><div><strong>Cloud API endpoint</strong><span>OWL Cloud HTTP API v1. Device transport uses the separately stored device credential.</span></div><input className="setting-input" value={settings.cloudBaseUrl} onChange={(e) => setSettings({ ...settings, cloudBaseUrl: e.target.value })} onBlur={() => saveSettings({ cloudBaseUrl: settings.cloudBaseUrl })} placeholder="https://…execute-api…amazonaws.com" /></div>
             <div className="setting-row"><div><strong>Cloud device ID</strong><span>Canonical deviceId returned by Cloud registration.</span></div><input className="setting-input" value={settings.cloudDeviceId} onChange={(e) => setSettings({ ...settings, cloudDeviceId: e.target.value })} onBlur={() => saveSettings({ cloudDeviceId: settings.cloudDeviceId })} placeholder="dev_…" /></div>
             <div className="setting-row"><div><strong>Provider telemetry</strong><span>Send privacy-bounded operational metadata only. No command payload, credentials or user content.</span></div><Toggle checked={settings.cloudTelemetryEnabled} onChange={(v) => saveSettings({ cloudTelemetryEnabled: v })} /></div>
-            <div className="contract-note compact-note"><KeyRound size={17} /><div><strong>Device credential stays OS-encrypted.</strong><p>Store it in Secrets as <code>OWL_CLOUD_DEVICE_CREDENTIAL</code> with scope <code>owl-cloud</code>. Human Cognito login/device enrollment is a separate product flow.</p></div></div>
+            <div className="contract-note compact-note"><KeyRound size={17} /><div><strong>Cloud enrollment is main-process only.</strong><p>Authorization Code + PKCE opens in the system browser. Desktop stores the one-time device credential and refresh token in the OS-encrypted Vault; the Renderer never receives either value.</p></div></div>
             <div className="setting-row"><div><strong>Runtime diagnostics</strong><span>Include Runtime support projections in the Logs screen.</span></div><Toggle checked={settings.diagnosticsEnabled} onChange={(v) => saveSettings({ diagnosticsEnabled: v })} /></div>
             <div className="setting-row"><div><strong>Launch at login</strong><span>Start OWL Desktop after macOS login in packaged builds.</span></div><Toggle checked={settings.launchAtLogin} onChange={(v) => saveSettings({ launchAtLogin: v })} /></div>
           </section>
