@@ -4,10 +4,15 @@ import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { DesktopStore } from "./store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
+import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
+import { TunnelSupervisor } from "./services/tunnel-supervisor.mjs";
+import { IdentityVault } from "./services/identity-vault.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow;
 let store;
+let identityVault;
+let tunnelSupervisor;
 let mcpServer;
 let mcpState = { status: "stopped", url: null, error: null };
 const activity = [];
@@ -48,6 +53,49 @@ function mcpToken() {
     store.readSecret("OWL_MCP_API_TOKEN", "owl-desktop") ??
     store.readSecret("OWL_MCP_API_TOKEN")
   );
+}
+
+function tunnelApiKey() {
+  return (
+    store.readSecret("OWL_TUNNEL_API_KEY", "owl-tunnel") ??
+    store.readSecret("OWL_TUNNEL_API_KEY")
+  );
+}
+
+function runtimeHostSupervisor() {
+  const settings = store.getSettings();
+  return new RuntimeHostSupervisor({
+    runtimeBaseUrl: settings.runtimeBaseUrl,
+    runtimeToken: runtimeToken(),
+  });
+}
+
+function effectiveTunnelBinary(settings) {
+  if (settings.tunnelBinaryPath?.trim()) {
+    return settings.tunnelBinaryPath.trim();
+  }
+  if (!app.isPackaged) return "";
+  const arch = process.arch === "x64" ? "x64" : "arm64";
+  return path.join(
+    process.resourcesPath,
+    "owl-tunnel",
+    arch,
+    "tunnel-client-runtime",
+  );
+}
+
+async function startTunnel() {
+  const settings = store.getSettings();
+  if (!settings.tunnelEnabled) {
+    await tunnelSupervisor.stop();
+    return tunnelSupervisor.status();
+  }
+  return tunnelSupervisor.start({
+    binaryPath: effectiveTunnelBinary(settings),
+    tunnelId: settings.tunnelId,
+    apiKey: tunnelApiKey(),
+    mcpUrl: `http://127.0.0.1:${settings.mcpPort}/mcp`,
+  });
 }
 
 async function stopMcp() {
@@ -99,7 +147,7 @@ async function runtimeSnapshot() {
   });
 
   const started = Date.now();
-  const [info, health, tasks, approvals, processes, diagnostics] =
+  const [info, health, tasks, approvals, processes, diagnostics, host] =
     await Promise.allSettled([
       client.info(),
       client.health(),
@@ -107,6 +155,7 @@ async function runtimeSnapshot() {
       client.approvals(),
       client.processes(),
       settings.diagnosticsEnabled ? client.diagnostics(40) : Promise.resolve(null),
+      runtimeHostSupervisor().status(),
     ]);
 
   const online = info.status === "fulfilled";
@@ -130,6 +179,9 @@ async function runtimeSnapshot() {
       ...mcpState,
       ...(mcpServer?.snapshot() ?? { sessionCount: 0, sessions: [] }),
     },
+    host: host.status === "fulfilled" ? host.value : null,
+    tunnel: tunnelSupervisor?.status() ?? { state: "stopped" },
+    accounts: identityVault?.list() ?? [],
     activity: activity.slice(0, 50),
   };
 
@@ -180,6 +232,19 @@ function registerIpc() {
   }));
 
   ipcMain.handle("runtime:refresh", () => runtimeSnapshot());
+  ipcMain.handle("host:status", () => runtimeHostSupervisor().status());
+  ipcMain.handle("host:restart", () => runtimeHostSupervisor().restartService());
+  ipcMain.handle("host:stop", () => runtimeHostSupervisor().stopService());
+  ipcMain.handle("tunnel:status", () => tunnelSupervisor.status());
+  ipcMain.handle("tunnel:start", () => startTunnel());
+  ipcMain.handle("tunnel:stop", () => tunnelSupervisor.stop());
+  ipcMain.handle("accounts:list", () => identityVault.list());
+  ipcMain.handle("accounts:upsert", (_event, input) => identityVault.upsert(input));
+  ipcMain.handle("accounts:delete", (_event, id) => identityVault.delete(id));
+  ipcMain.handle("accounts:status", (_event, id, status, options) =>
+    identityVault.markStatus(id, status, options));
+  ipcMain.handle("accounts:capabilities", (_event, id) =>
+    identityVault.capabilities(id));
   ipcMain.handle("settings:get", () => store.getSettings());
   ipcMain.handle("settings:update", async (_event, patch) => {
     const next = store.updateSettings(patch ?? {});
@@ -192,6 +257,27 @@ function registerIpc() {
       "mcpPort" in (patch ?? {})
     ) {
       await startMcp();
+    }
+    if (
+      "tunnelEnabled" in (patch ?? {}) ||
+      "tunnelBinaryPath" in (patch ?? {}) ||
+      "tunnelId" in (patch ?? {}) ||
+      "mcpPort" in (patch ?? {})
+    ) {
+      if (next.tunnelEnabled) {
+        await tunnelSupervisor.restart({
+          binaryPath: effectiveTunnelBinary(next),
+          tunnelId: next.tunnelId,
+          apiKey: tunnelApiKey(),
+          mcpUrl: `http://127.0.0.1:${next.mcpPort}/mcp`,
+        }).catch((error) => {
+          record("error", "tunnel", "Tunnel restart failed", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      } else {
+        await tunnelSupervisor.stop();
+      }
     }
     record("info", "desktop", "Settings updated");
     return next;
@@ -206,6 +292,17 @@ function registerIpc() {
     ) {
       await startMcp();
     }
+    if (meta.name === "OWL_TUNNEL_API_KEY") {
+      const settings = store.getSettings();
+      if (settings.tunnelEnabled) {
+        await tunnelSupervisor.restart({
+          binaryPath: effectiveTunnelBinary(settings),
+          tunnelId: settings.tunnelId,
+          apiKey: tunnelApiKey(),
+          mcpUrl: `http://127.0.0.1:${settings.mcpPort}/mcp`,
+        });
+      }
+    }
     return meta;
   });
   ipcMain.handle("secrets:delete", async (_event, id) => {
@@ -217,6 +314,9 @@ function registerIpc() {
       existing?.name === "OWL_MCP_API_TOKEN"
     ) {
       await startMcp();
+    }
+    if (existing?.name === "OWL_TUNNEL_API_KEY") {
+      await tunnelSupervisor.stop();
     }
     return result;
   });
@@ -235,9 +335,23 @@ if (!hasLock) {
 
   app.whenReady().then(async () => {
     store = new DesktopStore();
+    identityVault = new IdentityVault();
+    tunnelSupervisor = new TunnelSupervisor({
+      onEvent(level, message, meta) {
+        record(level, "tunnel", message, meta);
+      },
+    });
     registerIpc();
     record("info", "desktop", "OWL Desktop started", { version: app.getVersion() });
     await startMcp();
+    const settings = store.getSettings();
+    if (settings.tunnelEnabled && settings.tunnelAutoStart) {
+      await startTunnel().catch((error) => {
+        record("error", "tunnel", "Tunnel auto-start failed", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
     createWindow();
 
     app.on("activate", () => {
@@ -246,6 +360,7 @@ if (!hasLock) {
   });
 
   app.on("before-quit", () => {
+    void tunnelSupervisor?.stop();
     void stopMcp();
   });
 

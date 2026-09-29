@@ -3,6 +3,10 @@ export type Settings = {
   autoConnectRuntime: boolean;
   mcpEnabled: boolean;
   mcpPort: number;
+  tunnelEnabled: boolean;
+  tunnelAutoStart: boolean;
+  tunnelBinaryPath: string;
+  tunnelId: string;
   launchAtLogin: boolean;
   diagnosticsEnabled: boolean;
   sessionId: string;
@@ -16,6 +20,32 @@ export type SecretMeta = {
   updatedAt: string;
 };
 
+export type AccountMeta = {
+  id: string;
+  service: string;
+  label: string;
+  identifier: string;
+  authMethod:
+    | "password"
+    | "oauth"
+    | "third_party_oauth"
+    | "qr"
+    | "sms_otp"
+    | "email_otp"
+    | "totp"
+    | "authenticator_push"
+    | "passkey"
+    | "device_code"
+    | "native_app_session";
+  status: string;
+  browserProfileId: string | null;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+  lastAuthenticatedAt: string | null;
+  expiresAt: string | null;
+};
+
 export type ActivityEntry = {
   id: string;
   at: string;
@@ -23,6 +53,41 @@ export type ActivityEntry = {
   source: string;
   message: string;
   meta?: Record<string, unknown>;
+};
+
+export type HostStatus = {
+  host: {
+    installed: boolean;
+    path: string;
+    bundleIdentifier: string | null;
+    version: string | null;
+    error?: string;
+  };
+  service: {
+    loaded: boolean;
+    state: string;
+    pid: number | null;
+  };
+  runtime: {
+    reachable: boolean;
+    apiVersion?: string | null;
+    runtimeVersion?: string | null;
+    status?: number;
+    error?: string;
+  };
+  authority: "owl-runtime";
+  desktopRole: "lifecycle-consumer";
+};
+
+export type TunnelStatus = {
+  state: "running" | "stopped";
+  pid?: number | null;
+  startedAt?: string | null;
+  lastExit?: { at: string; code: number | null; signal: string | null } | null;
+  binaryPath?: string | null;
+  tunnelIdConfigured?: boolean;
+  mcpUrl?: string | null;
+  secretStorage?: string;
 };
 
 export type RuntimeSnapshot = {
@@ -51,6 +116,9 @@ export type RuntimeSnapshot = {
       lastSeenAt: string;
     }>;
   };
+  host: HostStatus | null;
+  tunnel: TunnelStatus;
+  accounts: AccountMeta[];
   activity: ActivityEntry[];
 };
 

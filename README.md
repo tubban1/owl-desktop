@@ -6,6 +6,7 @@ It integrates:
 
 - **OWL MCP** — ChatGPT / MCP compatibility adapter
 - **OWL Control** — local settings, logs, sessions, health, approvals
+- **Identity & Session Vault** — local external-service account/session management
 - **OWL Tunnel** — secure remote transport
 - **OWL Cloud Bridge** — control-plane synchronization
 - **OWL Helper / Runtime Host** — stable macOS native identity and permissions
@@ -33,11 +34,14 @@ See:
 - [Cross-Repo Development Protocol v1](docs/architecture/CROSS_REPO_DEVELOPMENT_PROTOCOL_V1.md)
 - [Runtime Consumer Contract](docs/contracts/RUNTIME_CONSUMER_CONTRACT_V1.md)
 - [MCP Bridge Contract](docs/contracts/MCP_BRIDGE_CONTRACT_V1.md)
+- [Identity & Session Vault v1](docs/contracts/IDENTITY_SESSION_VAULT_V1.md)
+- [Runtime Host + Tunnel Consumer v1](docs/contracts/RUNTIME_HOST_TUNNEL_CONSUMER_V1.md)
 - [Cloud Bridge Contract](docs/contracts/CLOUD_BRIDGE_CONTRACT_V1.md)
 - [Compatibility Matrix](docs/contracts/COMPATIBILITY_MATRIX.md)
 - [Platform Integration](docs/integration/PLATFORM_INTEGRATION.md)
 - [Platform Integration Gates v1](docs/integration/INTEGRATION_GATES_V1.md)
 - [Local E2E Status](docs/integration/LOCAL_E2E_STATUS.md)
+- [macOS Distribution](docs/integration/MACOS_DISTRIBUTION.md)
 - [2.0 Dependency Roadmap](docs/roadmap/2.0-dependency-roadmap.md)
 
 ## Development

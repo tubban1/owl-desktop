@@ -8,13 +8,13 @@ This file is the canonical local compatibility record published by OWL Desktop.
 
 | Component | Current role | Supported baseline |
 | --- | --- | --- |
-| OWL Desktop | local integration host | 0.1.0 development line |
+| OWL Desktop | local integration host | 0.1.0 development line; arm64+x64 packaging smoke |
 | OWL MCP | Desktop-owned ChatGPT/MCP adapter | 0.1.0 / Streamable HTTP / Local E2E verified |
-| OWL Runtime | execution authority | API 0.1 tested against 1.0.0-rc.4 |
-| OWL Cloud | control authority | Cloud Contract v1 draft/frozen for parallel development |
-| OWL Tunnel | transport | legacy Computer MCP transport until versioned OWL Tunnel contract is frozen |
+| OWL Runtime | execution authority | API 0.1; tested 1.0.0-rc.4 / SHA 001414f584be |
+| OWL Cloud | control authority | Cloud Account Access v1; Desktop consumes effective access only |
+| OWL Tunnel | transport | compatibility binary 0.0.15 arm64; formal x64/protocol artifact pending |
 | OWL Helper | macOS native capability | stable identity required |
-| Runtime Host | macOS production host | stable identity required |
+| Runtime Host | macOS production host | bundle fan.fde.owl.runtime / 1.0.0; current dev artifact x64 ad-hoc; signed universal artifact pending |
 | OWL Worker | optional SaaS UX | not required for local/cloud E2E |
 
 ## Production rule

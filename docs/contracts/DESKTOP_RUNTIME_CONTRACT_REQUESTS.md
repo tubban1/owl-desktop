@@ -77,3 +77,53 @@ Requested semantics:
 - consequential calls cannot rely on Desktop-local dedupe as execution truth
 
 Acceptance: fault injection after Runtime acceptance and before MCP response delivery proves one consequential execution and one canonical receipt.
+
+## CR-DESKTOP-006 — Named browser profile/session binding
+
+**Need:** Identity & Session Vault can identify an external account, but Runtime currently exposes one configured/default Chromium profile rather than a public per-account profile binding contract.
+
+Requested semantics:
+
+- stable `browserProfileId` owned by Runtime;
+- create/list/status/retire profile metadata through a public Runtime contract;
+- Primitive/Skill execution may request an explicit allowed profile binding;
+- Runtime owns profile directory, CDP lifecycle, locking and crash recovery;
+- Desktop stores only the account → `browserProfileId` reference;
+- no raw cookie/session database export to Desktop;
+- profile use remains subject to Runtime policy and execution ownership.
+
+Acceptance: two external accounts for the same service can remain logged in concurrently, an action explicitly selects the intended account/profile, and Runtime proves profile isolation without Desktop reading browser state files.
+
+## CR-DESKTOP-007 — Production Runtime Host artifact
+
+**Owner:** owl-runtime.
+
+Desktop release assembly needs a provider-owned native Host artifact rather than rebuilding Runtime Host source itself.
+
+Requested artifact:
+
+- bundle ID remains `fan.fde.owl.runtime`;
+- stable independent Host version;
+- universal arm64 + x86_64 Mach-O, or separately versioned signed artifacts with identical bundle identity policy;
+- Developer ID signature suitable for notarized Desktop distribution;
+- machine-readable version/fingerprint manifest;
+- ordinary Runtime code updates remain compatible without replacing the Host;
+- explicit native-host upgrade semantics preserve/revalidate macOS permissions.
+
+Acceptance: Desktop can stage the exact signed artifact, verify architecture/signature/version, install it only when missing or explicitly upgraded, and never compile a competing Host implementation.
+
+## CR-DESKTOP-008 — Versioned OWL Tunnel artifact and secret handoff
+
+**Owner:** OWL Tunnel transport provider / Cloud transport boundary.
+
+Requested contract:
+
+- explicit tunnel protocol version;
+- signed/versioned arm64 and x64 macOS binaries;
+- deterministic readiness/health projection;
+- reconnect semantics independent from Runtime task/process state;
+- loopback MCP target contract;
+- secret handoff through Keychain provider, inherited file descriptor, stdin, or equivalent non-persistent mechanism;
+- compatibility manifest consumable by OWL Desktop packaging.
+
+Current compatibility binary v0.0.15 accepts `file:` API-key input, so Desktop uses a 0600 ephemeral file only while the process is running. This is transitional and not the preferred production secret transport.

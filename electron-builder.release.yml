@@ -1,0 +1,30 @@
+appId: ai.owl.desktop
+productName: OWL Desktop
+asar: true
+compression: maximum
+artifactName: '${productName}-${version}-${arch}.${ext}'
+directories:
+  output: release
+files:
+  - dist/**/*
+  - electron/**/*
+  - mcp/**/*
+  - package.json
+extraResources:
+  - from: vendor/owl-runtime
+    to: owl-runtime
+  - from: vendor/owl-tunnel
+    to: owl-tunnel
+  - from: vendor/runtime-host
+    to: runtime-host
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  icon: build/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
