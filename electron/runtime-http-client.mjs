@@ -41,6 +41,9 @@ export class RuntimeHttpClient {
       if (!response.ok || payload?.ok !== true) {
         const error = new Error(payload?.error?.message ?? `OWL Runtime HTTP ${response.status}`);
         error.code = payload?.error?.code ?? `HTTP_${response.status}`;
+        error.runtimeResponded = true;
+        error.httpStatus = response.status;
+        error.requestId = requestId;
         throw error;
       }
       return payload.result;
@@ -65,6 +68,13 @@ export class RuntimeHttpClient {
   runSkill(request, options = {}) {
     return this.invoke("skill.run", request, {
       timeoutMs: options.timeoutMs ?? 30_000,
+      signal: options.signal,
+      requestId: options.requestId,
+    });
+  }
+  createTask(request, options = {}) {
+    return this.invoke("tasks.create", request, {
+      timeoutMs: options.timeoutMs ?? 15_000,
       signal: options.signal,
       requestId: options.requestId,
     });

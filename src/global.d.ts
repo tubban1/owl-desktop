@@ -1,5 +1,6 @@
 import type {
   AccountMeta,
+  CloudBridgeStatus,
   DesktopEnvironment,
   HostStatus,
   RuntimeSnapshot,
@@ -14,6 +15,11 @@ declare global {
     owlDesktop: {
       environment(): Promise<DesktopEnvironment>;
       refreshRuntime(): Promise<RuntimeSnapshot>;
+      cloudStatus(): Promise<CloudBridgeStatus>;
+      cloudProbe(): Promise<{ ok?: boolean; service?: string; contractVersion?: string }>;
+      cloudStart(): Promise<CloudBridgeStatus>;
+      cloudStop(): Promise<CloudBridgeStatus>;
+      cloudSync(): Promise<CloudBridgeStatus>;
       skillSnapshot(): Promise<SkillManagerSnapshot>;
       skillDryRun(skillId: string, args: Record<string, unknown>): Promise<unknown>;
       skillRun(skillId: string, args: Record<string, unknown>): Promise<unknown>;

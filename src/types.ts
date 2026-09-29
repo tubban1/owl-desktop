@@ -7,6 +7,13 @@ export type Settings = {
   tunnelAutoStart: boolean;
   tunnelBinaryPath: string;
   tunnelId: string;
+  cloudEnabled: boolean;
+  cloudAutoStart: boolean;
+  cloudBaseUrl: string;
+  cloudDeviceId: string;
+  cloudPollIntervalMs: number;
+  cloudPresenceIntervalMs: number;
+  cloudTelemetryEnabled: boolean;
   launchAtLogin: boolean;
   diagnosticsEnabled: boolean;
   sessionId: string;
@@ -90,6 +97,52 @@ export type TunnelStatus = {
   secretStorage?: string;
 };
 
+
+
+export type CloudBridgeCommandRecord = {
+  commandId: string;
+  deviceId: string;
+  kind: string;
+  digest: string;
+  status: "processing" | "accepted" | "rejected" | "uncertain";
+  receivedAt: string;
+  updatedAt: string;
+  runtimeTaskId: string | null;
+  runtimeRunId: string | null;
+  rejectionReason: string | null;
+  lastErrorCode: string | null;
+};
+
+export type CloudBridgeStatus = {
+  status:
+    | "stopped"
+    | "starting"
+    | "connected"
+    | "degraded"
+    | "needs_configuration"
+    | "needs_enrollment"
+    | "error";
+  running: boolean;
+  configured: boolean;
+  baseUrl: string;
+  deviceId: string | null;
+  lastHeartbeatAt?: string | null;
+  lastPollAt?: string | null;
+  lastCloudContactAt?: string | null;
+  lastErrorCode?: string | null;
+  lastErrorAt?: string | null;
+  recoveredUncertain?: number;
+  supportedCommandKinds?: string[];
+  commandCounts: {
+    processing: number;
+    accepted: number;
+    rejected: number;
+    uncertain: number;
+  };
+  outboxPending: number;
+  commands: CloudBridgeCommandRecord[];
+};
+
 export type RuntimeSnapshot = {
   mode: "live" | "offline";
   checkedAt: string;
@@ -118,6 +171,7 @@ export type RuntimeSnapshot = {
   };
   host: HostStatus | null;
   tunnel: TunnelStatus;
+  cloud: CloudBridgeStatus;
   accounts: AccountMeta[];
   activity: ActivityEntry[];
 };

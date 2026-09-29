@@ -71,6 +71,8 @@ describe("RuntimeHttpClient", () => {
     await expect(client.processes()).rejects.toMatchObject({
       message: "owned by another session",
       code: "PROCESS_OWNED",
+      runtimeResponded: true,
+      httpStatus: 409,
     });
   });
 });

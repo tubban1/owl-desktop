@@ -8,12 +8,22 @@ import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
 import { TunnelSupervisor } from "./services/tunnel-supervisor.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
 import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
+import { CloudHttpClient } from "./services/cloud-http-client.mjs";
+import { CloudBridgeStore } from "./services/cloud-bridge-store.mjs";
+import { CloudBridgeService } from "./services/cloud-bridge-service.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow;
 let store;
 let identityVault;
 let tunnelSupervisor;
+let cloudBridgeStore;
+let cloudBridge;
+let cloudBridgeState = {
+  status: "stopped",
+  running: false,
+  lastErrorCode: null,
+};
 let mcpServer;
 let mcpState = { status: "stopped", url: null, error: null };
 const activity = [];
@@ -74,6 +84,142 @@ function tunnelApiKey() {
     store.readSecret("OWL_TUNNEL_API_KEY", "owl-tunnel") ??
     store.readSecret("OWL_TUNNEL_API_KEY")
   );
+}
+
+function cloudDeviceCredential() {
+  return (
+    store.readSecret("OWL_CLOUD_DEVICE_CREDENTIAL", "owl-cloud") ??
+    store.readSecret("OWL_CLOUD_DEVICE_CREDENTIAL")
+  );
+}
+
+async function buildCloudPresence() {
+  const info = await runtimeClient().info().catch(() => null);
+  return {
+    capabilities: {
+      cloudBridge: "m1-polling-v1",
+      supportedRemoteCommands: ["runtime.task.create"],
+      runtimeReachable: Boolean(info),
+      mcpAvailable: mcpState.status === "running",
+      tunnelAvailable: tunnelSupervisor?.status().state === "running",
+    },
+    runtimeCompatibility: {
+      desktopVersion: app.getVersion(),
+      runtimeApiVersion: info?.apiVersion ?? null,
+      runtimeVersion: info?.runtimeVersion ?? null,
+      platform: process.platform,
+      arch: process.arch,
+      cloudBridgeContract: "v1",
+    },
+  };
+}
+
+function cloudBridgeSnapshot() {
+  const settings = store.getSettings();
+  const storeSnapshot = cloudBridgeStore?.snapshot() ?? {
+    commandCounts: {
+      processing: 0,
+      accepted: 0,
+      rejected: 0,
+      uncertain: 0,
+    },
+    outboxPending: 0,
+    commands: [],
+  };
+  return {
+    baseUrl: settings.cloudBaseUrl,
+    deviceId: settings.cloudDeviceId || null,
+    configured: Boolean(
+      settings.cloudBaseUrl &&
+      settings.cloudDeviceId &&
+      cloudDeviceCredential(),
+    ),
+    ...storeSnapshot,
+    ...(cloudBridge?.snapshot() ?? cloudBridgeState),
+  };
+}
+
+async function stopCloudBridge() {
+  if (cloudBridge) {
+    await cloudBridge.stop().catch(() => undefined);
+    cloudBridge = undefined;
+  }
+  cloudBridgeState = {
+    status: "stopped",
+    running: false,
+    lastErrorCode: null,
+  };
+  return cloudBridgeSnapshot();
+}
+
+async function startCloudBridge() {
+  const settings = store.getSettings();
+  await stopCloudBridge();
+
+  if (!settings.cloudEnabled) return cloudBridgeSnapshot();
+
+  if (!settings.cloudBaseUrl?.trim()) {
+    cloudBridgeState = {
+      status: "needs_configuration",
+      running: false,
+      lastErrorCode: "CLOUD_BASE_URL_MISSING",
+    };
+    return cloudBridgeSnapshot();
+  }
+  if (!settings.cloudDeviceId?.trim() || !cloudDeviceCredential()) {
+    cloudBridgeState = {
+      status: "needs_enrollment",
+      running: false,
+      lastErrorCode: "CLOUD_DEVICE_IDENTITY_MISSING",
+    };
+    return cloudBridgeSnapshot();
+  }
+
+  const client = new CloudHttpClient({
+    baseUrl: settings.cloudBaseUrl,
+    deviceCredential: cloudDeviceCredential(),
+  });
+
+  cloudBridge = new CloudBridgeService({
+    client,
+    runtimeClient: runtimeClient(),
+    store: cloudBridgeStore,
+    deviceId: settings.cloudDeviceId,
+    appVersion: app.getVersion(),
+    pollIntervalMs: settings.cloudPollIntervalMs,
+    presenceIntervalMs: settings.cloudPresenceIntervalMs,
+    telemetryEnabled: settings.cloudTelemetryEnabled,
+    buildPresence: buildCloudPresence,
+    onEvent(level, message, meta) {
+      record(level, "cloud", message, meta);
+    },
+  });
+
+  try {
+    cloudBridgeState = await cloudBridge.start();
+  } catch (error) {
+    cloudBridgeState = {
+      status: "error",
+      running: false,
+      lastErrorCode: error?.code ?? "CLOUD_BRIDGE_START_FAILED",
+    };
+    record("error", "cloud", "Cloud Bridge failed to start", {
+      code: cloudBridgeState.lastErrorCode,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return cloudBridgeSnapshot();
+}
+
+async function probeCloud() {
+  const settings = store.getSettings();
+  if (!settings.cloudBaseUrl?.trim()) {
+    throw new Error("OWL Cloud base URL is not configured.");
+  }
+  const client = new CloudHttpClient({
+    baseUrl: settings.cloudBaseUrl,
+  });
+  return client.health();
 }
 
 function runtimeHostSupervisor() {
@@ -188,6 +334,7 @@ async function runtimeSnapshot() {
     },
     host: host.status === "fulfilled" ? host.value : null,
     tunnel: tunnelSupervisor?.status() ?? { state: "stopped" },
+    cloud: cloudBridgeSnapshot(),
     accounts: identityVault?.list() ?? [],
     activity: activity.slice(0, 50),
   };
@@ -239,6 +386,15 @@ function registerIpc() {
   }));
 
   ipcMain.handle("runtime:refresh", () => runtimeSnapshot());
+  ipcMain.handle("cloud:status", () => cloudBridgeSnapshot());
+  ipcMain.handle("cloud:probe", () => probeCloud());
+  ipcMain.handle("cloud:start", () => startCloudBridge());
+  ipcMain.handle("cloud:stop", () => stopCloudBridge());
+  ipcMain.handle("cloud:sync", async () => {
+    if (!cloudBridge) return await startCloudBridge();
+    await cloudBridge.syncOnce({ forceHeartbeat: true });
+    return cloudBridgeSnapshot();
+  });
   ipcMain.handle("skills:snapshot", async () => {
     const started = Date.now();
     try {
@@ -339,6 +495,20 @@ function registerIpc() {
         await tunnelSupervisor.stop();
       }
     }
+    if (
+      "cloudEnabled" in (patch ?? {}) ||
+      "cloudBaseUrl" in (patch ?? {}) ||
+      "cloudDeviceId" in (patch ?? {}) ||
+      "cloudPollIntervalMs" in (patch ?? {}) ||
+      "cloudPresenceIntervalMs" in (patch ?? {}) ||
+      "cloudTelemetryEnabled" in (patch ?? {})
+    ) {
+      if (next.cloudEnabled) {
+        await startCloudBridge();
+      } else {
+        await stopCloudBridge();
+      }
+    }
     record("info", "desktop", "Settings updated");
     return next;
   });
@@ -363,6 +533,10 @@ function registerIpc() {
         });
       }
     }
+    if (meta.name === "OWL_CLOUD_DEVICE_CREDENTIAL") {
+      const settings = store.getSettings();
+      if (settings.cloudEnabled) await startCloudBridge();
+    }
     return meta;
   });
   ipcMain.handle("secrets:delete", async (_event, id) => {
@@ -377,6 +551,9 @@ function registerIpc() {
     }
     if (existing?.name === "OWL_TUNNEL_API_KEY") {
       await tunnelSupervisor.stop();
+    }
+    if (existing?.name === "OWL_CLOUD_DEVICE_CREDENTIAL") {
+      await stopCloudBridge();
     }
     return result;
   });
@@ -396,6 +573,9 @@ if (!hasLock) {
   app.whenReady().then(async () => {
     store = new DesktopStore();
     identityVault = new IdentityVault();
+    cloudBridgeStore = new CloudBridgeStore({
+      file: path.join(app.getPath("userData"), "cloud-bridge-state.json"),
+    });
     tunnelSupervisor = new TunnelSupervisor({
       onEvent(level, message, meta) {
         record(level, "tunnel", message, meta);
@@ -412,6 +592,14 @@ if (!hasLock) {
         });
       });
     }
+    if (settings.cloudEnabled && settings.cloudAutoStart) {
+      await startCloudBridge().catch((error) => {
+        record("error", "cloud", "Cloud Bridge auto-start failed", {
+          code: error?.code ?? null,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
     createWindow();
 
     app.on("activate", () => {
@@ -420,6 +608,7 @@ if (!hasLock) {
   });
 
   app.on("before-quit", () => {
+    void cloudBridge?.stop();
     void tunnelSupervisor?.stop();
     void stopMcp();
   });

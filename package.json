@@ -20,7 +20,8 @@
     "package:mac:smoke:x64": "npm run stage:runtime && npm run build && electron-builder --mac --x64 --dir",
     "verify:mac:release": "node scripts/verify-macos-release-env.mjs",
     "package:mac:release": "npm run stage:runtime && npm run verify:mac:release && npm run build && electron-builder --config electron-builder.release.yml --mac --arm64 --x64",
-    "start": "electron ."
+    "start": "electron .",
+    "verify:cloud-bridge-live": "node scripts/verify-cloud-bridge-live-e2e.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",

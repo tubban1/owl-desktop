@@ -37,6 +37,8 @@ See:
 - [Identity & Session Vault v1](docs/contracts/IDENTITY_SESSION_VAULT_V1.md)
 - [Runtime Host + Tunnel Consumer v1](docs/contracts/RUNTIME_HOST_TUNNEL_CONSUMER_V1.md)
 - [Cloud Bridge Contract](docs/contracts/CLOUD_BRIDGE_CONTRACT_V1.md)
+- [Cloud Bridge M1 Status](docs/integration/CLOUD_BRIDGE_M1_STATUS.md)
+- [Desktop → Cloud Contract Requests](docs/contracts/DESKTOP_CLOUD_CONTRACT_REQUESTS.md)
 - [Compatibility Matrix](docs/contracts/COMPATIBILITY_MATRIX.md)
 - [Platform Integration](docs/integration/PLATFORM_INTEGRATION.md)
 - [Platform Integration Gates v1](docs/integration/INTEGRATION_GATES_V1.md)
@@ -70,6 +72,7 @@ Quality gates:
 npm test
 npm run build
 npm run verify:local-e2e
+npm run verify:cloud-bridge-live
 ```
 
 The Local E2E verifier expects Runtime to allow the target repository through `ALLOWED_DIRECTORIES`.
