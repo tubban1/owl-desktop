@@ -30,6 +30,7 @@ describe("CloudBridgeStore", () => {
       commandId: "cmd_1",
       deviceId: "dev_1",
       kind: "runtime.task.create",
+      kindVersion: 1,
       payload: {
         label: "Check repo",
         steps: [{ id: "status", action: "git.status" }],
@@ -60,12 +61,27 @@ describe("CloudBridgeStore", () => {
     expect(cloudCommandDigest(command)).toHaveLength(64);
   });
 
+  it("includes kindVersion in the command digest", () => {
+    const base = {
+      commandId: "cmd_versioned",
+      deviceId: "dev_1",
+      kind: "runtime.task.create",
+      payload: { label: "x", steps: [{ id: "s", action: "git.status" }] },
+    };
+    expect(
+      cloudCommandDigest({ ...base, kindVersion: 1 }),
+    ).not.toBe(
+      cloudCommandDigest({ ...base, kindVersion: 2 }),
+    );
+  });
+
   it("turns interrupted processing into uncertain on restart", () => {
     const store = createStore();
     store.beginCommand({
       commandId: "cmd_crash",
       deviceId: "dev_1",
       kind: "runtime.task.create",
+      kindVersion: 1,
       payload: { label: "x", steps: [{ id: "s", action: "git.status" }] },
     });
 
@@ -82,6 +98,7 @@ describe("CloudBridgeStore", () => {
       commandId: "cmd_no_payload_copy",
       deviceId: "dev_1",
       kind: "runtime.task.create",
+      kindVersion: 1,
       payload: {
         label: "Contains user content",
         steps: [{
@@ -101,6 +118,35 @@ describe("CloudBridgeStore", () => {
     expect(store.getCommand("cmd_no_payload_copy")).toMatchObject({
       runtimeTaskId: "task_1",
       status: "accepted",
+    });
+  });
+
+  it("compacts only old terminal mappings and never uncertain records", () => {
+    const store = createStore();
+    const old = "2026-09-01T00:00:00.000Z";
+
+    for (const id of ["cmd_accepted", "cmd_rejected", "cmd_uncertain"]) {
+      store.beginCommand({
+        commandId: id,
+        deviceId: "dev_1",
+        kind: "runtime.task.create",
+        kindVersion: 1,
+        payload: { label: id, steps: [{ id: "s", action: "git.status" }] },
+      }, old);
+    }
+    store.markAccepted("cmd_accepted", { runtimeTaskId: "task_1" }, old);
+    store.markRejected("cmd_rejected", "TEST", old);
+    store.markUncertain("cmd_uncertain", "UNKNOWN", old);
+
+    expect(
+      store.compactTerminalCommands({
+        now: new Date("2026-09-29T00:00:00.000Z"),
+      }).sort(),
+    ).toEqual(["cmd_accepted", "cmd_rejected"]);
+    expect(store.getCommand("cmd_accepted")).toBeNull();
+    expect(store.getCommand("cmd_rejected")).toBeNull();
+    expect(store.getCommand("cmd_uncertain")).toMatchObject({
+      status: "uncertain",
     });
   });
 
