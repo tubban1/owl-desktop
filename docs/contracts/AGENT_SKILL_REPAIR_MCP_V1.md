@@ -1,6 +1,6 @@
 # AgentRequest Skill Repair MCP v1
 
-Status: **Desktop stacked integration candidate**
+Status: **Desktop stacked integration live accepted against pinned Runtime R1**
 
 ## Purpose
 
@@ -205,7 +205,24 @@ owl-runtime
 f00ba4f7f5c3fbddc18cf7c04fc0cfccdbb786bd
 ~~~
 
-The live gate must prove:
+Live acceptance evidence:
+
+~~~text
+16 test files PASS
+92 / 92 unit tests PASS
+TypeScript + renderer build PASS
+
+Runtime repair extensions PASS
+Runtime repair proposal -> Desktop Agent Inbox PASS
+stable MCP owner claim PASS
+privacy-safe repair context PASS
+Candidate revise + revalidate PASS
+same logical repair replay -> one Candidate revision PASS
+claimed repair survives Runtime withdrawal PASS
+durable AgentRequest completion PASS
+~~~
+
+The accepted live scenario proves:
 
 1. invalid Candidate produces a Runtime AgentRequest;
 2. Desktop materializes it once;
