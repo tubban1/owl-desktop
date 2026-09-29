@@ -20,6 +20,17 @@ Acceptance: reconnecting the same logical session does not create a duplicate id
 
 ## CR-DESKTOP-002 — Cursor-based event/log stream
 
+**Status:** **AgentRequest-required durable public event subset delivered; broader observability stream remains open.**
+
+Runtime now exposes the durable public event foundation required by
+CR-DESKTOP-010 through RuntimeEventRuntimeClient / events.list, including
+monotonic sequence/cursor replay, bounded retention and explicit cursor-expiry
+semantics. OWL Desktop consumes that subset with a durable cursor and explicit
+reconciliation.
+
+The remaining request in CR-DESKTOP-002 is the broader Control-plane
+observability projection for session/task/process/provider logs and filters.
+
 **Need:** Control must show near-real-time logs separated by session, task, process and provider.
 
 Requested semantics:
@@ -220,6 +231,19 @@ Acceptance:
 See `docs/skills/SKILL_MANAGER_V1.md` for the Desktop product contract.
 
 ## CR-DESKTOP-010 — Runtime AgentRequest producer events
+
+**Status:** **Runtime producer delivered and Desktop public-event consumer live accepted.**
+
+Accepted Runtime producer baseline:
+
+~~~text
+owl-runtime
+a44c5d26636c71faf8a8c146ef43e2af71332b11
+~~~
+
+Desktop consumes the producer only through events.list, materializes one
+canonical local Agent Inbox, and enters needs_attention rather than advancing
+past an unrecoverable cursor/retention gap.
 
 **Owner:** owl-runtime 1.x.
 
