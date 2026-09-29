@@ -143,8 +143,8 @@ describe("RuntimeAgentRequestEventBridge", () => {
         .mockResolvedValueOnce(
           page([], {
             nextCursor: "runtime-events:2",
-            oldestSequence: 100,
-            newestSequence: 101,
+            oldestSequence: 1,
+            newestSequence: 2,
           }),
         ),
     });
@@ -365,7 +365,7 @@ describe("RuntimeAgentRequestEventBridge", () => {
     const setupState = setup({
       listEvents: vi
         .fn()
-        .mockResolvedValueOnce(page([proposal(100)]))
+        .mockResolvedValueOnce(page([proposal(1)]))
         .mockRejectedValueOnce(expired),
     });
 
