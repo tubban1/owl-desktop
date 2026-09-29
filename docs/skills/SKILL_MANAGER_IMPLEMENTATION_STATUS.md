@@ -1,6 +1,6 @@
 # Skill Manager implementation status
 
-Status: **Phase B product flow implemented on Desktop feature branch**  
+Status: **Phase B implemented and live accepted through Runtime public HTTP API**  
 Base Runtime compatibility: **1.0.0-rc.4 / API 0.1**  
 Optional lifecycle extensions: **User Skill Registry v1 + Workflow Skill Discovery v1**
 
@@ -248,23 +248,83 @@ npm run build
 npm run verify:agent-inbox-e2e
 ~~~
 
-## Remaining live evidence
+## Live cross-repository acceptance
 
-Before merging Phase B, run against an actual Runtime build that exposes both 1.x extensions:
+CR-DESKTOP-009 has now passed a real public-HTTP integration gate against:
 
 ~~~text
-3+ repeated verified Tasks
-→ discover proposal
-→ Create Candidate
-→ Validate
-→ Compile Test
-→ Run Test
-→ Inspect promotable
-→ Promote
-→ User Skill appears in skills.catalog
-→ Dry Run promoted Skill
-→ disable/enable
-→ rollback/version management where applicable
+owl-runtime
+commit:
+9e36d0dc4ce6b10e792abea8cf8263de2baa4b20
+
+Runtime version:
+1.0.0-rc.4
+
+Public API:
+0.1
 ~~~
 
-This is the final product-level acceptance for CR-DESKTOP-009.
+The Desktop gate checks out that exact Runtime commit, starts the Runtime HTTP daemon with an isolated state root, then uses **Desktop's RuntimeHttpClient only**.
+
+Verified flow:
+
+~~~text
+Runtime HTTP reachable
+→ feature-detect userSkillRegistry v1
+→ feature-detect workflowSkillDiscovery v1
+
+3 x runtime.compile_task
+→ 3 completed real Persistent Primitive Tasks
+→ M2 episodes
+
+Desktop discover
+→ review Runtime proposal
+→ explicit submit
+→ canonical Candidate id/digest
+→ validate exact digest
+→ compile Candidate test
+→ normal Persistent Test Task
+→ run test
+→ inspect
+
+Runtime confirms:
+M2 evidence
+verification
+quality gate
+privacy gate
+promotion readiness
+
+→ promote(confirm=true)
+→ promoted User Skill appears in skills.catalog
+→ promoted User Skill dry-run succeeds
+→ disable
+→ enable
+→ discovery reconciles governance=installed
+~~~
+
+Observed live PASS markers:
+
+~~~text
+PASS Runtime HTTP reachable
+PASS Runtime 1.x Skill extensions feature-detected
+PASS three repeated verified Runtime Tasks completed
+PASS WorkflowDiscoveryRuntimeClient proposal review
+PASS explicit Create Candidate
+PASS digest-bound Runtime validation
+PASS Candidate compiled to normal Persistent Task
+PASS Candidate Persistent Test Task completed
+PASS M2 / verification / quality / privacy promotion inspection
+PASS explicit digest-bound promotion
+PASS promoted User Skill appears in canonical catalog
+PASS promoted User Skill dry-run
+PASS installed User Skill enable/disable lifecycle
+PASS discovery reconciles installed governance
+~~~
+
+The live verifier is:
+
+~~~text
+npm run verify:skill-discovery-live
+~~~
+
+This closes the Desktop product-level acceptance for the core CR-DESKTOP-009 workflow. Multi-version rollback remains covered by Runtime's own User Skill Registry conformance and Desktop's adapter/unit coverage; the live Desktop fixture intentionally promotes only one version.
