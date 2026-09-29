@@ -128,3 +128,86 @@ export type DesktopEnvironment = {
   arch: string;
   electronVersion: string;
 };
+
+export type SkillAvailability =
+  | "ready"
+  | "disabled"
+  | "needs_attention"
+  | "incompatible"
+  | "missing_capability"
+  | "missing_permission"
+  | "integrity_failed";
+
+export type SkillSource =
+  | "builtin"
+  | "user"
+  | "distilled"
+  | "team"
+  | "cloud_library";
+
+export type SkillSummary = {
+  id: string;
+  title: string;
+  domain: string;
+  description: string;
+  version: string;
+  source: SkillSource;
+  scope: string;
+  enabled: boolean;
+  availability: SkillAvailability;
+  availabilityReasons: string[];
+  executionMode: "inline" | "durable" | string;
+  requiredPrimitiveAbi: number | null;
+  requiredPrimitives: string[];
+  memoryPolicy: Record<string, unknown> | null;
+  riskLevel: "low" | "medium" | "high" | "critical" | string;
+  idempotent: boolean;
+  sideEffects: string[];
+  requiresVerification: boolean;
+  retryPolicy: string;
+  resources: unknown[];
+  inputs: Record<string, string>;
+  lifecycle: {
+    canInstall: boolean;
+    canEnableDisable: boolean;
+    canUpdate: boolean;
+    canRollback: boolean;
+    canUninstall: boolean;
+    reason: string;
+  };
+};
+
+export type SkillProviderStatus = {
+  id: string;
+  label: string;
+  enabled: boolean;
+  available: boolean;
+  capabilities: string[];
+  executionTargets: string[];
+  details: unknown;
+};
+
+export type SkillManagerSnapshot = {
+  source: "runtime-1.0";
+  fetchedAt: string;
+  primitiveAbiVersion: number;
+  skills: SkillSummary[];
+  primitives: Array<Record<string, unknown> & { id?: string }>;
+  providers: SkillProviderStatus[];
+  summary: {
+    installed: number;
+    ready: number;
+    needsAttention: number;
+    disabled: number;
+    candidates: number;
+    updates: number;
+  };
+  lifecycle: {
+    registrySupported: boolean;
+    candidatesSupported: boolean;
+    librarySupported: boolean;
+    reason: string;
+  };
+};
+
+export type SkillRunResult = unknown;

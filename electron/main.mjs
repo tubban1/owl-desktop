@@ -7,6 +7,7 @@ import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
 import { TunnelSupervisor } from "./services/tunnel-supervisor.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
+import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow;
@@ -46,6 +47,19 @@ function runtimeToken() {
     store.readSecret("OWL_RUNTIME_API_TOKEN", "owl-runtime") ??
     store.readSecret("OWL_RUNTIME_API_TOKEN")
   );
+}
+
+function runtimeClient() {
+  const settings = store.getSettings();
+  return new RuntimeHttpClient({
+    baseUrl: settings.runtimeBaseUrl,
+    sessionId: settings.sessionId,
+    token: runtimeToken(),
+  });
+}
+
+function skillManagerPort() {
+  return new RuntimeSkillManagerPort({ client: runtimeClient() });
 }
 
 function mcpToken() {
@@ -137,14 +151,7 @@ async function startMcp() {
 
 async function runtimeSnapshot() {
   const settings = store.getSettings();
-  const token =
-    store.readSecret("OWL_RUNTIME_API_TOKEN", "owl-runtime") ??
-    store.readSecret("OWL_RUNTIME_API_TOKEN");
-  const client = new RuntimeHttpClient({
-    baseUrl: settings.runtimeBaseUrl,
-    sessionId: settings.sessionId,
-    token,
-  });
+  const client = runtimeClient();
 
   const started = Date.now();
   const [info, health, tasks, approvals, processes, diagnostics, host] =
@@ -232,6 +239,59 @@ function registerIpc() {
   }));
 
   ipcMain.handle("runtime:refresh", () => runtimeSnapshot());
+  ipcMain.handle("skills:snapshot", async () => {
+    const started = Date.now();
+    try {
+      const snapshot = await skillManagerPort().snapshot();
+      record("info", "skills", "Skill catalog refreshed", {
+        skillCount: snapshot.skills.length,
+        durationMs: Date.now() - started,
+      });
+      return snapshot;
+    } catch (error) {
+      record("error", "skills", "Skill catalog refresh failed", {
+        code: error?.code ?? null,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  });
+  ipcMain.handle("skills:dry-run", async (_event, skillId, args) => {
+    const started = Date.now();
+    try {
+      const result = await skillManagerPort().dryRun(skillId, args ?? {});
+      record("info", "skills", "Skill dry run completed", {
+        skillId,
+        durationMs: Date.now() - started,
+      });
+      return result;
+    } catch (error) {
+      record("warn", "skills", "Skill dry run failed", {
+        skillId,
+        code: error?.code ?? null,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  });
+  ipcMain.handle("skills:run", async (_event, skillId, args) => {
+    const started = Date.now();
+    try {
+      const result = await skillManagerPort().run(skillId, args ?? {});
+      record("info", "skills", "Skill run completed", {
+        skillId,
+        durationMs: Date.now() - started,
+      });
+      return result;
+    } catch (error) {
+      record("warn", "skills", "Skill run failed", {
+        skillId,
+        code: error?.code ?? null,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  });
   ipcMain.handle("host:status", () => runtimeHostSupervisor().status());
   ipcMain.handle("host:restart", () => runtimeHostSupervisor().restartService());
   ipcMain.handle("host:stop", () => runtimeHostSupervisor().stopService());

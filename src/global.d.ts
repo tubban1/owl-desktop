@@ -5,6 +5,7 @@ import type {
   RuntimeSnapshot,
   SecretMeta,
   Settings,
+  SkillManagerSnapshot,
   TunnelStatus,
 } from "./types";
 
@@ -13,6 +14,9 @@ declare global {
     owlDesktop: {
       environment(): Promise<DesktopEnvironment>;
       refreshRuntime(): Promise<RuntimeSnapshot>;
+      skillSnapshot(): Promise<SkillManagerSnapshot>;
+      skillDryRun(skillId: string, args: Record<string, unknown>): Promise<unknown>;
+      skillRun(skillId: string, args: Record<string, unknown>): Promise<unknown>;
       hostStatus(): Promise<HostStatus>;
       hostRestart(): Promise<HostStatus>;
       hostStop(): Promise<HostStatus>;

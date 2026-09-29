@@ -59,4 +59,14 @@ export class RuntimeHttpClient {
   approvals() { return this.invoke("approvals.list", {}); }
   processes() { return this.invoke("process", { op: "list" }); }
   diagnostics(auditLimit = 40) { return this.invoke("diagnostics.get", { auditLimit }, 5000); }
+  capabilities(goal = "") { return this.invoke("capabilities.get", { goal }, 5000); }
+  primitiveCatalog() { return this.invoke("primitives.catalog", undefined, 5000); }
+  skillCatalog() { return this.invoke("skills.catalog", undefined, 5000); }
+  runSkill(request, options = {}) {
+    return this.invoke("skill.run", request, {
+      timeoutMs: options.timeoutMs ?? 30_000,
+      signal: options.signal,
+      requestId: options.requestId,
+    });
+  }
 }
