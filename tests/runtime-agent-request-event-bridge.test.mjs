@@ -134,15 +134,15 @@ afterEach(() => {
 
 describe("RuntimeAgentRequestEventBridge", () => {
   it("consumes the complete AgentRequest channel and resumes from the durable cursor", async () => {
-    const first = proposal(100);
-    const second = withdrawal(101, 100);
+    const first = proposal(1);
+    const second = withdrawal(2, 1);
     const setupState = setup({
       listEvents: vi
         .fn()
         .mockResolvedValueOnce(page([first, second]))
         .mockResolvedValueOnce(
           page([], {
-            nextCursor: "runtime-events:101",
+            nextCursor: "runtime-events:2",
             oldestSequence: 100,
             newestSequence: 101,
           }),
@@ -153,8 +153,8 @@ describe("RuntimeAgentRequestEventBridge", () => {
 
     expect(initial.status).toBe("healthy");
     expect(initial.consumer).toEqual({
-      lastSequence: 101,
-      lastCursor: "runtime-events:101",
+      lastSequence: 2,
+      lastCursor: "runtime-events:2",
     });
     expect(setupState.inbox.summary().pending).toBe(0);
     expect(setupState.client.listEvents).toHaveBeenNthCalledWith(1, {
@@ -168,7 +168,7 @@ describe("RuntimeAgentRequestEventBridge", () => {
     await setupState.bridge.syncOnce();
 
     expect(setupState.client.listEvents).toHaveBeenNthCalledWith(2, {
-      afterCursor: "runtime-events:101",
+      afterCursor: "runtime-events:2",
       limit: 100,
       types: [
         "agent_request.proposed",
@@ -180,8 +180,8 @@ describe("RuntimeAgentRequestEventBridge", () => {
   it("stops at the last accepted event when a page contains an unseen sequence gap", async () => {
     const setupState = setup({
       listEvents: vi.fn(async () =>
-        page([proposal(100), proposal(105)], {
-          nextCursor: "runtime-events:105",
+        page([proposal(1), proposal(5)], {
+          nextCursor: "runtime-events:5",
         }),
       ),
     });
@@ -191,13 +191,13 @@ describe("RuntimeAgentRequestEventBridge", () => {
     expect(result.status).toBe("needs_attention");
     expect(result.reconciliation).toMatchObject({
       reasonCode: "AGENT_REQUEST_EVENT_GAP",
-      savedCursor: "runtime-events:100",
-      savedSequence: 100,
-      pageNextCursor: "runtime-events:105",
+      savedCursor: "runtime-events:1",
+      savedSequence: 1,
+      pageNextCursor: "runtime-events:5",
     });
     expect(setupState.consumer.readState()).toMatchObject({
-      lastSequence: 100,
-      lastCursor: "runtime-events:100",
+      lastSequence: 1,
+      lastCursor: "runtime-events:1",
     });
     expect(setupState.inbox.summary().pending).toBe(1);
 
@@ -208,7 +208,7 @@ describe("RuntimeAgentRequestEventBridge", () => {
   it("enters durable reconciliation on retention gap and never jumps to newest cursor", async () => {
     const expired = Object.assign(
       new Error(
-        "CURSOR_EXPIRED: RETENTION_GAP requested=100 oldestRetained=150.",
+        "CURSOR_EXPIRED: RETENTION_GAP requested=1 oldestRetained=50.",
       ),
       {
         code: "CURSOR_EXPIRED",
@@ -217,24 +217,24 @@ describe("RuntimeAgentRequestEventBridge", () => {
     );
     const listEvents = vi
       .fn()
-      .mockResolvedValueOnce(page([proposal(100)]))
+      .mockResolvedValueOnce(page([proposal(1)]))
       .mockRejectedValue(expired);
 
     const setupState = setup({ listEvents });
     await setupState.bridge.syncOnce();
 
     expect(setupState.consumer.readState().lastCursor).toBe(
-      "runtime-events:100",
+      "runtime-events:1",
     );
 
     const gap = await setupState.bridge.syncOnce();
     expect(gap.status).toBe("needs_attention");
     expect(gap.reconciliation).toMatchObject({
       reasonCode: "CURSOR_EXPIRED",
-      savedCursor: "runtime-events:100",
-      savedSequence: 100,
-      requestedSequence: 100,
-      oldestRetainedSequence: 150,
+      savedCursor: "runtime-events:1",
+      savedSequence: 1,
+      requestedSequence: 1,
+      oldestRetainedSequence: 50,
     });
 
     await setupState.bridge.syncOnce();
@@ -243,7 +243,7 @@ describe("RuntimeAgentRequestEventBridge", () => {
     await setupState.bridge.retrySavedCursor();
     expect(listEvents).toHaveBeenCalledTimes(3);
     expect(listEvents).toHaveBeenNthCalledWith(3, {
-      afterCursor: "runtime-events:100",
+      afterCursor: "runtime-events:1",
       limit: 100,
       types: [
         "agent_request.proposed",
@@ -253,12 +253,12 @@ describe("RuntimeAgentRequestEventBridge", () => {
 
     const afterRetry = setupState.bridge.snapshot();
     expect(afterRetry.status).toBe("needs_attention");
-    expect(afterRetry.consumer.lastCursor).toBe("runtime-events:100");
+    expect(afterRetry.consumer.lastCursor).toBe("runtime-events:1");
   });
 
   it("preserves needs-attention when explicit retry encounters a transient transport failure", async () => {
     const cursorAhead = Object.assign(
-      new Error("CURSOR_AHEAD: requested=100 newest=50."),
+      new Error("CURSOR_AHEAD: requested=1 newest=0."),
       {
         code: "CURSOR_AHEAD",
         runtimeResponded: true,
@@ -269,7 +269,7 @@ describe("RuntimeAgentRequestEventBridge", () => {
     });
     const listEvents = vi
       .fn()
-      .mockResolvedValueOnce(page([proposal(100)]))
+      .mockResolvedValueOnce(page([proposal(1)]))
       .mockRejectedValueOnce(cursorAhead)
       .mockRejectedValueOnce(transient);
 
@@ -280,7 +280,7 @@ describe("RuntimeAgentRequestEventBridge", () => {
     const retry = await setupState.bridge.retrySavedCursor();
     expect(retry.status).toBe("needs_attention");
     expect(retry.reconciliation.reasonCode).toBe("CURSOR_AHEAD");
-    expect(retry.reconciliation.savedCursor).toBe("runtime-events:100");
+    expect(retry.reconciliation.savedCursor).toBe("runtime-events:1");
   });
 
   it("does not call events.list when Runtime does not expose both optional extensions", async () => {
@@ -324,10 +324,41 @@ describe("RuntimeAgentRequestEventBridge", () => {
     expect(setupState.client.listEvents).not.toHaveBeenCalled();
   });
 
+  it("requires reconciliation when first replay begins above journal genesis", async () => {
+    const setupState = setup({
+      listEvents: vi.fn(async () =>
+        page([proposal(50)], {
+          nextCursor: "runtime-events:50",
+          oldestSequence: 50,
+          newestSequence: 50,
+        }),
+      ),
+    });
+
+    const result = await setupState.bridge.syncOnce();
+
+    expect(result.status).toBe("needs_attention");
+    expect(result.reconciliation).toMatchObject({
+      reasonCode: "RUNTIME_EVENT_HISTORY_TRUNCATED_BEFORE_FIRST_CHECKPOINT",
+      savedCursor: null,
+      savedSequence: null,
+      oldestRetainedSequence: 50,
+      pageNextCursor: "runtime-events:50",
+    });
+    expect(setupState.consumer.readState()).toMatchObject({
+      lastSequence: null,
+      lastCursor: null,
+    });
+    expect(setupState.inbox.summary().pending).toBe(0);
+
+    await setupState.bridge.syncOnce();
+    expect(setupState.client.listEvents).toHaveBeenCalledTimes(1);
+  });
+
   it("persists reconciliation across bridge restart", async () => {
     const expired = Object.assign(
       new Error(
-        "CURSOR_EXPIRED: RETENTION_GAP requested=100 oldestRetained=150.",
+        "CURSOR_EXPIRED: RETENTION_GAP requested=1 oldestRetained=50.",
       ),
       { code: "CURSOR_EXPIRED", runtimeResponded: true },
     );
@@ -356,7 +387,7 @@ describe("RuntimeAgentRequestEventBridge", () => {
     expect(snapshot.status).toBe("needs_attention");
     expect(snapshot.reconciliation).toMatchObject({
       reasonCode: "CURSOR_EXPIRED",
-      savedCursor: "runtime-events:100",
+      savedCursor: "runtime-events:1",
     });
 
     await restarted.syncOnce();
