@@ -815,6 +815,7 @@ if (!hasLock) {
       inbox: agentInbox,
       stateFile: runtimeAgentRequestConsumerStateFile,
     });
+    createRuntimeEventBridge();
     tunnelSupervisor = new TunnelSupervisor({
       onEvent(level, message, meta) {
         record(level, "tunnel", message, meta);
