@@ -128,48 +128,93 @@ Requested contract:
 
 Current compatibility binary v0.0.15 accepts `file:` API-key input, so Desktop uses a 0600 ephemeral file only while the process is running. This is transitional and not the preferred production secret transport.
 
-## CR-DESKTOP-009 — User Skill Registry and candidate lifecycle
+## CR-DESKTOP-009 — User Skill Registry, candidate validation and evidence-backed promotion
 
 **Owner:** owl-runtime 1.x.
 
 **Priority:** post-1.0 / non-blocking for Runtime 1.0 stable.
 
-**Need:** OWL Control is adding a first-class Skill Manager. Runtime 1.0 already exposes the built-in Skill catalog and Skill execution, but user-installable Skill lifecycle is not yet a public canonical Runtime capability.
+**Observed baseline:** current AgentOS Runtime 1.0.x has a static built-in Skill catalog. Unknown Skill IDs are rejected. Durable workflow learning currently persists as Task -> M2 Episodic -> optional M3 Semantic Memory; it does not create an executable Skill.
+
+**Need:** add a canonical User Skill lifecycle that reuses the existing Primitive, durable Task, evidence, privacy/quality gate, Approval and verification architecture.
 
 Requested Runtime surface:
 
-- inspect a declarative Skill package without installing it;
-- validate schema, Primitive ABI, required Primitives, execution contract, verification and integrity;
-- install an immutable Skill version;
-- list installed Skills and versions;
-- enable/disable an installed Skill;
+Candidate ingestion / repair loop:
+
+- `candidate.submit`
+- `candidate.get`
+- `candidate.revise`
+- `candidate.validate`
+- `candidate.dismiss`
+
+Test/evidence:
+
+- `candidate.compile_test`
+- `candidate.test`
+- `candidate.inspect`
+
+Promotion:
+
+- `candidate.promote`
+
+Canonical Registry:
+
+- list installed Skills and immutable versions;
+- install/promote exactly one validated digest;
+- enable/disable;
 - activate a specific version;
-- roll back to a previous immutable version;
-- uninstall a Skill/version through Runtime;
+- roll back;
+- uninstall version/Skill;
 - report provenance/digest/integrity/compatibility;
-- list/get/test/dismiss Skill candidates;
-- promote a validated candidate into an installed Skill only with explicit confirmation;
-- expose current availability based on Primitive/provider/policy/permission state.
+- expose canonical availability based on Primitive/provider/policy/permission state.
+
+Validation result must be machine-readable and suitable for an external LLM repair loop. It should include stable error codes, target ABI versions, field/file references where possible, required/allowed Primitives, contract mismatches, and a candidate/package digest.
 
 Required invariants:
 
 - Desktop never writes Runtime Skill Registry files directly;
+- Desktop/Runtime do not require an embedded LLM for semantic repair;
+- ChatGPT/AI Worker may revise Candidate content but cannot bypass validation/promotion;
 - Cloud distribution does not bypass local Runtime validation;
 - user Skills execute through the same Approval, Resource Arbiter, Primitive ABI and Verifier boundaries as built-ins;
 - declarative user Skills cannot call provider internals or L0.5 Actions directly;
+- test execution should reuse durable Task semantics where possible;
+- promotion evidence references real Task/M2 evidence rather than an LLM self-assessment;
+- M3 Semantic Memory remains knowledge/procedure memory and is not executable Registry state;
 - one successful Task cannot silently auto-activate a new Skill;
 - Skill versions are immutable and reversible;
+- Candidate revisions and installed packages are digest-bound;
+- promotion installs exactly the digest that was validated/tested/reviewed;
 - candidate provenance links back to evidence without embedding user secrets in catalog metadata.
+
+Suggested promotion gate inputs:
+
+- schema validation;
+- Skill ABI / Primitive ABI compatibility;
+- required Primitive closure;
+- execution contract;
+- risk / side effects / resources;
+- verification plan;
+- package integrity;
+- test Task result;
+- unresolved side-effect review;
+- M2 evidence digest;
+- quality gate;
+- privacy gate;
+- candidate digest.
 
 Acceptance:
 
-1. Desktop imports a valid declarative Skill package and receives a Runtime inspection result.
-2. Incompatible ABI/Primitive dependencies are rejected before install.
-3. User confirmation installs exactly one immutable version.
-4. Installed Skill appears in canonical Runtime catalog/registry and can execute under normal policy.
-5. Update installs a new version without mutating the old one.
-6. Rollback reactivates the old version.
-7. Duplicate/retried install requests do not create ambiguous duplicate state.
-8. A repeated-work candidate can be reviewed/tested and explicitly promoted, but never auto-activated solely from one success.
+1. An external Skill submitted by ChatGPT/Desktop becomes a Candidate, not an installed Skill.
+2. Invalid Candidates return deterministic machine-readable repair errors.
+3. A revised Candidate can be revalidated without creating duplicate ambiguous state.
+4. A valid Candidate can compile/run as a controlled test Task.
+5. Runtime records evidence and exposes promotion readiness.
+6. User confirmation promotes exactly the validated/tested Candidate digest.
+7. Installed Skill appears in the canonical Runtime Registry/catalog and executes under normal policy.
+8. Update creates a new immutable version without mutating the old one.
+9. Rollback reactivates a previous immutable version.
+10. Repeated-work discovery may propose Candidates, but M2/M3 memory alone never silently becomes an installed Skill.
 
-See docs/skills/SKILL_MANAGER_V1.md for the Desktop product contract and Runtime docs/skills/USER_SKILL_LIFECYCLE_V1.md on the platform contract branch.
+See `docs/skills/SKILL_MANAGER_V1.md` for the Desktop product contract.

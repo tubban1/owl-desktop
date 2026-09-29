@@ -283,131 +283,291 @@ Do not fake success locally.
 
 ## 7. Candidate Skill experience
 
-This is a core OWL product feature.
+A **Skill Candidate** is not M2 Episodic Memory and not M3 Semantic Memory.
 
-Example:
+Validated AgentOS behavior shows three distinct durable objects:
 
 ```text
-OWL found a reusable workflow
+Persistent Task
+  -> M2 Episodic Memory
+  -> optional M3 Semantic Memory
 
-TEMU 瑞士仓异常订单日报
+Skill Candidate
+  -> validation
+  -> test Task
+  -> execution evidence
+  -> promotion gate
+  -> User Skill Registry
+```
 
-Observed executions      12
-Verified successes       12
-Repeated structure       High
-Average retries          0.2
+M3 answers:
 
-Stable steps detected:
-1. Open order backend
-2. Select date
-3. Download file
-4. Filter exceptions
-5. Generate Excel
-6. Verify output
+> What reusable knowledge/procedure did OWL learn?
 
-Suggested inputs:
-- date
-- warehouse
-- output directory
+A Skill Candidate answers:
 
-Risk: Medium
+> What governed executable capability is proposed for installation?
 
-[Review Candidate]
+The two may reference the same evidence, but one must never silently become the other.
+
+Candidate sources may include:
+
+- ChatGPT/user import of an external Skill;
+- Desktop package/import flow;
+- repeated verified Tasks detected by Worker/Runtime;
+- Cloud Library package;
+- a manually authored OWL Skill package.
+
+Example Candidate:
+
+```text
+Repository quick health check
+
+Source
+Repeated verified Tasks
+
+Proposed graph
+1. git.query(status)
+2. git.query(log)
+
+Test Task
+task_xxx
+
+Evidence
+2/2 steps succeeded
+M2 episode captured
+No unresolved state-changing steps
+
+Quality gate
+PASS
+
+Privacy gate
+PASS
+
+[View Evidence]
+[Test Again]
+[Send to ChatGPT for Improvement]
+[Promote to Skill]
 [Dismiss]
 ```
 
 Candidate detail should show:
 
-- evidence count;
-- evidence Task IDs as safe references;
-- recurring Primitive graph;
-- parameters inferred as variable;
-- constants that will remain fixed;
-- proposed side effects;
-- proposed risk;
-- proposed verification;
-- confidence/evidence explanation;
-- replay/test status.
+- source and provenance;
+- candidate revision;
+- target Skill ABI / Primitive ABI;
+- proposed Primitive graph;
+- inferred inputs and outputs;
+- proposed risk / side effects / resources / verification;
+- validation failures and machine-readable repair report;
+- test Task IDs;
+- M2 evidence references;
+- evidence digest;
+- quality/privacy gate results;
+- promotion readiness;
+- immutable candidate/package digest.
 
-## 8. Candidate promotion flow
+## 8. Candidate lifecycle and promotion
 
-Default flow:
+The experimentally validated AgentOS memory flow is:
 
 ```text
-Repeated verified Tasks
-        ↓
-Runtime / future distiller creates candidate
-        ↓
-Desktop shows candidate
-        ↓
-User reviews
-        ↓
-Validate / Test Run
-        ↓
-User confirms
-        ↓
-Runtime installs immutable Skill version
+Primitive graph
+  -> runtime.compile_task
+  -> Persistent Task
+  -> execution
+  -> M2 Episodic evidence
+  -> optional explicit M3 Semantic promotion
 ```
 
-Desktop must not turn one successful task into an automatically activated production Skill.
+Future User Skill lifecycle should extend this model rather than invent a second testing/evidence system:
 
-### Desktop may automate
+```text
+External Skill / repeated workflow
+        |
+        v
+Skill Candidate
+        |
+        v
+Runtime deterministic validation
+        |
+   FAIL +----------------------+
+        |                      |
+        v                      |
+machine-readable repair        |
+        |                      |
+        v                      |
+ChatGPT / external AI repair --+
+        |
+       PASS
+        |
+        v
+compile_test
+        |
+        v
+Persistent Test Task
+        |
+        v
+real execution
+        |
+        v
+M2 Episodic evidence
+        |
+        v
+Skill Promotion Gate
+        |
+        v
+explicit user confirmation
+        |
+        v
+Runtime User Skill Registry
+        |
+        v
+L2 executable Skill
+```
 
-- surfacing a candidate;
-- explaining repeated patterns;
-- requesting a candidate draft;
-- running dry-run/test validation;
-- showing duplicate/compatibility warnings.
+Desktop does not modify Skill code semantically. It can:
 
-### Desktop may not autonomously
+- submit/import a Candidate;
+- display deterministic validation;
+- send/copy a repair request for ChatGPT or another AI;
+- display test/evidence results;
+- request another test;
+- request explicit promotion/dismissal.
 
-- grant new permissions;
-- activate a high-risk Skill;
-- install arbitrary executable code;
-- bypass Runtime validation;
-- mark a candidate installed without Runtime receipt.
+Desktop must not:
+
+- turn M3 knowledge into executable Skill state by itself;
+- treat one successful Task as sufficient promotion evidence;
+- grant permissions;
+- rewrite arbitrary Skill code with an implicit Desktop LLM;
+- bypass Runtime validation/promotion;
+- write Registry files directly.
+
+### Repair responsibility
+
+Runtime decides whether a Candidate is valid.
+
+LLM-enabled clients decide how to repair semantic/code problems.
+
+```text
+Runtime
+  = validate / test / evidence / promotion authority
+
+ChatGPT or AI Worker
+  = normalize / rewrite / repair / generalize
+
+Desktop
+  = human review and management UX
+```
+
+Validation should return a machine-readable repair report so ChatGPT does not have to guess.
 
 ## 9. Add Skill flow
 
 Provide **+ Add Skill**.
 
-Recommended options:
+Ordinary users should not need to know the OWL Skill specification.
+
+Primary paths:
 
 ```text
-Add Skill
-
-1. Import Skill Package
-2. From Cloud Library         [later]
-3. Create from Template       [later]
-4. Review Learned Candidate
+1. Add with ChatGPT
+2. Import Skill / package / repository
+3. Review Learned Candidate
+4. From Cloud Library        [later]
 ```
 
-### Import package
-
-Future Runtime-backed flow:
+### A. ChatGPT path
 
 ```text
-Select package
-   ↓
-Desktop sends package/manifest to Runtime inspect
-   ↓
-Runtime returns:
-- identity/version
-- ABI compatibility
-- required capabilities
-- risk
-- side effects
-- verification
-- integrity
-   ↓
-Desktop presents review
-   ↓
-User confirms
-   ↓
-Runtime installs
-   ↓
-Desktop refreshes canonical Registry
+User gives Skill to ChatGPT
+        |
+        v
+ChatGPT converts/submits Candidate
+        |
+        v
+Runtime validate
+        |
+   FAIL +---- repair report ----> ChatGPT
+        |                           |
+        +<------ revised Candidate--+
+        |
+       PASS
+        |
+        v
+compile/test/evidence
+        |
+        v
+Desktop review
+        |
+        v
+Runtime promote/install
 ```
+
+ChatGPT may revise the Candidate repeatedly, but only Runtime may declare validation/promotion success.
+
+### B. Desktop import path
+
+```text
+Select package / folder / repository
+        |
+        v
+Desktop submits Candidate to Runtime
+        |
+        v
+Runtime validate
+        |
+    +---+---+
+    |       |
+   PASS    FAIL
+    |       |
+    |       +--> [Send to ChatGPT]
+    |       +--> [Copy AI Repair Request]
+    |       +--> [Upload Revised Candidate]
+    |
+    v
+compile/test/evidence
+    |
+    v
+review + promote
+```
+
+Desktop itself does not require or hide an LLM.
+
+### C. Repeated-work path
+
+```text
+Repeated successful Tasks
+        |
+        v
+pattern detection
+        |
+        v
+Candidate proposal
+        |
+        v
+ChatGPT/AI generalizes and parameterizes when needed
+        |
+        v
+Runtime validation/test/evidence/promotion
+```
+
+### Repair Pack
+
+When validation fails, Desktop should be able to copy/send a self-contained Repair Pack containing:
+
+- candidate ID and revision;
+- target Skill ABI;
+- target Primitive ABI;
+- validation error codes;
+- file/path/field references where applicable;
+- allowed/required Primitives;
+- deterministic constraints;
+- package digest;
+- behavior-preservation instruction.
+
+No secrets or raw protected execution artifacts should be included.
 
 Desktop must not copy package files directly into Runtime state directories.
 
@@ -484,23 +644,24 @@ Implement:
 
 Do not claim user installation exists yet.
 
-### Phase B — mock now, Runtime 1.x later
+### Phase B — contract-preview UI now, Runtime 1.x later
 
-Build UI and adapter contracts for:
+Build UI and typed adapter contracts for:
 
+- candidate intake;
+- validation/repair reports;
+- test/evidence review;
+- promotion review;
 - user-installed Skills;
 - enable/disable;
-- install;
 - update;
 - rollback;
-- candidate list;
-- candidate promotion;
 - uninstall;
 - Cloud library.
 
-Use a mock repository behind a typed Desktop port.
+Until Runtime exposes canonical APIs, keep these controls explicitly unavailable or use static design fixtures only.
 
-Never store mock state in a location that could be mistaken for Runtime canonical Skill Registry.
+Do not persist a mock Candidate/Registry state that could be mistaken for Runtime truth.
 
 ## 12. Desktop adapter boundary
 
@@ -516,21 +677,22 @@ interface SkillManagerPort {
   dryRun(skillId: string, args: Record<string, unknown>): Promise<SkillRunResult>;
   run(skillId: string, args: Record<string, unknown>): Promise<SkillRunResult>;
 
-  inspectPackage?(input: SkillPackageInput): Promise<SkillInspection>;
-  install?(inspectionId: string, confirm: boolean): Promise<SkillInstallReceipt>;
+  submitCandidate?(input: SkillCandidateInput): Promise<SkillCandidateReceipt>;
+  reviseCandidate?(candidateId: string, revision: SkillCandidateRevision): Promise<SkillCandidateReceipt>;
+  validateCandidate?(candidateId: string): Promise<SkillValidationReport>;
+  compileCandidateTest?(candidateId: string): Promise<CandidateTestTaskReceipt>;
+  testCandidate?(candidateId: string): Promise<CandidateTestResult>;
+  inspectCandidate?(candidateId: string): Promise<SkillPromotionInspection>;
+  promoteCandidate?(candidateId: string, confirm: boolean): Promise<SkillInstallReceipt>;
+  dismissCandidate?(candidateId: string): Promise<void>;
+
   setEnabled?(skillId: string, version: string, enabled: boolean): Promise<void>;
   activateVersion?(skillId: string, version: string): Promise<void>;
   uninstall?(skillId: string, version?: string): Promise<void>;
-
-  listCandidates?(): Promise<SkillCandidate[]>;
-  getCandidate?(candidateId: string): Promise<SkillCandidateDetail>;
-  testCandidate?(candidateId: string): Promise<CandidateTestResult>;
-  promoteCandidate?(candidateId: string, confirm: boolean): Promise<SkillInstallReceipt>;
-  dismissCandidate?(candidateId: string): Promise<void>;
 }
 ```
 
-Current implementation can map the first four methods to Runtime 1.0 and leave the optional lifecycle methods unavailable or mock-backed in development.
+Current implementation maps the first four methods to Runtime 1.0. Candidate/Registry lifecycle methods remain unavailable until Runtime 1.x exposes canonical APIs; Desktop may preview their UX with static fixtures, but not with persisted mock truth.
 
 ## 13. Suggested UI model
 
