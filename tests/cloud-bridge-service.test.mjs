@@ -108,7 +108,10 @@ describe("CloudBridgeService", () => {
     expect(setup.runtimeClient.createTask).toHaveBeenCalledTimes(1);
     expect(setup.runtimeClient.createTask).toHaveBeenCalledWith(
       input.payload,
-      { requestId: "cloud:cmd_1" },
+      expect.objectContaining({
+        idempotencyKey: "cloud:cmd_1",
+        requestId: expect.stringMatching(/^cloud:cmd_1:/),
+      }),
     );
     expect(setup.client.acceptCommand).toHaveBeenCalledTimes(2);
     expect(setup.client.acceptCommand).toHaveBeenLastCalledWith(
@@ -276,7 +279,10 @@ describe("CloudBridgeService", () => {
           },
         ],
       },
-      { requestId: "cloud:cmd_sanitize" },
+      expect.objectContaining({
+        idempotencyKey: "cloud:cmd_sanitize",
+        requestId: expect.stringMatching(/^cloud:cmd_sanitize:/),
+      }),
     );
   });
 
@@ -304,6 +310,80 @@ describe("CloudBridgeService", () => {
     expect(
       setup.store.getCommand("cmd_validation_privacy").rejectionReason,
     ).not.toContain("private-user-step-name");
+  });
+
+  it("retries response loss with the same Runtime idempotency key when R1 is available", async () => {
+    const runtimeClient = {
+      capabilities: vi.fn(async () => ({
+        extensions: {
+          consequentialRequestReplay: { version: 1 },
+        },
+      })),
+      createTask: vi
+        .fn()
+        .mockRejectedValueOnce(
+          Object.assign(new Error("response lost"), { code: "ECONNRESET" }),
+        )
+        .mockResolvedValueOnce({ id: "task_replayed" }),
+    };
+    const setup = createService({ runtimeClient });
+    await setup.service.start();
+
+    const input = command({ commandId: "cmd_r1_retry" });
+    await expect(setup.service.processCommand(input)).rejects.toMatchObject({
+      code: "ECONNRESET",
+    });
+    expect(setup.store.getCommand("cmd_r1_retry")).toMatchObject({
+      status: "processing",
+    });
+
+    await setup.service.processCommand(input);
+
+    expect(runtimeClient.createTask).toHaveBeenCalledTimes(2);
+    const firstOptions = runtimeClient.createTask.mock.calls[0][1];
+    const secondOptions = runtimeClient.createTask.mock.calls[1][1];
+    expect(firstOptions.idempotencyKey).toBe("cloud:cmd_r1_retry");
+    expect(secondOptions.idempotencyKey).toBe("cloud:cmd_r1_retry");
+    expect(secondOptions.requestId).not.toBe(firstOptions.requestId);
+    expect(setup.store.getCommand("cmd_r1_retry")).toMatchObject({
+      status: "accepted",
+      runtimeTaskId: "task_replayed",
+    });
+    await setup.service.stop();
+  });
+
+  it("fails closed when Runtime R1 reports an uncertain canonical outcome", async () => {
+    const runtimeClient = {
+      capabilities: vi.fn(async () => ({
+        extensions: {
+          consequentialRequestReplay: { version: 1 },
+        },
+      })),
+      createTask: vi.fn(async () => {
+        const error = new Error("manual reconciliation required");
+        error.code = "IDEMPOTENCY_OUTCOME_UNCERTAIN";
+        error.runtimeResponded = true;
+        throw error;
+      }),
+    };
+    const setup = createService({ runtimeClient });
+    await setup.service.start();
+
+    await setup.service.processCommand(
+      command({ commandId: "cmd_r1_uncertain" }),
+    );
+
+    expect(setup.store.getCommand("cmd_r1_uncertain")).toMatchObject({
+      status: "uncertain",
+    });
+    expect(setup.onAgentRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reasonCode: "RUNTIME_COMPLETION_UNCERTAIN",
+        correlationId: "cmd_r1_uncertain",
+      }),
+    );
+    expect(setup.client.rejectCommand).not.toHaveBeenCalled();
+    await setup.service.stop();
   });
 
   it("turns a transport-level Runtime failure into uncertain without Cloud rejection", async () => {
