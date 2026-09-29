@@ -220,9 +220,18 @@ export class RuntimeHttpClient {
   }
 
   runTask(taskId, options = {}) {
-    const { timeoutMs, ...request } = options;
+    const {
+      timeoutMs,
+      signal,
+      requestId,
+      idempotencyKey,
+      ...request
+    } = options;
     return this.invoke("tasks.run", { taskId, ...request }, {
       timeoutMs: timeoutMs ?? 120_000,
+      signal,
+      requestId,
+      idempotencyKey,
     });
   }
 
