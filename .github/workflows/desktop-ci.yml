@@ -260,7 +260,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: tubban1/owl-runtime
-          ref: feature/1.x-execution-revision
+          ref: efbcf43db2d6e6de2643c9496ac1882395c82e56
           path: owl-runtime
 
       - name: Use Node.js 22
