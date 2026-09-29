@@ -119,6 +119,55 @@ describe("RuntimeHttpClient", () => {
     });
   });
 
+  it("maps durable Runtime event listing to events.list without changing cursor semantics", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        result: {
+          events: [],
+          nextCursor: "runtime-events:41",
+          hasMore: false,
+          retention: {
+            strategy: "count",
+            maxEvents: 10000,
+            oldestSequence: 1,
+            newestSequence: 41,
+            oldestCursor: "runtime-events:1",
+            newestCursor: "runtime-events:41",
+          },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new RuntimeHttpClient({
+      baseUrl: "http://127.0.0.1:8788",
+      sessionId: "owl-desktop:test-session",
+    });
+
+    await client.listEvents({
+      afterCursor: "runtime-events:41",
+      limit: 100,
+      types: [
+        "agent_request.proposed",
+        "agent_request.withdrawn",
+      ],
+    });
+
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(payload.method).toBe("events.list");
+    expect(payload.params).toEqual({
+      afterCursor: "runtime-events:41",
+      limit: 100,
+      types: [
+        "agent_request.proposed",
+        "agent_request.withdrawn",
+      ],
+    });
+  });
+
   it("fails closed on Runtime RPC errors", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,
