@@ -425,6 +425,7 @@ export class CloudBridgeService {
             : {}),
         });
         this.noteContact();
+        return;
       } else if (record.status === "rejected") {
         await this.client.rejectCommand(
           commandId,
