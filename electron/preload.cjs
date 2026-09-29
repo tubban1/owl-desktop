@@ -4,6 +4,14 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   environment: () => ipcRenderer.invoke("desktop:environment"),
   refreshRuntime: () => ipcRenderer.invoke("runtime:refresh"),
   cloudStatus: () => ipcRenderer.invoke("cloud:status"),
+  cloudEnrollmentStatus: () => ipcRenderer.invoke("cloud:enrollment-status"),
+  cloudEnroll: () => ipcRenderer.invoke("cloud:enroll"),
+  cloudLogoutAccount: () => ipcRenderer.invoke("cloud:logout-account"),
+  onCloudEnrollmentChanged: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("cloud:enrollment-changed", listener);
+    return () => ipcRenderer.removeListener("cloud:enrollment-changed", listener);
+  },
   cloudProbe: () => ipcRenderer.invoke("cloud:probe"),
   cloudStart: () => ipcRenderer.invoke("cloud:start"),
   cloudStop: () => ipcRenderer.invoke("cloud:stop"),
