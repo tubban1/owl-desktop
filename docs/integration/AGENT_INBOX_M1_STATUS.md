@@ -74,13 +74,16 @@ This asks an agent to inspect/reconcile the ambiguity. It never authorizes autom
 Current PR evidence:
 
 ~~~text
-13 test files PASS
-71 / 71 unit tests PASS
+16 test files PASS
+92 / 92 unit tests PASS
 npm run build PASS
 npm run verify:agent-inbox-e2e PASS
 npm run verify:runtime-agent-request-consumer PASS
 npm run verify:runtime-agent-request-live PASS
+npm run verify:agent-skill-repair-live PASS
 runtime-agent-request-integration PASS
+runtime-request-replay-integration PASS
+runtime-agent-skill-repair-integration PASS
 runtime-1x-skill-integration PASS
 ~~~
 
@@ -159,7 +162,7 @@ Desktop does not expose raw Candidate history or embedded-secret detector
 matches to the model. Repair mutations require Runtime
 `consequentialRequestReplay v1` and never promote/activate the Skill.
 
-Provider target for the live gate:
+Live-accepted provider target:
 
 ~~~text
 owl-runtime
