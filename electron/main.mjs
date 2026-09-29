@@ -230,7 +230,9 @@ async function buildCloudPresence() {
     capabilities: {
       cloudBridge: "m1-polling-v1",
       agentInbox: "v1",
+      // Legacy discovery retained during the M1 transition.
       supportedRemoteCommands: ["runtime.task.create"],
+      supportedRemoteCommandContracts: ["runtime.task.create@1"],
       runtimeReachable: Boolean(info),
       mcpAvailable: mcpState.status === "running",
       tunnelAvailable: tunnelSupervisor?.status().state === "running",
