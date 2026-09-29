@@ -69,13 +69,17 @@ This asks an agent to inspect/reconcile the ambiguity. It never authorizes autom
 
 ## Validation
 
-Current evidence:
+Current PR evidence:
 
 ~~~text
-43 / 43 unit tests PASS
+13 test files PASS
+71 / 71 unit tests PASS
 npm run build PASS
 npm run verify:agent-inbox-e2e PASS
-npm run verify:local-e2e PASS
+npm run verify:runtime-agent-request-consumer PASS
+npm run verify:runtime-agent-request-live PASS
+runtime-agent-request-integration PASS
+runtime-1x-skill-integration PASS
 ~~~
 
 Agent Inbox E2E proves:
