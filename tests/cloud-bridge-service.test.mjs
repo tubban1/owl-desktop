@@ -20,6 +20,7 @@ function command(overrides = {}) {
     commandId: "cmd_1",
     deviceId: "dev_1",
     kind: "runtime.task.create",
+    kindVersion: 1,
     payload: {
       label: "Cloud task",
       steps: [
@@ -170,10 +171,30 @@ describe("CloudBridgeService", () => {
     expect(setup.runtimeClient.createTask).not.toHaveBeenCalled();
     expect(setup.client.rejectCommand).toHaveBeenCalledWith(
       "cmd_unknown",
-      "UNSUPPORTED_COMMAND_KIND:runtime.anything",
+      "UNSUPPORTED_COMMAND_CONTRACT:runtime.anything@1",
     );
     expect(setup.store.getCommand("cmd_unknown")).toMatchObject({
       status: "rejected",
+    });
+  });
+
+  it("rejects unsupported command versions without touching Runtime", async () => {
+    const setup = createService();
+    await setup.service.processCommand(
+      command({
+        commandId: "cmd_v2",
+        kindVersion: 2,
+      }),
+    );
+
+    expect(setup.runtimeClient.createTask).not.toHaveBeenCalled();
+    expect(setup.client.rejectCommand).toHaveBeenCalledWith(
+      "cmd_v2",
+      "UNSUPPORTED_COMMAND_CONTRACT:runtime.task.create@2",
+    );
+    expect(setup.store.getCommand("cmd_v2")).toMatchObject({
+      status: "rejected",
+      kindVersion: 2,
     });
   });
 
