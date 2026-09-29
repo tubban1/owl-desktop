@@ -17,6 +17,7 @@ const RECONCILIATION_CODES = new Set([
   "RUNTIME_EVENT_PAGE_INVALID",
   "RUNTIME_EVENT_PAGE_CURSOR_MISMATCH",
   "LOCAL_RUNTIME_EVENT_CHECKPOINT_MISSING",
+  "RUNTIME_EVENT_HISTORY_TRUNCATED_BEFORE_FIRST_CHECKPOINT",
   "EVENT_LIST_TYPE_FILTER_INCOMPLETE_CHANNEL",
 ]);
 
@@ -377,6 +378,23 @@ export class RuntimeAgentRequestEventBridge {
             return this.markReconciliation(error, state);
           }
           throw error;
+        }
+
+        if (
+          before.lastCursor === null &&
+          before.lastSequence === null &&
+          page.retention?.oldestSequence !== null &&
+          page.retention?.oldestSequence !== undefined &&
+          page.retention.oldestSequence > 1
+        ) {
+          const error = new Error(
+            `RUNTIME_EVENT_HISTORY_TRUNCATED_BEFORE_FIRST_CHECKPOINT: oldestRetained=${page.retention.oldestSequence}.`,
+          );
+          error.code = "RUNTIME_EVENT_HISTORY_TRUNCATED_BEFORE_FIRST_CHECKPOINT";
+          return this.markReconciliation(error, state, {
+            oldestRetainedSequence: page.retention.oldestSequence,
+            pageNextCursor: page.nextCursor,
+          });
         }
 
         for (const event of page.events) {
