@@ -114,22 +114,28 @@ export class RuntimeHttpClient {
     });
   }
 
-  reviseSkillCandidate(candidateId, expectedDigest, manifest) {
+  reviseSkillCandidate(candidateId, expectedDigest, manifest, options = {}) {
     return this.invoke("skill-candidates.revise", {
       candidateId,
       expectedDigest,
       manifest,
     }, {
-      timeoutMs: 15_000,
+      timeoutMs: options.timeoutMs ?? 15_000,
+      signal: options.signal,
+      requestId: options.requestId,
+      idempotencyKey: options.idempotencyKey,
     });
   }
 
-  validateSkillCandidate(candidateId, expectedDigest) {
+  validateSkillCandidate(candidateId, expectedDigest, options = {}) {
     return this.invoke("skill-candidates.validate", {
       candidateId,
       ...(expectedDigest ? { expectedDigest } : {}),
     }, {
-      timeoutMs: 15_000,
+      timeoutMs: options.timeoutMs ?? 15_000,
+      signal: options.signal,
+      requestId: options.requestId,
+      idempotencyKey: options.idempotencyKey,
     });
   }
 

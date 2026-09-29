@@ -80,6 +80,78 @@ describe("RuntimeHttpClient", () => {
     expect(options.headers["x-owl-idempotency-key"]).toBe("cloud:cmd_42");
   });
 
+  it("protects Candidate repair mutations with independent replay and transport identities", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        result: {
+          candidate: {
+            id: "candidate_1",
+            currentDigest: "digest_2",
+          },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new RuntimeHttpClient({
+      baseUrl: "http://127.0.0.1:8788",
+      sessionId: "owl-desktop:test-session",
+    });
+
+    await client.reviseSkillCandidate(
+      "candidate_1",
+      "digest_1",
+      { schemaVersion: 1 },
+      {
+        requestId: "repair-attempt-1",
+        idempotencyKey: "agent-repair:request-1:candidate-revise",
+      },
+    );
+    await client.validateSkillCandidate(
+      "candidate_1",
+      "digest_2",
+      {
+        requestId: "validate-attempt-1",
+        idempotencyKey: "agent-repair:request-1:candidate-validate",
+      },
+    );
+
+    const first = fetchMock.mock.calls[0][1];
+    const second = fetchMock.mock.calls[1][1];
+    expect(first.headers["x-owl-request-id"]).toBe("repair-attempt-1");
+    expect(first.headers["x-owl-idempotency-key"]).toBe(
+      "agent-repair:request-1:candidate-revise",
+    );
+    expect(second.headers["x-owl-request-id"]).toBe(
+      "validate-attempt-1",
+    );
+    expect(second.headers["x-owl-idempotency-key"]).toBe(
+      "agent-repair:request-1:candidate-validate",
+    );
+
+    const payloads = fetchMock.mock.calls.map(([, options]) =>
+      JSON.parse(options.body),
+    );
+    expect(payloads[0]).toMatchObject({
+      method: "skill-candidates.revise",
+      params: {
+        candidateId: "candidate_1",
+        expectedDigest: "digest_1",
+        manifest: { schemaVersion: 1 },
+      },
+    });
+    expect(payloads[1]).toMatchObject({
+      method: "skill-candidates.validate",
+      params: {
+        candidateId: "candidate_1",
+        expectedDigest: "digest_2",
+      },
+    });
+  });
+
   it("maps User Skill and workflow discovery methods to public Runtime RPC", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

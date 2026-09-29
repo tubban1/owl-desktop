@@ -38,6 +38,8 @@ Implemented behavior:
   - agent_requests_claim
   - agent_requests_release
   - agent_requests_complete
+  - skill_repair_context
+  - skill_repair_apply
 
 ## Security and prompt-injection boundary
 
@@ -72,13 +74,16 @@ This asks an agent to inspect/reconcile the ambiguity. It never authorizes autom
 Current PR evidence:
 
 ~~~text
-13 test files PASS
-71 / 71 unit tests PASS
+16 test files PASS
+92 / 92 unit tests PASS
 npm run build PASS
 npm run verify:agent-inbox-e2e PASS
 npm run verify:runtime-agent-request-consumer PASS
 npm run verify:runtime-agent-request-live PASS
+npm run verify:agent-skill-repair-live PASS
 runtime-agent-request-integration PASS
+runtime-request-replay-integration PASS
+runtime-agent-skill-repair-integration PASS
 runtime-1x-skill-integration PASS
 ~~~
 
@@ -136,6 +141,35 @@ a44c5d26636c71faf8a8c146ef43e2af71332b11
 The live gate proves proposal materialization, restart replay, withdrawal,
 CURSOR_EXPIRED reconciliation, blocked polling, same-cursor retry, and
 first-checkpoint truncation protection.
+
+## Skill repair reasoning loop
+
+The first claimed-work execution path is being integrated for Runtime-produced
+`skill.repair` requests.
+
+~~~text
+Runtime semantic Candidate issue
+→ AgentRequest
+→ stable MCP owner claim
+→ privacy-safe repair context
+→ replay-protected Candidate revise
+→ replay-protected Candidate validate
+→ Runtime withdrawal / next proposal
+→ AgentRequest completion
+~~~
+
+Desktop does not expose raw Candidate history or embedded-secret detector
+matches to the model. Repair mutations require Runtime
+`consequentialRequestReplay v1` and never promote/activate the Skill.
+
+Live-accepted provider target:
+
+~~~text
+owl-runtime
+f00ba4f7f5c3fbddc18cf7c04fc0cfccdbb786bd
+~~~
+
+See `docs/contracts/AGENT_SKILL_REPAIR_MCP_V1.md`.
 
 ## Future routing
 
