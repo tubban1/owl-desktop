@@ -1,59 +1,151 @@
 # Runtime AgentRequest Consumer v1
 
-Status: **Desktop consumer semantics implemented on feature branch; Runtime transport pending**
+Status: **Desktop events.list integration implemented and live accepted**
 
-## Why this exists
+## Purpose
 
-OWL Desktop already owns the canonical local Agent Inbox.
+OWL Desktop owns one canonical local Agent Inbox.
 
-The missing cross-repo boundary is:
+OWL Runtime owns canonical Task, Skill Candidate, validation, verification and
+execution truth. Runtime may identify a deterministic state that needs semantic
+reasoning, but it does not own Desktop claim/lease/completion state.
+
+The integrated boundary is:
 
 ~~~text
-OWL Runtime
-  -> durable/replayable AgentRequest events
-  -> OWL Desktop
-  -> local Agent Inbox
+OWL Runtime canonical state
+        ↓
+Runtime transactional public-event outbox
+        ↓
+durable public event journal
+        ↓
+RuntimeEventRuntimeClient.events.list
+        ↓
+RuntimeAgentRequestEventBridge
+        ↓
+RuntimeAgentRequestEventConsumer
+        ↓
+Desktop Agent Inbox
+        ↓
+ChatGPT / AI Worker
 ~~~
 
-Desktop must be ready to consume those events without reading Runtime state files, importing Runtime internals, or inventing a polling workaround.
+Desktop does not read Runtime state files, Task JSON or diagnostics to infer
+AgentRequest transitions.
 
-## Runtime gap observed on the current baseline
+## Runtime public contract consumed
 
-The current Runtime public RPC surface exposes Task, Skill, Schedule, Approval, Process, Health and Diagnostics operations.
+Runtime public API remains:
 
-It does **not** expose a public durable event stream with cursor/sequence semantics.
+~~~text
+POST /runtime/v0.1/rpc
+~~~
 
-Runtime does maintain Task-local persistent events as M2 evidence, but that Task-local trace is not a replacement for a public cross-consumer event stream.
+Desktop feature-detects:
 
-Therefore Desktop intentionally does not attach to a fake Runtime transport yet.
+~~~text
+extensions.publicEventJournal.version >= 1
+extensions.agentRequestProducer.version >= 1
+~~~
 
-## Desktop consumer boundary
+The consumed RPC is:
 
-The transport-independent consumer lives at:
+~~~text
+events.list
+~~~
+
+Desktop v1 always requests the complete AgentRequest channel:
+
+~~~json
+{
+  "afterCursor": "runtime-events:41",
+  "limit": 100,
+  "types": [
+    "agent_request.proposed",
+    "agent_request.withdrawn"
+  ]
+}
+~~~
+
+The two event types are requested together because Runtime v1 exposes one
+global sequence. A partial filter is not a safe contiguous channel.
+
+## Desktop layers
+
+### RuntimeAgentRequestEventConsumer
+
+File:
 
 ~~~text
 electron/services/runtime-agent-request-consumer.mjs
 ~~~
 
-Its input is one typed Runtime event.
+Responsibility:
 
-Its output is an idempotent mutation of the local Agent Inbox plus a minimal consumer journal.
+- strict AgentRequest event parsing;
+- eventId replay dedupe;
+- sequence continuity;
+- proposal/dedupe collision checks;
+- local AgentRequest materialization;
+- pending-only withdrawal;
+- minimal durable event receipt journal.
 
-The consumer does not know how events arrived.
+It does not perform HTTP polling.
 
-Future adapters may use HTTP polling, SSE, WebSocket or another public Runtime transport, but all must feed the same consumer contract.
+### RuntimeAgentRequestEventBridge
 
-## Supported event types
+File:
+
+~~~text
+electron/services/runtime-agent-request-event-bridge.mjs
+~~~
+
+Responsibility:
+
+- Runtime feature detection;
+- events.list polling;
+- durable cursor resume;
+- pagination;
+- page acknowledgement discipline;
+- retention/cursor error classification;
+- explicit reconciliation state;
+- Desktop lifecycle integration.
+
+The bridge does not own AgentRequest claim/lease/completion semantics.
+
+## Exact event position contract
+
+Runtime v1 events must contain both:
+
+~~~text
+sequence >= 1
+cursor = runtime-events:<same sequence>
+~~~
+
+Desktop rejects:
+
+- sequence without cursor;
+- cursor without sequence;
+- malformed cursor;
+- cursor/sequence mismatch;
+- sequence 0;
+- unknown event fields.
+
+Malformed event data is a replay-integrity failure, not a transient transport
+warning.
+
+## Supported events
 
 ### agent_request.proposed
 
-Required semantic fields:
+Required fields:
 
 ~~~text
 eventType
 eventId
 proposalId
-sequence or cursor
+sequence
+cursor
 requestType
 priority
 subject
@@ -66,7 +158,7 @@ dedupeKey
 occurredAt
 ~~~
 
-Desktop materializes this as one local AgentRequest with:
+Desktop materializes exactly one local AgentRequest:
 
 ~~~text
 producer = runtime
@@ -76,35 +168,37 @@ dedupeKey = Runtime dedupeKey
 
 ### agent_request.withdrawn
 
-Required semantic fields:
+Required fields:
 
 ~~~text
 eventType
 eventId
 proposalId
-sequence or cursor
+sequence
+cursor
 subject
 reasonCode
 dedupeKey
 occurredAt
 ~~~
 
-A withdrawal may cancel only the matching **pending** local AgentRequest.
+Withdrawal cancels only the matching request while it is still pending.
 
-It does not cancel:
+It does not silently cancel:
 
 - claimed work;
 - completed work;
 - already-cancelled work;
-- another request that merely looks similar.
+- another request with a different proposal identity.
 
-## Strict parsing
+A claimed request records claimed_not_cancelled; the active agent must
+re-observe canonical Runtime state before continuing.
 
-The event parser is allow-list based.
+## Prompt-injection boundary
 
-Unknown fields are rejected.
+The parser is allow-list based.
 
-This deliberately rejects fields such as:
+The Runtime event channel rejects uncontracted fields such as:
 
 ~~~text
 prompt
@@ -113,15 +207,23 @@ payload
 secret
 sourceCode
 raw user content
+permission grants
 ~~~
 
-The Runtime event channel is coordination metadata, not a hidden prompt channel.
+AgentRequest events carry coordination metadata and canonical references, not
+hidden instructions.
 
-Nested subject/context references are also allow-list parsed.
+## Durable consumer checkpoint
 
-## Replay and ordering model
+Desktop persists:
 
-The consumer keeps a small local journal containing only:
+~~~text
+lastSequence
+lastCursor
+bounded event receipts
+~~~
+
+Each receipt contains only:
 
 ~~~text
 eventId
@@ -134,103 +236,303 @@ appliedAt
 outcome
 ~~~
 
-It does not persist the original Runtime event payload.
+The original Runtime event payload is not persisted in the consumer journal.
 
-Rules:
+The sequence and cursor checkpoint must either both be null or exactly agree.
 
-1. same eventId replay -> duplicate/no-op;
-2. same proposal replay under a new eventId -> existing AgentRequest reused;
-3. same dedupeKey with another proposalId -> fail closed as collision;
-4. sequence lower than the last applied sequence -> stale/no-op;
-5. same sequence with a different unseen event -> fail closed as sequence conflict;
-6. sequence gap -> fail closed and do not advance the journal;
-7. consumer restart -> journal resumes replay protection.
+## Page acknowledgement rule
 
-For a cursor-only future Runtime stream, eventId + Inbox materialization idempotency still protects proposal/withdrawal replay.
+For every events.list page:
 
-## Candidate revisions
+~~~text
+Runtime returns page
+        ↓
+Desktop consumes event 1
+        ↓
+Desktop consumes event 2
+        ↓
+...
+        ↓
+all events accepted
+        ↓
+consumer.lastCursor MUST equal page.nextCursor
+~~~
 
-Candidate revision belongs in the subject and should also affect Runtime's deterministic dedupeKey.
+If event N fails:
+
+~~~text
+events 1..N-1 may already be durably accepted
+event N is rejected
+page.nextCursor is NOT acknowledged
+polling enters reconciliation
+~~~
+
+Desktop therefore never acknowledges past an event it failed to consume.
+
+## Reconciliation state machine
+
+The bridge exposes:
+
+~~~text
+stopped
+healthy
+degraded
+unsupported
+needs_attention
+~~~
+
+### degraded
+
+Used for a temporary transport/runtime failure when replay integrity is still
+known.
+
+Desktop may retry from the same durable cursor.
+
+### unsupported
+
+Used when Runtime does not expose both required optional extensions.
+
+Desktop keeps its local Inbox but does not fabricate events from diagnostics or
+Task files.
+
+### needs_attention
+
+Used when Desktop can no longer prove contiguous replay.
+
+Examples:
+
+~~~text
+CURSOR_EXPIRED / RETENTION_GAP
+CURSOR_AHEAD
+sequence gap
+sequence conflict
+dedupe collision
+malformed event position/schema
+corrupt consumer journal
+corrupt Runtime public journal
+page nextCursor mismatch
+local Runtime AgentRequest history with a missing local checkpoint
+first Desktop replay begins above Runtime journal genesis
+~~~
+
+needs_attention is durable across Desktop restart.
+
+Normal background polling is blocked while reconciliation is unresolved.
+
+## No skip-to-latest behavior
+
+There is intentionally no:
+
+~~~text
+skip to latest
+reset to newest
+acknowledge gap
+advance cursor
+~~~
+
+operation in the Desktop bridge or renderer API.
+
+The only current operator action is:
+
+~~~text
+Retry saved cursor
+~~~
+
+That retry calls Runtime again with the exact same durable afterCursor.
+
+If Runtime still returns CURSOR_EXPIRED, Desktop remains in needs_attention.
+
+A temporary network failure during explicit retry also preserves the original
+reconciliation state rather than hiding it as ordinary degradation.
+
+## First-checkpoint protection
+
+A brand-new Desktop with no checkpoint is not allowed to silently begin at an
+already-truncated retention floor.
 
 Example:
 
 ~~~text
-runtime:skill_candidate:candidate_123:r2:validation_failed
-runtime:skill_candidate:candidate_123:r3:validation_failed
+Desktop cursor = none
+Runtime oldest retained sequence = 150
+Runtime newest sequence = 220
 ~~~
 
-A new revision is therefore a new reasoning item.
-
-Runtime remains responsible for deciding whether an older revision is stale and should emit agent_request.withdrawn when appropriate.
-
-Desktop does not infer Candidate truth.
-
-## Withdrawal versus claim
-
-Once an AI agent has claimed an AgentRequest, Desktop does not silently cancel that lease because Runtime later emits withdrawn.
-
-The consumer records:
+Desktop enters:
 
 ~~~text
-claimed_not_cancelled
+RUNTIME_EVENT_HISTORY_TRUNCATED_BEFORE_FIRST_CHECKPOINT
+needs_attention
 ~~~
 
-The agent must then re-observe canonical Runtime state before continuing or completing the work.
+It does not consume event 150 and does not establish a new cursor.
 
-This avoids a background Runtime event unexpectedly taking work away from an active logical agent session.
+This prevents "no cursor" from becoming an implicit skip operation.
 
-## Conformance fixture
+## Lost-checkpoint protection
 
-Fixture:
+If the local Agent Inbox already contains producer=runtime history but the
+Runtime event consumer checkpoint is empty, Desktop enters:
 
 ~~~text
-tests/fixtures/runtime-agent-request-events-v1.json
+LOCAL_RUNTIME_EVENT_CHECKPOINT_MISSING
+needs_attention
 ~~~
 
-Standalone gate:
+It does not restart from Runtime's current retained floor.
+
+## Replay semantics
+
+Consumer rules:
+
+1. same eventId replay -> duplicate/no-op;
+2. same proposal replay under a new valid eventId -> existing AgentRequest reused;
+3. same dedupeKey under another proposalId -> fail closed;
+4. lower sequence -> stale/no-op without moving checkpoint;
+5. same sequence with another unseen event -> fail closed;
+6. sequence gap -> fail closed;
+7. consumer restart -> durable checkpoint/replay protection retained.
+
+Runtime v1 itself uses stable deterministic eventIds, so rule 2 is defensive
+Desktop idempotency rather than an expected producer behavior.
+
+## Candidate revision identity
+
+Runtime's deterministic identity includes Candidate revision and digest.
+
+A later Candidate revision is therefore distinct semantic work.
+
+Desktop does not infer whether a Candidate issue still exists. Runtime emits
+the corresponding agent_request.withdrawn when the canonical issue is
+resolved, revised or dismissed.
+
+## Desktop UX
+
+Agent Inbox now exposes a first-class Runtime Durable Event Feed panel.
+
+Healthy view shows:
+
+- durable cursor;
+- sequence;
+- Runtime retained range;
+- last successful replay.
+
+needs_attention view shows:
+
+- reason code;
+- detail message;
+- saved cursor;
+- saved sequence;
+- Runtime retention floor when available;
+- Retry saved cursor.
+
+The sidebar and Overview surface persistent needs-attention state.
+
+## Tests
+
+Transport-independent consumer:
 
 ~~~text
 npm run verify:runtime-agent-request-consumer
 ~~~
 
-Unit coverage:
+Live cross-repository gate:
 
 ~~~text
-tests/runtime-agent-request-consumer.test.mjs
+npm run verify:runtime-agent-request-live
 ~~~
 
-The fixture covers:
+Unit coverage includes:
+
+- strict event schema;
+- exact sequence/cursor binding;
+- replay idempotency;
+- restart;
+- stale event handling;
+- sequence gaps;
+- sequence conflicts;
+- dedupe collisions;
+- claimed-withdrawal behavior;
+- prompt-like field rejection;
+- bridge pagination;
+- unsupported Runtime fallback;
+- lost local checkpoint;
+- truncated first replay;
+- cursor expiration;
+- explicit saved-cursor retry;
+- reconciliation persistence.
+
+## Live acceptance
+
+Desktop has passed the real public HTTP integration against:
 
 ~~~text
-Skill Candidate revision 2 proposal
--> withdrawal
--> Skill Candidate revision 3 proposal
+owl-runtime
+a44c5d26636c71faf8a8c146ef43e2af71332b11
+
+Runtime public API:
+0.1
 ~~~
 
-The tests additionally cover replay, restart, sequence gaps, dedupe collisions, claimed-withdrawal behavior and rejected prompt-like fields.
+The live test configures Runtime public-event retention to 2 and proves:
 
-## Runtime integration requirement
+~~~text
+semantic-invalid Skill Candidate
+→ Runtime validation
+→ agent_request.proposed
+→ Desktop events.list
+→ one local AgentRequest
 
-Do not connect this consumer to Runtime until Runtime exposes a provider-owned public durable event contract.
+Desktop consumer restart
+→ replay from durable cursor
+→ no duplicate
 
-The eventual adapter must:
+Candidate revision resolves issue
+→ Runtime agent_request.withdrawn
+→ matching pending AgentRequest cancelled
 
-- start from a durable cursor/checkpoint;
-- deliver events at least once;
-- never acknowledge a cursor past an event the Desktop consumer rejected;
-- surface retention/cursor-expiry explicitly;
-- preserve sequence/cursor identity across Runtime restart;
-- never derive AgentRequest events by scraping diagnostics or Task JSON.
+Desktop remains at cursor 2
+Runtime advances to sequences 3, 4, 5
+retention floor becomes 4
+→ Runtime returns CURSOR_EXPIRED
+→ Desktop enters needs_attention
+→ cursor remains 2
+→ normal polling stops
+→ explicit retry still uses cursor 2
+→ no jump to newest
 
-CR-DESKTOP-002 and CR-DESKTOP-010 remain the provider requirements.
+fresh Desktop with no cursor
++ retention floor 4
+→ explicit needs_attention
+→ no retained event materialization
+→ no cursor established
+~~~
+
+## CR-DESKTOP status
+
+For AgentRequest delivery:
+
+~~~text
+CR-DESKTOP-010 Runtime producer
+= delivered by Runtime candidate contract
+
+CR-DESKTOP-002 durable public event foundation needed by AgentRequest
+= delivered and consumed through events.list
+~~~
+
+CR-DESKTOP-002's broader future log/session/task/process/provider event
+projection remains a separate backlog item.
 
 ## Authority remains unchanged
 
 ~~~text
 Runtime
 = canonical Task/Candidate/validation/execution truth
+= durable public event producer truth
 
 Desktop
+= durable event consumer checkpoint
+= explicit reconciliation state
 = Agent Inbox coordination truth
 
 ChatGPT / AI Worker
