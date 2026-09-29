@@ -178,6 +178,36 @@ describe("CloudEnrollmentService", () => {
     expect(x.client.registerDevice).not.toHaveBeenCalled();
   });
 
+  it("restores a signed-in account from the OS-vault refresh token", async () => {
+    const readSecret = vi.fn(async () => "refresh-token-existing");
+    const x = setup({
+      initialDeviceId: "dev_existing",
+      readSecret,
+    });
+
+    const ready = await x.service.resume();
+
+    expect(ready).toMatchObject({
+      status: "ready",
+      deviceId: "dev_existing",
+      account: {
+        userId: "usr_1",
+        organizationId: "org_1",
+        role: "owner",
+      },
+    });
+    expect(readSecret).toHaveBeenCalledWith(
+      cloudEnrollmentSecretNames.accountRefreshToken,
+      "owl-cloud",
+    );
+    const [, tokenInit] = x.fetchImpl.mock.calls[0];
+    const tokenForm = new URLSearchParams(tokenInit.body);
+    expect(tokenForm.get("grant_type")).toBe("refresh_token");
+    expect(tokenForm.get("refresh_token")).toBe("refresh-token-existing");
+    expect(x.client.bootstrap).toHaveBeenCalledWith("id-token-value");
+    expect(x.client.registerDevice).not.toHaveBeenCalled();
+  });
+
   it("signs out the human account without revoking the enrolled device", async () => {
     const x = setup({ initialDeviceId: "dev_existing" });
 
