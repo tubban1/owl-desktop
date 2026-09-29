@@ -26,7 +26,8 @@
     "verify:skill-discovery-live": "node scripts/verify-skill-discovery-live-e2e.mjs",
     "verify:runtime-agent-request-consumer": "node scripts/verify-runtime-agent-request-consumer.mjs",
     "verify:runtime-agent-request-live": "node scripts/verify-runtime-agent-request-live-e2e.mjs",
-    "verify:runtime-replay-live": "node scripts/verify-runtime-replay-live-e2e.mjs"
+    "verify:runtime-replay-live": "node scripts/verify-runtime-replay-live-e2e.mjs",
+    "verify:runtime-execution-revision-live": "node scripts/verify-runtime-execution-revision-live-e2e.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
