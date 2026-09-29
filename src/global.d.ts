@@ -4,6 +4,7 @@ import type {
   AgentRequest,
   AgentRequestStatus,
   CloudBridgeStatus,
+  CloudEnrollmentStatus,
   DesktopEnvironment,
   HostStatus,
   RuntimeSnapshot,
@@ -25,6 +26,12 @@ declare global {
       environment(): Promise<DesktopEnvironment>;
       refreshRuntime(): Promise<RuntimeSnapshot>;
       cloudStatus(): Promise<CloudBridgeStatus>;
+      cloudEnrollmentStatus(): Promise<CloudEnrollmentStatus>;
+      cloudEnroll(): Promise<CloudEnrollmentStatus>;
+      cloudLogoutAccount(): Promise<CloudEnrollmentStatus>;
+      onCloudEnrollmentChanged(
+        callback: (state: CloudEnrollmentStatus) => void,
+      ): () => void;
       cloudProbe(): Promise<{ ok?: boolean; service?: string; contractVersion?: string }>;
       cloudStart(): Promise<CloudBridgeStatus>;
       cloudStop(): Promise<CloudBridgeStatus>;
