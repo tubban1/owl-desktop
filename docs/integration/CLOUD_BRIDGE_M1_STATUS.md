@@ -42,6 +42,23 @@ Implemented surfaces:
 
 The Cloud event transport exists, but Desktop must not fabricate Runtime execution events. Runtime-origin execution truth remains Runtime-owned.
 
+## Product access gate
+
+Normal OWL LAB Desktop/Runtime use now requires a restored or freshly authenticated Cloud account plus an enrolled device.
+
+Pre-login behavior is intentionally limited:
+
+- Runtime Host may remain reachable for version / health / diagnostics;
+- OWL MCP stays stopped;
+- OWL Tunnel stays stopped;
+- Runtime AgentRequest event bridge stays stopped;
+- Cloud RemoteCommand polling stays stopped;
+- normal Runtime mutations fail closed with `DESKTOP_CLOUD_LOGIN_REQUIRED`.
+
+Desktop restores the human account session from the OS-vault refresh token on restart. This avoids forcing an interactive browser login on every launch.
+
+Temporary offline authorization is a later bounded-lease step; the current gate does not claim permanent offline/local-only authority.
+
 ## Product enrollment
 
 The normal product path is now implemented in Desktop PR #13:
@@ -163,3 +180,23 @@ Cognito login
 ```
 
 Once this evidence passes, Desktop ↔ Cloud M1 is product-level closed.
+
+
+## Runtime R1 replay integration
+
+When Runtime advertises:
+
+~~~text
+extensions.consequentialRequestReplay.version = 1
+~~~
+
+Cloud RemoteCommand `runtime.task.create@1` uses:
+
+~~~text
+idempotencyKey = cloud:<commandId>
+requestId      = cloud:<commandId>:<unique-attempt-id>
+~~~
+
+Transport response loss no longer immediately becomes a permanent Desktop-local uncertain state. Desktop safely retries the same logical mutation; Runtime returns the canonical durable result or an explicit `IDEMPOTENCY_OUTCOME_UNCERTAIN`.
+
+With an older Runtime that does not advertise R1, Desktop preserves the previous fail-closed behavior.
