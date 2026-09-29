@@ -126,7 +126,6 @@ async function startRuntimeEventBridge() {
 
 function stopRuntimeEventBridge() {
   runtimeAgentRequestEventBridge?.stop();
-  runtimeAgentRequestEventBridge = undefined;
   return runtimeEventBridgeSnapshot();
 }
 
