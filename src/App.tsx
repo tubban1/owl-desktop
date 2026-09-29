@@ -147,7 +147,7 @@ export default function App() {
   const logoutCloudAccount = async () => {
     const state = await window.owlDesktop.cloudLogoutAccount();
     setCloudEnrollment(state);
-    setNotice("Account signed out; enrolled device remains active");
+    setNotice("Account signed out; OWL LAB Desktop is locked");
     window.setTimeout(() => setNotice(""), 2400);
   };
 
@@ -190,6 +190,66 @@ export default function App() {
   const runtimeEventStatus = snapshot?.runtimeEvents;
   const runtimeEventNeedsAttention =
     runtimeEventStatus?.status === "needs_attention";
+  const accessReady =
+    cloudEnrollment?.status === "ready" &&
+    Boolean(cloudEnrollment.account) &&
+    Boolean(cloudEnrollment.deviceId);
+
+  if (!env || !settings || !cloudEnrollment) {
+    return <div className="app-shell"><main className="main"><div className="content"><section className="panel"><span className="eyebrow">OWL LAB</span><h2>Starting Desktop…</h2><p>Checking account and device authorization.</p></section></div></main></div>;
+  }
+
+  if (!accessReady) {
+    return <div className="app-shell">
+      <main className="main">
+        <div className="content">
+          <section className="panel cloud-bridge-panel">
+            <span className="eyebrow">OWL LAB DESKTOP</span>
+            <h1>Sign in to continue</h1>
+            <p>OWL LAB requires an authenticated Cloud account and an enrolled device before Runtime work, MCP, Tunnel, Skills or remote commands are enabled.</p>
+            <div className="about-grid">
+              <span>Account</span><strong>{cloudEnrollment.account?.email ?? "Signed out"}</strong>
+              <span>Device</span><code>{cloudEnrollment.deviceId ?? "Not enrolled"}</code>
+              <span>Access</span><strong>LOCKED</strong>
+              <span>Cloud</span><code>{settings.cloudBaseUrl || "Not configured"}</code>
+              <span>Status</span><strong>{cloudEnrollment.status.replaceAll("_", " ")}</strong>
+              <span>Reason</span><strong>{cloudEnrollment.lastErrorCode ?? "CLOUD_LOGIN_REQUIRED"}</strong>
+            </div>
+            {!settings.cloudBaseUrl && <div className="setting-row">
+              <div><strong>OWL LAB Cloud endpoint</strong><span>Configure the Cloud API before signing in.</span></div>
+              <input
+                className="setting-input"
+                value={settings.cloudBaseUrl}
+                onChange={(e) => setSettings({ ...settings, cloudBaseUrl: e.target.value })}
+                onBlur={() => saveSettings({ cloudBaseUrl: settings.cloudBaseUrl })}
+                placeholder="https://…execute-api…amazonaws.com"
+              />
+            </div>}
+            <div className="runtime-version cloud-actions">
+              <button className="primary" onClick={beginCloudEnrollment}>
+                <KeyRound size={15} />
+                {cloudEnrollment.deviceId ? "Sign in to OWL LAB" : "Sign in & enroll this Mac"}
+              </button>
+              <button className="secondary" onClick={async () => {
+                try {
+                  const result = await window.owlDesktop.cloudProbe();
+                  setNotice(`Cloud ${result.contractVersion ?? "v1"} reachable`);
+                } catch {
+                  setNotice("Cloud probe failed");
+                }
+                window.setTimeout(() => setNotice(""), 1800);
+              }}>Probe Cloud</button>
+            </div>
+            <div className="contract-note compact-note">
+              <ShieldCheck size={17} />
+              <div><strong>Local Runtime stays locked.</strong><p>Version, health and diagnostics may remain available for recovery, but consequential execution is not enabled until account and device authorization succeeds.</p></div>
+            </div>
+            {notice && <div className="toast">{notice}</div>}
+          </section>
+        </div>
+      </main>
+    </div>;
+  }
 
   return <div className="app-shell">
     <aside className="sidebar">
