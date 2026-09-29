@@ -78,6 +78,7 @@ npm run verify:local-e2e
 npm run verify:cloud-bridge-live
 npm run verify:agent-inbox-e2e
 npm run verify:runtime-agent-request-consumer
+npm run verify:runtime-agent-request-live
 npm run verify:skill-discovery-live
 ```
 
