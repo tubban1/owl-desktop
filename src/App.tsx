@@ -58,6 +58,10 @@ export default function App() {
   const [notice, setNotice] = useState("");
 
   const online = snapshot?.mode === "live";
+  const cloudOnline = snapshot?.cloud.status === "connected";
+  const cloudStatusLabel = snapshot?.cloud.status
+    ? snapshot.cloud.status.replaceAll("_", " ")
+    : "stopped";
 
   const refresh = async () => {
     setBusy(true);
@@ -94,7 +98,11 @@ export default function App() {
       "mcpPort" in patch ||
       "tunnelEnabled" in patch ||
       "tunnelBinaryPath" in patch ||
-      "tunnelId" in patch
+      "tunnelId" in patch ||
+      "cloudEnabled" in patch ||
+      "cloudBaseUrl" in patch ||
+      "cloudDeviceId" in patch ||
+      "cloudTelemetryEnabled" in patch
     ) {
       await refresh();
     }
@@ -170,7 +178,7 @@ export default function App() {
               <div className="component-list">
                 <div><span className="component-icon"><Boxes size={17} /></span><p><strong>OWL Runtime</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
                 <div><span className="component-icon"><Terminal size={17} /></span><p><strong>OWL MCP</strong><small>{snapshot?.mcp.url ?? snapshot?.mcp.error ?? "Desktop adapter boundary"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
-                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL Cloud Bridge</strong><small>Optional for local execution</small></p><span className="neutral-pill">Not connected</span></div>
+                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL Cloud Bridge</strong><small>{snapshot?.cloud.deviceId ?? "Optional for local execution"}</small></p>{cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}</div>
               </div>
             </section>
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RECENT ACTIVITY</span><h3>Local events</h3></div><button className="text-button" onClick={() => setPage("logs")}>View logs</button></div>
@@ -211,6 +219,30 @@ export default function App() {
             <div className="about-grid"><span>State</span><strong>{snapshot?.tunnel.state ?? "stopped"}</strong><span>PID</span><strong>{snapshot?.tunnel.pid ?? "—"}</strong><span>MCP target</span><code>{snapshot?.tunnel.mcpUrl ?? "—"}</code><span>Secret</span><strong>{snapshot?.tunnel.secretStorage ?? "OS encrypted"}</strong></div>
             <div className="runtime-version"><button className="secondary" onClick={async () => { await window.owlDesktop.tunnelStart(); await refresh(); }}>Start tunnel</button><button className="secondary" onClick={async () => { await window.owlDesktop.tunnelStop(); await refresh(); }}>Stop tunnel</button></div>
           </section>
+          <section className="panel cloud-bridge-panel">
+            <div className="panel-heading">
+              <div><span className="eyebrow">OWL CLOUD BRIDGE</span><h3>Device control-plane transport</h3></div>
+              {cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}
+            </div>
+            <div className="about-grid">
+              <span>Device</span><code>{snapshot?.cloud.deviceId ?? "Not enrolled"}</code>
+              <span>Last heartbeat</span><strong>{formatTime(snapshot?.cloud.lastHeartbeatAt ?? undefined)}</strong>
+              <span>Last command poll</span><strong>{formatTime(snapshot?.cloud.lastPollAt ?? undefined)}</strong>
+              <span>Outbox</span><strong>{snapshot?.cloud.outboxPending ?? 0} pending</strong>
+              <span>Accepted</span><strong>{snapshot?.cloud.commandCounts.accepted ?? 0}</strong>
+              <span>Uncertain</span><strong>{snapshot?.cloud.commandCounts.uncertain ?? 0}</strong>
+            </div>
+            <div className="runtime-version cloud-actions">
+              <button className="secondary" onClick={async () => { try { const result = await window.owlDesktop.cloudProbe(); setNotice(`Cloud ${result.contractVersion ?? "v1"} reachable`); } catch { setNotice("Cloud probe failed"); } window.setTimeout(() => setNotice(""), 1800); }}>Probe Cloud</button>
+              <button className="secondary" onClick={async () => { await window.owlDesktop.cloudStart(); await refresh(); }}>Start bridge</button>
+              <button className="secondary" onClick={async () => { await window.owlDesktop.cloudSync(); await refresh(); }}>Sync now</button>
+              <button className="secondary" onClick={async () => { await window.owlDesktop.cloudStop(); await refresh(); }}>Stop bridge</button>
+            </div>
+            <div className="contract-note compact-note">
+              <ShieldCheck size={17} />
+              <div><strong>Cloud controls delivery; Runtime controls execution.</strong><p>Remote commands are deduplicated by commandId. Unknown command kinds are rejected. An uncertain Runtime completion is never replayed through another backend.</p></div>
+            </div>
+          </section>
           <section className="panel"><div className="panel-heading"><div><span className="eyebrow">COMPATIBILITY</span><h3>Desktop consumer boundary</h3></div></div><div className="compat-row"><span>Minimum Runtime API</span><strong>0.1</strong><span>Preferred / tested</span><strong>0.1</strong><span>Fallback</span><strong>Fail closed</strong></div></section>
         </>}
 
@@ -246,6 +278,13 @@ export default function App() {
             <div className="setting-row"><div><strong>Tunnel auto-start</strong><span>Start the tunnel after Desktop and MCP are ready.</span></div><Toggle checked={settings.tunnelAutoStart} onChange={(v) => saveSettings({ tunnelAutoStart: v })} /></div>
             <div className="setting-row"><div><strong>Tunnel binary</strong><span>Versioned OWL Tunnel client executable. Desktop owns lifecycle, not transport semantics.</span></div><input className="setting-input" value={settings.tunnelBinaryPath} onChange={(e) => setSettings({ ...settings, tunnelBinaryPath: e.target.value })} onBlur={() => saveSettings({ tunnelBinaryPath: settings.tunnelBinaryPath })} placeholder="/path/to/tunnel-client-runtime" /></div>
             <div className="setting-row"><div><strong>Tunnel ID</strong><span>Control-plane tunnel identity. API key belongs in Secrets as OWL_TUNNEL_API_KEY.</span></div><input className="setting-input" value={settings.tunnelId} onChange={(e) => setSettings({ ...settings, tunnelId: e.target.value })} onBlur={() => saveSettings({ tunnelId: settings.tunnelId })} placeholder="tunnel_…" /></div>
+            <div className="setting-group-label"><Cloud size={14} /><span>Cloud Bridge</span></div>
+            <div className="setting-row"><div><strong>OWL Cloud Bridge</strong><span>Connect this registered Desktop to OWL Cloud M1 control plane.</span></div><Toggle checked={settings.cloudEnabled} onChange={(v) => saveSettings({ cloudEnabled: v })} /></div>
+            <div className="setting-row"><div><strong>Cloud auto-start</strong><span>Start heartbeat, command pull and projection outbox after Desktop launches.</span></div><Toggle checked={settings.cloudAutoStart} onChange={(v) => saveSettings({ cloudAutoStart: v })} /></div>
+            <div className="setting-row"><div><strong>Cloud API endpoint</strong><span>OWL Cloud HTTP API v1. Device transport uses the separately stored device credential.</span></div><input className="setting-input" value={settings.cloudBaseUrl} onChange={(e) => setSettings({ ...settings, cloudBaseUrl: e.target.value })} onBlur={() => saveSettings({ cloudBaseUrl: settings.cloudBaseUrl })} placeholder="https://…execute-api…amazonaws.com" /></div>
+            <div className="setting-row"><div><strong>Cloud device ID</strong><span>Canonical deviceId returned by Cloud registration.</span></div><input className="setting-input" value={settings.cloudDeviceId} onChange={(e) => setSettings({ ...settings, cloudDeviceId: e.target.value })} onBlur={() => saveSettings({ cloudDeviceId: settings.cloudDeviceId })} placeholder="dev_…" /></div>
+            <div className="setting-row"><div><strong>Provider telemetry</strong><span>Send privacy-bounded operational metadata only. No command payload, credentials or user content.</span></div><Toggle checked={settings.cloudTelemetryEnabled} onChange={(v) => saveSettings({ cloudTelemetryEnabled: v })} /></div>
+            <div className="contract-note compact-note"><KeyRound size={17} /><div><strong>Device credential stays OS-encrypted.</strong><p>Store it in Secrets as <code>OWL_CLOUD_DEVICE_CREDENTIAL</code> with scope <code>owl-cloud</code>. Human Cognito login/device enrollment is a separate product flow.</p></div></div>
             <div className="setting-row"><div><strong>Runtime diagnostics</strong><span>Include Runtime support projections in the Logs screen.</span></div><Toggle checked={settings.diagnosticsEnabled} onChange={(v) => saveSettings({ diagnosticsEnabled: v })} /></div>
             <div className="setting-row"><div><strong>Launch at login</strong><span>Start OWL Desktop after macOS login in packaged builds.</span></div><Toggle checked={settings.launchAtLogin} onChange={(v) => saveSettings({ launchAtLogin: v })} /></div>
           </section>

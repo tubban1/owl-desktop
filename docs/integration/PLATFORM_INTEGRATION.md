@@ -102,3 +102,17 @@ OWL Desktop version
 ```
 
 Worker compatibility is published separately because Worker is not required for local execution.
+
+## Implemented Desktop Cloud transport
+
+OWL Desktop now implements the M1 device transport as a polling bridge with:
+
+- presence heartbeat;
+- at-least-once command pull;
+- commandId/digest dedupe;
+- explicit accept/reject;
+- Runtime task identity mapping;
+- durable event/telemetry outbox;
+- reconnect without inferring Runtime failure.
+
+Human Cognito sign-in/device enrollment and canonical Runtime event streaming remain separate integration workstreams.

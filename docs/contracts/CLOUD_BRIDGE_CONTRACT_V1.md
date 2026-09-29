@@ -63,3 +63,39 @@ Cloud cannot mutate local Runtime state files while the device is offline.
 ## No silent fallback
 
 If Runtime returns `uncertain`, Desktop must surface it. It must never silently execute the same command through a legacy backend.
+
+## Desktop M1 transport profile
+
+The first implemented Desktop transport is HTTP polling against the Cloud v1 device API:
+
+```text
+POST /device/v1/presence
+GET  /device/v1/commands
+POST /device/v1/commands/{commandId}/accept|reject
+POST /device/v1/events
+POST /device/v1/telemetry
+```
+
+Desktop persists a local bridge journal containing only command identity/digest/status and Runtime mapping. It does not persist another copy of the RemoteCommand payload.
+
+Before invoking Runtime for a new command, Desktop marks the command `processing`. A restart while that state is present converts it to `uncertain`; Desktop does not automatically re-execute it.
+
+Once Runtime returns a canonical identity, Desktop persists the mapping before Cloud acknowledgement. A later duplicate delivery replays only the same acknowledgement.
+
+Runtime/Desktop events and bounded provider telemetry use a durable outbox with stable event IDs.
+
+## Command adapter rule
+
+`RemoteCommand.kind` is not a generic Runtime RPC escape hatch. Desktop enables only explicitly versioned/compatible adapters.
+
+Current M1 implementation supports only:
+
+```text
+runtime.task.create -> Runtime tasks.create
+```
+
+Unknown kinds are rejected before Runtime is touched. A versioned Cloud command-kind registry is tracked in `DESKTOP_CLOUD_CONTRACT_REQUESTS.md`.
+
+## Credential boundary
+
+Device credentials are consumed only in the Electron main process from OS-backed secret storage. They are never returned to the renderer or written into the bridge journal/logs.

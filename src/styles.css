@@ -724,3 +724,30 @@ input:focus { border-color: #41634b; box-shadow: 0 0 0 3px rgba(78,128,92,.08); 
     justify-self: start;
   }
 }
+
+.setting-group-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 14px 0 6px;
+  color: #7e878d;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.cloud-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.compact-note {
+  margin-top: 12px;
+}
+
+.cloud-bridge-panel .about-grid code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
