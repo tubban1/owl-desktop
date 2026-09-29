@@ -50,6 +50,40 @@ export class RuntimeHttpClient {
     }
   }
 
+  async telemetry({ after = 0, limit = 100, timeoutMs = 3500 } = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error(`Runtime telemetry request timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    try {
+      const query = new URLSearchParams({
+        after: String(after),
+        limit: String(limit),
+      });
+      const response = await fetch(
+        `${this.baseUrl}/runtime/v${API_VERSION}/telemetry?${query}`,
+        {
+          headers: {
+            ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+          },
+          signal: controller.signal,
+        },
+      );
+      const payload = await response.json();
+      if (!response.ok || payload?.ok !== true) {
+        const error = new Error(
+          payload?.error?.message ?? `OWL Runtime telemetry HTTP ${response.status}`,
+        );
+        error.code = payload?.error?.code ?? `HTTP_${response.status}`;
+        throw error;
+      }
+      return payload.result;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async info() {
     const info = await this.invoke("info");
     return { ...info, transport: "http" };
