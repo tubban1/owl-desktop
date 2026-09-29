@@ -12,6 +12,28 @@ function jsonResponse(body, status = 200) {
 }
 
 describe("CloudHttpClient", () => {
+  it("reads public auth and command registry discovery without auth headers", async () => {
+    const fetchImpl = vi.fn(async (url) =>
+      jsonResponse(
+        url.endsWith("/auth/config")
+          ? { provider: "cognito", pkce: { required: true, method: "S256" } }
+          : { contractVersion: 1, kinds: [] },
+      ),
+    );
+    const client = new CloudHttpClient({
+      baseUrl: "https://cloud.example.test",
+      fetchImpl,
+    });
+
+    await client.authConfig();
+    await client.remoteCommandRegistry();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchImpl.mock.calls) {
+      expect(init.headers.authorization).toBeUndefined();
+    }
+  });
+
   it("uses Device auth for presence without exposing the credential elsewhere", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
     const client = new CloudHttpClient({
