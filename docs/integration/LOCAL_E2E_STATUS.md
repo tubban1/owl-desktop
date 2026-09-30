@@ -280,7 +280,7 @@ Canonical tested set:
 
 ~~~text
 OWL Desktop release assembly
-40552b9
+75b72f3
 
 OWL Cloud feat/cloud-m1-control-plane
 1d556aa
@@ -311,7 +311,7 @@ Current release-candidate set:
 
 ~~~text
 OWL Desktop release assembly
-40552b9
+75b72f3
 
 OWL Cloud feat/cloud-m1-control-plane
 1d556aa
@@ -322,13 +322,16 @@ d6320d2
 
 Automated release evidence completed on 2026-09-30:
 
-- Desktop release staging refuses any Runtime checkout other than the pinned canonical Runtime main SHA;
+- Desktop release staging pins canonical Runtime main `d6320d2`; without an exact local checkout it fetches that exact Git object into a temporary build directory, verifies the SHA, builds it and removes the temporary source;
 - canonical Runtime `d6320d2` stages as `1.0.0-rc.4` / API `0.1`;
 - Tunnel 0.0.15 arm64+x64 is reconstructed from pinned vendor artifacts and SHA-verified;
-- Runtime Host `fan.fde.owl.runtime@1.0.0` is built as a universal arm64+x86_64 native app and included in Desktop resources;
+- Runtime Host `fan.fde.owl.runtime@1.0.0` is reproducibly built from the pinned Runtime source as a universal arm64+x86_64 native app and included in Desktop resources;
+- OWL LAB Helper `fan.fde.owl.helper@1.0.0` is reproducibly built from the same pinned Runtime source as a universal arm64+x86_64 native app and included in Desktop resources;
+- Runtime Host and Helper automatically reuse `OWL_*_SIGNING_IDENTITY`, `CSC_NAME`, or an installed Developer ID Application identity when one becomes available;
 - the OWL LAB Desktop icon is generated reproducibly from the tracked SVG source and appears as packaged `icon.icns`;
 - unsigned arm64 and x64 app bundles both build successfully;
-- `npm run verify:packaged-smoke` confirms both bundles contain the correct Desktop identity, canonical Runtime, both Tunnel architectures, custom icon and universal Runtime Host;
+- `npm run verify:packaged-smoke` confirms both bundles contain the correct Desktop identity, canonical Runtime, both Tunnel architectures, custom icon, universal Runtime Host and universal OWL LAB Helper;
+- the signed-release config is fail-checked for the `OWL LAB Desktop` product name, Helper resource inclusion and mandatory notarization;
 - unsigned arm64+x64 DMG/ZIP installers, blockmaps and `latest-mac.yml` are generated successfully;
 - `hdiutil verify` reports both generated DMGs as checksum VALID.
 
@@ -336,6 +339,7 @@ The macOS release preflight now fails only on signing/notarization prerequisites
 
 ~~~text
 OWL Runtime Host must carry a non-ad-hoc Developer ID signature
+OWL LAB Helper must carry a non-ad-hoc Developer ID signature
 No valid Developer ID Application signing identity is available
 APPLE_TEAM_ID is required
 Notarization credentials are missing
