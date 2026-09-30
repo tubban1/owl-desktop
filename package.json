@@ -16,19 +16,21 @@
     "stage:runtime": "node scripts/stage-runtime-component.mjs",
     "stage:tunnel": "node scripts/stage-tunnel-component.mjs",
     "package:mac": "npm run package:mac:arm64",
-    "package:mac:arm64": "npm run stage:runtime && npm run build && electron-builder --mac --arm64",
-    "package:mac:x64": "npm run stage:runtime && npm run build && electron-builder --mac --x64",
-    "package:mac:smoke:arm64": "npm run stage:runtime && npm run build && electron-builder --mac --arm64 --dir",
-    "package:mac:smoke:x64": "npm run stage:runtime && npm run build && electron-builder --mac --x64 --dir",
+    "package:mac:arm64": "npm run stage:runtime && npm run prepare:tunnel && npm run build && electron-builder --mac --arm64",
+    "package:mac:x64": "npm run stage:runtime && npm run prepare:tunnel && npm run build && electron-builder --mac --x64",
+    "package:mac:smoke:arm64": "npm run stage:runtime && npm run prepare:tunnel && npm run build && electron-builder --mac --arm64 --dir",
+    "package:mac:smoke:x64": "npm run stage:runtime && npm run prepare:tunnel && npm run build && electron-builder --mac --x64 --dir",
     "verify:mac:release": "node scripts/verify-macos-release-env.mjs",
-    "package:mac:release": "npm run stage:runtime && npm run verify:mac:release && npm run build && electron-builder --config electron-builder.release.yml --mac --arm64 --x64",
+    "package:mac:release": "npm run stage:runtime && npm run prepare:tunnel && npm run verify:mac:release && npm run build && electron-builder --config electron-builder.release.yml --mac --arm64 --x64",
     "start": "electron .",
     "verify:cloud-bridge-live": "node scripts/verify-cloud-bridge-live-e2e.mjs",
     "verify:cloud-bridge-http-live": "node scripts/verify-cloud-bridge-http-live-e2e.mjs",
     "verify:agent-inbox-e2e": "node scripts/verify-agent-inbox-e2e.mjs",
     "verify:skill-discovery-live": "node scripts/verify-skill-discovery-live-e2e.mjs",
     "verify:runtime-agent-request-consumer": "node scripts/verify-runtime-agent-request-consumer.mjs",
-    "verify:runtime-agent-request-live": "node scripts/verify-runtime-agent-request-live-e2e.mjs"
+    "verify:runtime-agent-request-live": "node scripts/verify-runtime-agent-request-live-e2e.mjs",
+    "verify:release-components": "npm run prepare:tunnel && node scripts/verify-release-components.mjs",
+    "prepare:tunnel": "node scripts/prepare-tunnel-components.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
@@ -69,6 +71,10 @@
       {
         "from": "vendor/owl-runtime",
         "to": "owl-runtime"
+      },
+      {
+        "from": "vendor/owl-tunnel",
+        "to": "owl-tunnel"
       }
     ],
     "mac": {

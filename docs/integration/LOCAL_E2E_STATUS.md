@@ -212,14 +212,76 @@ GET /contracts/remote-command-kinds/v1
 
 confirmed both `runtime.task.create@1` and `runtime.task.create-and-start@1` are deployed.
 
+## I5 — Approval E2E
+
+**CLOSED for the tested dev contract.**
+
+Canonical implementation set:
+
+~~~text
+OWL Cloud feat/cloud-m1-control-plane @ b6a764b
+OWL Desktop main @ a8cb8ab
+OWL Runtime integration baseline @ 919eeed
+~~~
+
+Authority remains intentionally split:
+
+~~~text
+Cloud ApprovalDecision
+= authenticated human decision + provenance + delivery/ack state
+
+Runtime Approval
+= exact task/step/fingerprint authorization + one-time receipt consumption
+~~~
+
+The live gate `npm run verify:i5-approval-e2e` exercised real Cloud API handler/control-plane logic, Desktop Cloud Bridge, and a real approval-enforcing Runtime. It proved:
+
+- an `fs.delete` step remained `waiting_approval` and the file remained present before approval;
+- Cloud `approve` resumed the same Runtime taskId and same stepId;
+- the exact Runtime approval receipt became `consumed`;
+- the delete side effect executed once;
+- replaying the same Cloud ApprovalDecision replayed the durable Cloud acknowledgement rather than re-invoking Runtime;
+- a separate Cloud `deny` decision moved the waiting Task to `failed`;
+- the denied delete side effect never executed;
+- no replacement Task was created for approve or deny;
+- Cloud records the final Runtime approval/task outcome, not an intermediate `approved` snapshot;
+- ApprovalDecision is persisted in Aurora via `005_approval_decision_v1.sql`, exposed through OpenAPI, and protected by effective `approve` DeviceGrant access.
+
+Provider/consumer gates are green:
+
+- Cloud typecheck + 52/52 tests;
+- Cloud schema verifier: 10 tables + approval constraints/indexes;
+- Desktop 87/87 tests + production build.
+
+## I6 — Offline / reconnect
+
+**CLOSED for the tested dev contract.**
+
+The live gate `npm run verify:i6-offline-reconnect-e2e` exercises an actual HTTP Cloud transport, Desktop Cloud Bridge with durable journal, and a real enforced Runtime. It proved:
+
+- a RemoteCommand can remain queued while Desktop is not polling;
+- repeated pre-accept pulls return the same stable `commandId`;
+- duplicate delivery maps to one `runtimeTaskId` and does not create/start a second Task;
+- the Cloud HTTP server was actually stopped while the Runtime Task was active;
+- Runtime reached canonical `completed` while Cloud transport was unavailable;
+- no terminal Cloud projection was fabricated while the device was offline;
+- restarting Cloud on the same endpoint and reconnecting with the same device credential restored device identity;
+- a fresh Desktop bridge instance reused the durable journal and reconciled the same Runtime Task;
+- exactly one terminal event was projected after reconnect;
+- a second reconnect/sync did not duplicate terminal projection or invent failure.
+
+This closes the Gate 6 invariants for queued intent, at-least-once delivery, command dedupe, Runtime independence from Cloud transport, stable device identity and projection reconciliation.
+
 ## Next serial gate
 
-The next integration phase is **I5 — Approval E2E**.
+The next integration phase is **I7 — Compatibility Matrix**.
 
 ~~~text
 I2 Desktop ↔ Runtime CLOSED
 → I3 login + Device Enrollment + Runtime access CLOSED
 → I4 RemoteCommand product E2E CLOSED
-→ I5 Approval E2E
-→ I6 Offline / reconnect
+→ I5 Approval E2E CLOSED
+→ I6 Offline / reconnect CLOSED
+→ I7 Compatibility Matrix
+→ I8 Dogfood / soak / production promotion
 ~~~

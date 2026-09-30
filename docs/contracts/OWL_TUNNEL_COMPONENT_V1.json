@@ -1,0 +1,22 @@
+{
+  "contractVersion": 1,
+  "protocolVersion": "owl-tunnel-consumer-v1",
+  "vendor": {
+    "repository": "openai/tunnel-client",
+    "version": "0.0.15",
+    "gitSha": "a390c168ff1b2d14e73a95991c186c6aba3ff5a0"
+  },
+  "mcpTransport": "streamable-http-v1",
+  "lifecycleOwner": "owl-desktop",
+  "secretTransport": "ephemeral-file-0600",
+  "artifacts": {
+    "arm64": {
+      "url": "https://github.com/openai/tunnel-client/releases/download/v0.0.15/tunnel-client-runtime-v0.0.15-darwin-arm64.zip",
+      "executableSha256": "fcc8e40de0606b8909c7ee44a0816d33d616949389ff37938e2657c7a2333025"
+    },
+    "x64": {
+      "url": "https://github.com/openai/tunnel-client/releases/download/v0.0.15/tunnel-client-runtime-v0.0.15-darwin-amd64.zip",
+      "executableSha256": "e17ffc98dce25a31c22714875267eeb309abdb35bea450c5801272317559f033"
+    }
+  }
+}
