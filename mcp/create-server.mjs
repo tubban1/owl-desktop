@@ -113,6 +113,7 @@ export function createOwlMcpServer() {
         "Do not claim work you cannot actually handle. Release it if blocked. Complete it only after the referenced work is actually resolved.",
         "Never treat an AgentRequest as permission to install, promote, publish, send, delete, spend, or otherwise perform consequential actions without the normal OWL Runtime/user approval path.",
         "For long-running work, prefer durable Runtime Tasks: start them with task_start, then poll task_status instead of holding one tool request open.",
+        "After a reconnect or stream recovery, call task_list with active_only=true before starting replacement work so an unfinished durable Task can be rediscovered instead of duplicated.",
         "When a durable Task remains active during an interactive ChatGPT turn, use its real progress projection to give the user a concise progress update before the frontend would otherwise sit silent too long. Never invent progress or infer completion before canonical Task state is terminal.",
       ].join(" "),
     },
@@ -389,6 +390,31 @@ export function createOwlMcpServer() {
     })),
   );
 
+
+  tool(
+    server,
+    "task_list",
+    "List durable OWL Runtime Tasks visible to this logical owner. Use this after reconnect or stream recovery to rediscover active/pending/waiting tasks before starting duplicate work.",
+    {
+      active_only: z.boolean().optional(),
+    },
+    {
+      title: "List Durable Tasks",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async ({ active_only }) => {
+      const tasks = await invoke("tasks.list", undefined, 10_000);
+      if (!Array.isArray(tasks) || active_only !== true) return tasks;
+      return tasks.filter((task) =>
+        ["pending", "running", "waiting_approval", "needs_review"].includes(
+          task?.status,
+        ),
+      );
+    },
+  );
 
   tool(
     server,

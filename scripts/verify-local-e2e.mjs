@@ -40,6 +40,7 @@ try {
     "primitive_call",
     "skill_run",
     "git_status",
+    "task_list",
     "task_start",
     "task_status",
     "agent_requests_status",
@@ -57,8 +58,8 @@ try {
   if (!instructions?.includes("AgentRequests")) {
     throw new Error("OWL MCP server instructions do not describe Agent Inbox.");
   }
-  if (!instructions?.includes("task_start") || !instructions?.includes("task_status")) {
-    throw new Error("OWL MCP server instructions do not describe detached long-task progress.");
+  if (!instructions?.includes("task_start") || !instructions?.includes("task_status") || !instructions?.includes("task_list")) {
+    throw new Error("OWL MCP server instructions do not describe detached long-task recovery.");
   }
 
   const info = await first.client.callTool({

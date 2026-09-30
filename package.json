@@ -12,6 +12,7 @@
     "test": "vitest run",
     "verify:local-e2e": "node scripts/verify-local-e2e.mjs",
     "verify:consequential-replay-live": "node scripts/verify-consequential-replay-live-e2e.mjs",
+    "verify:stream-recovery-live": "node scripts/verify-stream-recovery-live-e2e.mjs",
     "stage:runtime": "node scripts/stage-runtime-component.mjs",
     "stage:tunnel": "node scripts/stage-tunnel-component.mjs",
     "package:mac": "npm run package:mac:arm64",
