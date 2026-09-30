@@ -272,9 +272,40 @@ The live gate `npm run verify:i6-offline-reconnect-e2e` exercises an actual HTTP
 
 This closes the Gate 6 invariants for queued intent, at-least-once delivery, command dedupe, Runtime independence from Cloud transport, stable device identity and projection reconciliation.
 
+## I7 — Compatibility Matrix
+
+**CLOSED for the exact tested development set.**
+
+Canonical tested set:
+
+~~~text
+OWL Desktop main
+6c7e714
+
+OWL Cloud feat/cloud-m1-control-plane
+1d556aa
+
+OWL Runtime feature/1.x-runtime-integration-freeze
+b841815
+~~~
+
+The canonical matrix is `docs/contracts/COMPATIBILITY_MATRIX.md`.
+
+Gate 7 now has executable fail-closed behavior, not only documentation:
+
+- Desktop requires Runtime public API exactly `0.1` before Cloud Bridge begins pulling RemoteCommands;
+- incompatible Runtime API blocks the bridge with `RUNTIME_API_INCOMPATIBLE`;
+- RemoteCommand kind/version compatibility is centralized in `OWL_COMPATIBILITY_V1`;
+- unsupported kind/version is rejected before Runtime is invoked;
+- Tunnel release preparation reconstructs pinned arm64+x64 0.0.15 artifacts and verifies architecture/version/vendor SHA/executable SHA256;
+- OWL LAB Helper publishes `fan.fde.owl.helper` / `1.0.0`, with the old Computer MCP Helper path retained only as a local migration fallback;
+- Runtime Host identity remains `fan.fde.owl.runtime` / `1.0.0`.
+
+Frankfurt live provider evidence confirms Cognito PKCE, both RemoteCommand v1 kinds and the authenticated ApprovalDecision route are deployed.
+
 ## Next serial gate
 
-The next integration phase is **I7 — Compatibility Matrix**.
+The only remaining product-promotion phase is **I8 — Dogfood / soak / production promotion**.
 
 ~~~text
 I2 Desktop ↔ Runtime CLOSED
@@ -282,6 +313,6 @@ I2 Desktop ↔ Runtime CLOSED
 → I4 RemoteCommand product E2E CLOSED
 → I5 Approval E2E CLOSED
 → I6 Offline / reconnect CLOSED
-→ I7 Compatibility Matrix
-→ I8 Dogfood / soak / production promotion
+→ I7 Compatibility Matrix CLOSED
+→ I8 Dogfood / soak / signed production release
 ~~~
