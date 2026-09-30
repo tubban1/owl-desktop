@@ -32,7 +32,8 @@
     "verify:release-components": "npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:icon && node scripts/verify-release-components.mjs",
     "prepare:tunnel": "node scripts/prepare-tunnel-components.mjs",
     "prepare:runtime-host": "node scripts/prepare-runtime-host-component.mjs",
-    "prepare:icon": "node scripts/prepare-macos-icon.mjs"
+    "prepare:icon": "node scripts/prepare-macos-icon.mjs",
+    "verify:packaged-smoke": "node scripts/verify-packaged-smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
