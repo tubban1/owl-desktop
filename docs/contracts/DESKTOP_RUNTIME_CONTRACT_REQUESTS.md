@@ -79,16 +79,16 @@ Desktop may spawn/supervise the process; Runtime remains execution authority.
 Accepted Runtime provider:
 
 ~~~text
-852fdb4eb7595800eb1c3e64e822b15cf5528ef6
+ae926a14327fedee68269ded608951dcc0ccbaa5
 ~~~
 
 Accepted Desktop consumer code:
 
 ~~~text
-779c00b51cbfb99d82e5e4413ac91a99d2b9e96c
+dc43a07e48b4013a87a3ca922726bbcf29e78b65
 ~~~
 
-Runtime owns canonical consequential replay through logical-session-scoped idempotency keys and durable replay receipts. Desktop does not maintain a second execution dedupe database.
+Runtime owns canonical consequential replay and durable replay receipts. Desktop does not maintain a second execution dedupe database. Stable logical owner identity is deliberately separate from replay identity: default replay identity is MCP-transport scoped so fresh transports cannot accidentally replay stale responses when JSON-RPC numeric IDs are reused; an explicit client idempotency key may intentionally preserve replay identity across transports.
 
 Desktop/MCP mapping:
 
@@ -343,7 +343,7 @@ Accepted Runtime baseline:
 
 ~~~text
 owl-runtime
-852fdb4eb7595800eb1c3e64e822b15cf5528ef6
+ae926a14327fedee68269ded608951dcc0ccbaa5
 ~~~
 
 **Owner:** owl-runtime Task contract; consumed by OWL MCP / Desktop / agent frontends.

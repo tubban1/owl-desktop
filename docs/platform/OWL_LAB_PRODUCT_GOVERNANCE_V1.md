@@ -191,11 +191,11 @@ Every Gate records exact component SHAs.
 Current serial closure state on 2026-09-30:
 
 ~~~text
-I1 Runtime 1.x provider head
-852fdb4eb7595800eb1c3e64e822b15cf5528ef6
+I1 Runtime 1.x canonical main merge
+ae926a14327fedee68269ded608951dcc0ccbaa5
 
-I2 Desktop consumer code
-779c00b51cbfb99d82e5e4413ac91a99d2b9e96c
+I2 Desktop tested main
+1d32e902caaab12c99e1932788904ff58062f99c
 
 I2 Local E2E
 PASS — read-only, stable-owner reconnect, detached long-task progress,

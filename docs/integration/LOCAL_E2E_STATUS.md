@@ -5,11 +5,11 @@ Status: **Gate 3 complete / Desktop ↔ Runtime I2 live accepted**.
 Validated on 2026-09-30 against the exact consumer/provider pair:
 
 ~~~text
-OWL Desktop consumer code
-dc43a07e48b4013a87a3ca922726bbcf29e78b65
+OWL Desktop tested main
+1d32e902caaab12c99e1932788904ff58062f99c
 
-OWL Runtime 1.x provider
-852fdb4eb7595800eb1c3e64e822b15cf5528ef6
+OWL Runtime canonical main merge
+ae926a14327fedee68269ded608951dcc0ccbaa5
 
 Runtime public API
 0.1
@@ -80,7 +80,7 @@ OWL MCP skill_run(runtime.compile_task)
 → terminal completed
 ~~~
 
-Latest full-gate acceptance was **43 ms** while the Task continued independently.
+Final exact-pair validation against canonical Runtime `main` observed **1034 ms** cold-start acceptance while the 2.2-second Task continued independently. Earlier warm integration runs were as low as 43 ms; both remain below the 1500 ms acceptance gate.
 
 The gate also proved:
 

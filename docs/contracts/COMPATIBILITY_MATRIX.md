@@ -8,13 +8,13 @@ This file is the canonical local compatibility record published by OWL Desktop.
 
 | Component | Current role | Tested baseline |
 | --- | --- | --- |
-| OWL Desktop | local integration host | consumer code SHA `dc43a07e48b4013a87a3ca922726bbcf29e78b65`; 0.1.0 development line; arm64+x64 packaging smoke |
-| OWL MCP | Desktop-owned ChatGPT/MCP adapter | Desktop SHA `dc43a07e48b4013a87a3ca922726bbcf29e78b65`; Streamable HTTP; Local E2E Gate 3 complete |
-| OWL Runtime | execution authority | API 0.1; 1.x integration provider SHA `852fdb4eb7595800eb1c3e64e822b15cf5528ef6`; implementation currently reports `1.0.0-rc.4` |
-| Runtime User Skill extension | Candidate / Registry / Discovery | contained in provider SHA `852fdb4eb7595800eb1c3e64e822b15cf5528ef6`; User Skill + Workflow Discovery live accepted |
-| Runtime Public Event + AgentRequest extension | durable coordination producer | contained in provider SHA `852fdb4eb7595800eb1c3e64e822b15cf5528ef6`; `events.list` + explicit retention-gap reconciliation live accepted |
-| Runtime detached Task extension | long-task execution / truthful progress | contained in provider SHA `852fdb4eb7595800eb1c3e64e822b15cf5528ef6`; `tasks.start` + Task progress projection; Desktop MCP `task_start/task_status` live accepted |
-| Runtime consequential replay | duplicate side-effect protection | contained in provider SHA `852fdb4eb7595800eb1c3e64e822b15cf5528ef6`; Desktop stable replay-key handoff live fault-injection accepted |
+| OWL Desktop | local integration host | tested main SHA `1d32e902caaab12c99e1932788904ff58062f99c`; 0.1.0 development line; arm64+x64 packaging smoke |
+| OWL MCP | Desktop-owned ChatGPT/MCP adapter | Desktop tested main SHA `1d32e902caaab12c99e1932788904ff58062f99c`; Streamable HTTP; Local E2E Gate 3 complete |
+| OWL Runtime | execution authority | API 0.1; canonical 1.x main merge SHA `ae926a14327fedee68269ded608951dcc0ccbaa5`; implementation currently reports `1.0.0-rc.4` |
+| Runtime User Skill extension | Candidate / Registry / Discovery | contained in provider SHA `ae926a14327fedee68269ded608951dcc0ccbaa5`; User Skill + Workflow Discovery live accepted |
+| Runtime Public Event + AgentRequest extension | durable coordination producer | contained in provider SHA `ae926a14327fedee68269ded608951dcc0ccbaa5`; `events.list` + explicit retention-gap reconciliation live accepted |
+| Runtime detached Task extension | long-task execution / truthful progress | contained in provider SHA `ae926a14327fedee68269ded608951dcc0ccbaa5`; `tasks.start` + Task progress projection; Desktop MCP `task_start/task_status` live accepted |
+| Runtime consequential replay | duplicate side-effect protection | contained in provider SHA `ae926a14327fedee68269ded608951dcc0ccbaa5`; Desktop stable replay-key handoff live fault-injection accepted |
 | OWL Cloud | control authority | HTTP API v1 / Account Access v1; Desktop M1 bridge exists; I3 login/device-access integration is next |
 | OWL Tunnel | transport | compatibility binary 0.0.15 arm64; formal x64/protocol artifact pending |
 | OWL Helper | macOS native capability | stable identity required |
@@ -27,10 +27,10 @@ Exact tested pair:
 
 ~~~text
 Desktop consumer code:
-dc43a07e48b4013a87a3ca922726bbcf29e78b65
+1d32e902caaab12c99e1932788904ff58062f99c
 
-Runtime provider:
-852fdb4eb7595800eb1c3e64e822b15cf5528ef6
+Runtime canonical main merge:
+ae926a14327fedee68269ded608951dcc0ccbaa5
 ~~~
 
 Passed:
@@ -39,7 +39,7 @@ Passed:
 - Desktop production build;
 - Desktop-owned MCP read-only Local E2E;
 - stable logical owner reconnect;
-- live detached 2.2-second Task with 43 ms start acceptance and monotonic progress;
+- live detached 2.2-second Task on canonical Runtime main with 1034 ms cold-start acceptance, monotonic progress and terminal completion;
 - consequential response-loss fault injection;
 - exact same-transport replay returned canonical prior response;
 - fresh MCP transports receive fresh default replay scope, preventing stale replay under reused JSON-RPC IDs;
