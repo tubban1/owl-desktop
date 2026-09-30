@@ -6,7 +6,7 @@ Validated on 2026-09-30 against the exact consumer/provider pair:
 
 ~~~text
 OWL Desktop consumer code
-779c00b51cbfb99d82e5e4413ac91a99d2b9e96c
+dc43a07e48b4013a87a3ca922726bbcf29e78b65
 
 OWL Runtime 1.x provider
 852fdb4eb7595800eb1c3e64e822b15cf5528ef6
@@ -42,8 +42,8 @@ git diff --check
 
 Result at the tested consumer code baseline:
 
-- 13/13 test files passed;
-- 72/72 tests passed;
+- 14/14 test files passed;
+- 74/74 tests passed;
 - production Vite/TypeScript build passed.
 
 Read-only Local E2E:
@@ -80,7 +80,7 @@ OWL MCP skill_run(runtime.compile_task)
 → terminal completed
 ~~~
 
-Observed acceptance was **113 ms** while the Task continued independently.
+Latest full-gate acceptance was **43 ms** while the Task continued independently.
 
 The gate also proved:
 
@@ -109,8 +109,10 @@ Fault injection:
 2. Runtime completes the append.
 3. A test proxy receives the complete upstream MCP response, then intentionally destroys the downstream response before the caller can observe it.
 4. The exact same MCP JSON-RPC request is replayed.
-5. Desktop maps stable owner + logical MCP request + Runtime method/params to the same Runtime `x-owl-idempotency-key`.
+5. Desktop maps the MCP transport session + logical request + Runtime method/params to a Runtime `x-owl-idempotency-key` for the default retry scope.
 6. Runtime returns the canonical prior result rather than executing again.
+7. A fresh MCP transport receives a fresh default replay scope even when the logical owner is unchanged, preventing stale response replay when JSON-RPC numeric IDs are reused.
+8. A client that explicitly supplies `x-owl-idempotency-key` may intentionally preserve the same replay identity across a fresh MCP transport.
 
 Observed result:
 
@@ -119,7 +121,7 @@ Observed result:
 - target file contained exactly one `once\n`;
 - side-effect count = 1.
 
-This closes **CR-DESKTOP-005**. Desktop does not maintain a competing execution dedupe database; Runtime remains the canonical replay authority.
+This closes **CR-DESKTOP-005**. Desktop does not maintain a competing execution dedupe database; Runtime remains the canonical replay authority. Stable logical owner identity and request replay identity are intentionally separate: owner identity may survive reconnect, while the default replay scope is transport-local unless the client explicitly supplies a cross-transport idempotency key.
 
 ## Gate 3 conclusion
 

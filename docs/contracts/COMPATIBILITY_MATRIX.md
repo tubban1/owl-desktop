@@ -8,8 +8,8 @@ This file is the canonical local compatibility record published by OWL Desktop.
 
 | Component | Current role | Tested baseline |
 | --- | --- | --- |
-| OWL Desktop | local integration host | consumer code SHA `779c00b51cbfb99d82e5e4413ac91a99d2b9e96c`; 0.1.0 development line; arm64+x64 packaging smoke |
-| OWL MCP | Desktop-owned ChatGPT/MCP adapter | Desktop SHA `779c00b51cbfb99d82e5e4413ac91a99d2b9e96c`; Streamable HTTP; Local E2E Gate 3 complete |
+| OWL Desktop | local integration host | consumer code SHA `dc43a07e48b4013a87a3ca922726bbcf29e78b65`; 0.1.0 development line; arm64+x64 packaging smoke |
+| OWL MCP | Desktop-owned ChatGPT/MCP adapter | Desktop SHA `dc43a07e48b4013a87a3ca922726bbcf29e78b65`; Streamable HTTP; Local E2E Gate 3 complete |
 | OWL Runtime | execution authority | API 0.1; 1.x integration provider SHA `852fdb4eb7595800eb1c3e64e822b15cf5528ef6`; implementation currently reports `1.0.0-rc.4` |
 | Runtime User Skill extension | Candidate / Registry / Discovery | contained in provider SHA `852fdb4eb7595800eb1c3e64e822b15cf5528ef6`; User Skill + Workflow Discovery live accepted |
 | Runtime Public Event + AgentRequest extension | durable coordination producer | contained in provider SHA `852fdb4eb7595800eb1c3e64e822b15cf5528ef6`; `events.list` + explicit retention-gap reconciliation live accepted |
@@ -27,7 +27,7 @@ Exact tested pair:
 
 ~~~text
 Desktop consumer code:
-779c00b51cbfb99d82e5e4413ac91a99d2b9e96c
+dc43a07e48b4013a87a3ca922726bbcf29e78b65
 
 Runtime provider:
 852fdb4eb7595800eb1c3e64e822b15cf5528ef6
@@ -35,13 +35,15 @@ Runtime provider:
 
 Passed:
 
-- Desktop 72/72 unit/integration tests;
+- Desktop 74/74 unit/integration tests;
 - Desktop production build;
 - Desktop-owned MCP read-only Local E2E;
 - stable logical owner reconnect;
-- live detached 2.2-second Task with 113 ms start acceptance and monotonic progress;
+- live detached 2.2-second Task with 43 ms start acceptance and monotonic progress;
 - consequential response-loss fault injection;
-- exact replay returned canonical prior response;
+- exact same-transport replay returned canonical prior response;
+- fresh MCP transports receive fresh default replay scope, preventing stale replay under reused JSON-RPC IDs;
+- explicit client idempotency keys remain stable across transports when intentional;
 - non-idempotent append side effect executed exactly once.
 
 ## Compatibility rule
