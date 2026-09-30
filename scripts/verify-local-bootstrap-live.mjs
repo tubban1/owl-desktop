@@ -10,6 +10,23 @@ import { LocalRuntimeBootstrap } from "../electron/services/local-runtime-bootst
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const resourcesPath = path.resolve(
+  process.env.OWL_BOOTSTRAP_RESOURCES_PATH?.trim() ||
+    path.join(root, "vendor"),
+);
+const desktopExecPath = path.resolve(
+  process.env.OWL_BOOTSTRAP_EXEC_PATH?.trim() ||
+    path.join(
+      root,
+      "node_modules",
+      "electron",
+      "dist",
+      "Electron.app",
+      "Contents",
+      "MacOS",
+      "Electron",
+    ),
+);
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
@@ -33,18 +50,8 @@ for (const dir of ["Desktop", "Documents", "Downloads"]) {
 
 const port = await freePort();
 const label = `com.owl.runtime.bootstrap-e2e.${process.pid}`;
-const electronBinary = path.join(
-  root,
-  "node_modules",
-  "electron",
-  "dist",
-  "Electron.app",
-  "Contents",
-  "MacOS",
-  "Electron",
-);
-if (!fs.existsSync(electronBinary)) {
-  throw new Error(`Electron runtime is missing: ${electronBinary}`);
+if (!fs.existsSync(desktopExecPath)) {
+  throw new Error(`Desktop runtime executable is missing: ${desktopExecPath}`);
 }
 
 const secrets = new Map();
@@ -60,8 +67,8 @@ const store = {
 
 const events = [];
 const bootstrap = new LocalRuntimeBootstrap({
-  resourcesPath: path.join(root, "vendor"),
-  desktopExecPath: electronBinary,
+  resourcesPath,
+  desktopExecPath,
   store,
   homeDir: home,
   uid: process.getuid(),
@@ -111,7 +118,10 @@ try {
       {
         ok: true,
         gate: "Packaged local Runtime bootstrap",
-        source: "Desktop vendor release components",
+        source:
+          process.env.OWL_BOOTSTRAP_RESOURCES_PATH?.trim()
+            ? "packaged Desktop resources"
+            : "Desktop vendor release components",
         runtimeApiVersion: result.health.apiVersion,
         runtimeVersion: result.health.runtimeVersion,
         launchdLabel: label,

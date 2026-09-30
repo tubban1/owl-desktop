@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomBytes } from "node:crypto";
-import { execFile } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -239,7 +239,61 @@ export class LocalRuntimeBootstrap {
         `.tmp-${releaseName}-${process.pid}`,
       );
       fs.rmSync(temp, { recursive: true, force: true });
-      fs.cpSync(source, temp, { recursive: true, force: true });
+      fs.mkdirSync(temp, { recursive: true });
+
+      const archiveName =
+        typeof manifest.archive === "string" && manifest.archive.trim()
+          ? manifest.archive.trim()
+          : "owl-runtime-release.tgz";
+      const archive = path.join(source, archiveName);
+      const canUseArchive =
+        fs.existsSync(archive) &&
+        typeof manifest.archiveSha256 === "string" &&
+        manifest.archiveSha256.length === 64;
+
+      if (canUseArchive) {
+        const actualSha = createHash("sha256")
+          .update(fs.readFileSync(archive))
+          .digest("hex");
+        if (actualSha !== manifest.archiveSha256) {
+          throw new Error(
+            `Packaged OWL Runtime archive SHA256 mismatch: expected ${manifest.archiveSha256}, got ${actualSha}`,
+          );
+        }
+        const extracted = spawnSync(
+          "/usr/bin/tar",
+          ["-xzf", archive, "-C", temp],
+          { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
+        );
+        if (extracted.status !== 0) {
+          throw new Error(
+            extracted.stderr ||
+              extracted.stdout ||
+              "Failed to extract packaged OWL Runtime archive.",
+          );
+        }
+        fs.writeFileSync(
+          path.join(temp, "component.json"),
+          JSON.stringify(manifest, null, 2) + "\n",
+          { mode: 0o644 },
+        );
+      } else {
+        // Development/test fixture fallback. Production Desktop artifacts ship
+        // the verified archive because electron-builder intentionally filters
+        // nested node_modules from extraResources.
+        fs.cpSync(source, temp, { recursive: true, force: true });
+      }
+
+      if (!fs.existsSync(path.join(temp, "dist", "server.js"))) {
+        throw new Error("Packaged OWL Runtime release is missing dist/server.js.");
+      }
+      if (
+        canUseArchive &&
+        !fs.existsSync(path.join(temp, "node_modules"))
+      ) {
+        throw new Error("Packaged OWL Runtime release archive is missing node_modules.");
+      }
+
       fs.renameSync(temp, releaseDir);
       changed = true;
     }
