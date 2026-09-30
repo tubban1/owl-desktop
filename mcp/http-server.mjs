@@ -124,6 +124,8 @@ export async function startOwlMcpHttpServer({
             ownerSource: identity.source,
             transportSessionId,
             runtimeRequestId,
+            logicalRequestId:
+              body?.id !== undefined ? String(body.id) : runtimeRequestId,
             signal: requestAbort.signal,
             agentInbox,
             onEvent,

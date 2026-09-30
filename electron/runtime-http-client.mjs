@@ -28,6 +28,9 @@ export class RuntimeHttpClient {
           "content-type": "application/json",
           "x-owl-session-id": this.sessionId,
           "x-owl-request-id": requestId,
+          ...(normalized.idempotencyKey
+            ? { "x-owl-idempotency-key": normalized.idempotencyKey }
+            : {}),
           ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
         },
         body: JSON.stringify({
@@ -214,10 +217,21 @@ export class RuntimeHttpClient {
     });
   }
 
+  startTask(taskId, options = {}) {
+    const { timeoutMs, requestId, idempotencyKey, ...request } = options;
+    return this.invoke("tasks.start", { taskId, ...request }, {
+      timeoutMs: timeoutMs ?? 15_000,
+      requestId,
+      idempotencyKey,
+    });
+  }
+
   runTask(taskId, options = {}) {
-    const { timeoutMs, ...request } = options;
+    const { timeoutMs, requestId, idempotencyKey, ...request } = options;
     return this.invoke("tasks.run", { taskId, ...request }, {
       timeoutMs: timeoutMs ?? 120_000,
+      requestId,
+      idempotencyKey,
     });
   }
 

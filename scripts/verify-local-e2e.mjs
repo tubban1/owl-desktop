@@ -40,6 +40,8 @@ try {
     "primitive_call",
     "skill_run",
     "git_status",
+    "task_start",
+    "task_status",
     "agent_requests_status",
     "agent_requests_list",
     "agent_requests_claim",
@@ -54,6 +56,9 @@ try {
   const instructions = first.client.getInstructions();
   if (!instructions?.includes("AgentRequests")) {
     throw new Error("OWL MCP server instructions do not describe Agent Inbox.");
+  }
+  if (!instructions?.includes("task_start") || !instructions?.includes("task_status")) {
+    throw new Error("OWL MCP server instructions do not describe detached long-task progress.");
   }
 
   const info = await first.client.callTool({
@@ -96,11 +101,94 @@ try {
     throw new Error("Read-only retry changed the Git status result.");
   }
 
+  const compiled = await first.client.callTool({
+    name: "skill_run",
+    arguments: {
+      skill: "runtime.compile_task",
+      args: {
+        label: "Desktop Local E2E detached task",
+        steps: [
+          {
+            id: "slow",
+            primitive: "sys.exec",
+            op: "run",
+            args: {
+              command: `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
+                "setTimeout(() => process.stdout.write('done\\n'), 2200)",
+              )}`,
+              cwd: repo,
+              timeout_ms: 10_000,
+              workspace_mode: "read",
+            },
+          },
+        ],
+        max_concurrency: 1,
+        fail_fast: true,
+      },
+      dry_run: false,
+    },
+  });
+  if (compiled.isError) throw new Error(textResult(compiled));
+  const compiledPayload = JSON.parse(textResult(compiled));
+  const taskId = compiledPayload?.result?.id ?? compiledPayload?.id;
+  if (!taskId) {
+    throw new Error("runtime.compile_task did not return a durable Task id.");
+  }
+
+  const startedAt = Date.now();
+  const started = await first.client.callTool({
+    name: "task_start",
+    arguments: { task_id: taskId },
+  });
+  if (started.isError) throw new Error(textResult(started));
+  const startPayload = JSON.parse(textResult(started));
+  const acceptanceMs = Date.now() - startedAt;
+  if (startPayload.accepted !== true || acceptanceMs >= 1_500) {
+    throw new Error(
+      `Detached Task did not return promptly (accepted=${startPayload.accepted}, ${acceptanceMs}ms).`,
+    );
+  }
+
+  let observedActive = false;
+  let lastRevision = Number(startPayload.progress?.revision ?? 0);
+  let taskStatus = null;
+  const taskDeadline = Date.now() + 12_000;
+  while (Date.now() < taskDeadline) {
+    const statusResult = await first.client.callTool({
+      name: "task_status",
+      arguments: { task_id: taskId },
+    });
+    if (statusResult.isError) throw new Error(textResult(statusResult));
+    taskStatus = JSON.parse(textResult(statusResult));
+    const revision = Number(taskStatus.progress?.revision ?? 0);
+    if (revision < lastRevision) {
+      throw new Error("Task progress revision moved backwards.");
+    }
+    lastRevision = revision;
+    if (
+      taskStatus.progress?.phase === "executing" &&
+      Array.isArray(taskStatus.progress?.activeSteps) &&
+      taskStatus.progress.activeSteps.some((step) => step.id === "slow")
+    ) {
+      observedActive = true;
+    }
+    if (taskStatus.progress?.terminal === true) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  if (taskStatus?.status !== "completed" || taskStatus?.progress?.terminal !== true) {
+    throw new Error("Detached Task did not reach canonical completed state.");
+  }
+  if (!observedActive) {
+    throw new Error("Desktop MCP task_status never observed the active long-running step.");
+  }
+
   console.log("PASS tool discovery");
   console.log("PASS RuntimeClient info");
   console.log("PASS MCP Agent Inbox discovery");
   console.log("PASS MCP → Runtime git.query → local repository");
   console.log("PASS deterministic read-only retry");
+  console.log(`PASS MCP detached task start/status (${acceptanceMs}ms acceptance, revision ${lastRevision})`);
 } finally {
   await first.transport.close().catch(() => undefined);
 }

@@ -28,6 +28,39 @@ describe("RuntimeHttpClient", () => {
     expect(options.headers.authorization).toBe("Bearer test-token");
   });
 
+  it("forwards the stable consequential replay identity to Runtime", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: { ok: true } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new RuntimeHttpClient({
+      baseUrl: "http://127.0.0.1:8788",
+      sessionId: "owl-desktop:replay-session",
+    });
+
+    await client.invoke(
+      "primitive.call",
+      {
+        primitive: "fs.write",
+        op: "append",
+        args: { path: "/tmp/replay.txt", content: "once\n" },
+      },
+      {
+        requestId: "desktop:req:1",
+        idempotencyKey: "owl-mcp-replay:0123456789abcdef",
+      },
+    );
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.headers["x-owl-request-id"]).toBe("desktop:req:1");
+    expect(options.headers["x-owl-idempotency-key"]).toBe(
+      "owl-mcp-replay:0123456789abcdef",
+    );
+  });
+
   it("propagates external cancellation to the Runtime HTTP request", async () => {
     const fetchMock = vi.fn().mockImplementation((_url, options) =>
       new Promise((_resolve, reject) => {
@@ -74,6 +107,13 @@ describe("RuntimeHttpClient", () => {
       "digest_1",
       { date: "2026-09-29" },
     );
+    await client.startTask("task_skilltest_1", {
+      maxWaves: 100,
+      timeBudgetMs: 120_000,
+      timeoutMs: 15_000,
+      requestId: "desktop:start:1",
+      idempotencyKey: "owl-mcp-replay:start1",
+    });
     await client.runTask("task_skilltest_1", {
       maxWaves: 100,
       timeBudgetMs: 120_000,
@@ -94,6 +134,7 @@ describe("RuntimeHttpClient", () => {
       "skill-candidates.discover-workflows",
       "skill-candidates.submit",
       "skill-candidates.compile-test",
+      "tasks.start",
       "tasks.run",
       "skill-candidates.promote",
     ]);
@@ -111,7 +152,15 @@ describe("RuntimeHttpClient", () => {
       maxWaves: 100,
       timeBudgetMs: 120_000,
     });
+    expect(fetchMock.mock.calls[3][1].headers["x-owl-idempotency-key"]).toBe(
+      "owl-mcp-replay:start1",
+    );
     expect(payloads[4].params).toEqual({
+      taskId: "task_skilltest_1",
+      maxWaves: 100,
+      timeBudgetMs: 120_000,
+    });
+    expect(payloads[5].params).toEqual({
       candidateId: "candidate_1",
       expectedDigest: "digest_1",
       testTaskId: "task_skilltest_1",
