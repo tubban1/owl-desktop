@@ -88,13 +88,21 @@ Runtime/Desktop events and bounded provider telemetry use a durable outbox with 
 
 `RemoteCommand.kind` is not a generic Runtime RPC escape hatch. Desktop enables only explicitly versioned/compatible adapters.
 
-Current M1 implementation supports only:
+Current M1/I4 implementation supports only these explicitly versioned mappings:
 
 ```text
-runtime.task.create -> Runtime tasks.create
+runtime.task.create@1
+→ Runtime tasks.create
+
+runtime.task.create-and-start@1
+→ Runtime tasks.create
+→ Runtime tasks.start
+→ desktop.cloud.task.terminal@1
 ```
 
-Unknown kinds are rejected before Runtime is touched. A versioned Cloud command-kind registry is tracked in `DESKTOP_CLOUD_CONTRACT_REQUESTS.md`.
+For both consequential phases Desktop derives stable Runtime idempotency keys from `commandId`. `runtime.task.create-and-start@1` does not infer completion from Cloud acceptance: Desktop polls the mapped canonical Runtime Task and emits exactly one terminal event/telemetry projection when Runtime reports terminal truth.
+
+Unknown kinds are rejected before Runtime is touched. The Cloud versioned command-kind registry remains the authority.
 
 ## Credential boundary
 

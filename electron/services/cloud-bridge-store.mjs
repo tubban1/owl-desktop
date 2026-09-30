@@ -104,6 +104,9 @@ export class CloudBridgeStore {
       updatedAt: now,
       runtimeTaskId: null,
       runtimeRunId: null,
+      runtimeTerminalStatus: null,
+      runtimeTerminalRevision: null,
+      runtimeTerminalProjectedAt: null,
       rejectionReason: null,
       lastErrorCode: null,
     };
@@ -121,6 +124,34 @@ export class CloudBridgeStore {
     record.runtimeRunId = mapping.runtimeRunId ?? null;
     record.updatedAt = now;
     record.lastErrorCode = null;
+    this.write(state);
+    return record;
+  }
+
+  listAcceptedRuntimeMappingsPendingTerminal(limit = 100) {
+    return Object.values(this.read().commands)
+      .filter(
+        (record) =>
+          record.status === "accepted" &&
+          record.runtimeTaskId &&
+          !record.runtimeTerminalProjectedAt,
+      )
+      .slice(0, Math.max(1, Math.min(Number(limit) || 100, 500)));
+  }
+
+  markRuntimeTerminal(
+    commandId,
+    { status, revision = null },
+    now = new Date().toISOString(),
+  ) {
+    const state = this.read();
+    const record = state.commands[commandId];
+    if (!record) throw new Error(`Unknown Cloud command journal entry: ${commandId}`);
+    record.runtimeTerminalStatus = String(status || "unknown");
+    record.runtimeTerminalRevision =
+      Number.isInteger(revision) ? revision : null;
+    record.runtimeTerminalProjectedAt = now;
+    record.updatedAt = now;
     this.write(state);
     return record;
   }

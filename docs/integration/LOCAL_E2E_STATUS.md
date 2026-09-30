@@ -134,14 +134,49 @@ Gate 3 is **green** for the tested exact pair above:
 - one side effect / one canonical result;
 - Runtime Task/Process ownership remains authoritative.
 
+## I3 — OWL LAB login, Device Enrollment, Runtime access state
+
+**Automated product implementation is closed. Human browser login remains a dogfood step, not an implementation blocker.**
+
+Accepted provider/consumer baseline:
+
+~~~text
+OWL Cloud Frankfurt /auth/config
+→ Cognito Authorization Code + PKCE S256
+→ owl-desktop://auth/callback
+→ Desktop main-process token exchange
+→ bootstrap
+→ device registration
+→ one-time deviceCredential → OS safeStorage
+→ effective device access
+→ bounded local Runtime access lease
+→ LOCKED / READY / REVOKED
+~~~
+
+Evidence:
+
+- Frankfurt live `/auth/config` returns Cognito `eu-central-1`, public client, Authorization Code, PKCE S256 and `owl-desktop://auth/callback`;
+- Desktop PKCE/state/code-exchange tests pass;
+- device credential is persisted to OS-backed secure storage before non-secret device settings;
+- refresh token remains main-process/OS-vault only;
+- Runtime `access.get / authorize / lock / revoke` is available through the public HTTP contract;
+- production Runtime access defaults to enforced/LOCKED;
+- Cloud `canRun=true` creates a bounded READY lease;
+- logout/no run permission locks new mutations;
+- rejected/revoked device auth transitions Runtime to REVOKED;
+- expired leases fail closed while read-only status remains observable.
+
+Canonical Runtime access implementation is on the Runtime integration branch at `919eeed`.
+Canonical Desktop binding is on `main` at `082a526`.
+
 ## Next serial gate
 
-The next integration phase is **I3 — mandatory OWL LAB login + Device Enrollment + Runtime access state**.
-
-Do not start Cloud RemoteCommand E2E ahead of I3. The required order remains:
+The next integration phase is **I4 — Cloud RemoteCommand → Desktop → Runtime → terminal Cloud projection**.
 
 ~~~text
 I2 Desktop ↔ Runtime complete
-→ I3 Cloud login + Device Enrollment + local Runtime unlock
-→ I4 Cloud RemoteCommand → Desktop → Runtime → verified terminal projection
+→ I3 login + Device Enrollment + Runtime access CLOSED
+→ I4 RemoteCommand product E2E
+→ I5 Approval
+→ I6 Offline / reconnect
 ~~~

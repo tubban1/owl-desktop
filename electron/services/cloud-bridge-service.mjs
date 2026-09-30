@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 const SUPPORTED_COMMAND_KINDS = new Set([
   "runtime.task.create",
+  "runtime.task.create-and-start",
 ]);
 
 function isObject(value) {
@@ -379,6 +380,7 @@ export class CloudBridgeService {
         await this.processCommand(command);
       }
 
+      await this.projectRuntimeTerminalStates();
       await this.flushOutbox();
       return this.snapshot();
     } finally {
@@ -452,7 +454,10 @@ export class CloudBridgeService {
       );
     }
 
-    if (command.kind === "runtime.task.create") {
+    if (
+      command.kind === "runtime.task.create" ||
+      command.kind === "runtime.task.create-and-start"
+    ) {
       let request;
       try {
         request = validateTaskCreatePayload(command.payload);
@@ -465,7 +470,8 @@ export class CloudBridgeService {
 
       try {
         const task = await this.runtimeClient.createTask(request, {
-          requestId: `cloud:${commandId}`,
+          requestId: `cloud:${commandId}:create`,
+          idempotencyKey: `cloud-command:${commandId}:create`,
         });
         const runtimeTaskId =
           typeof task?.id === "string"
@@ -480,6 +486,13 @@ export class CloudBridgeService {
           );
         }
 
+        if (command.kind === "runtime.task.create-and-start") {
+          await this.runtimeClient.startTask(runtimeTaskId, {
+            requestId: `cloud:${commandId}:start`,
+            idempotencyKey: `cloud-command:${commandId}:start`,
+          });
+        }
+
         const mapping = { runtimeTaskId };
         this.store.markAccepted(commandId, mapping);
         this.queueIntegrationEvent(
@@ -491,7 +504,7 @@ export class CloudBridgeService {
         this.queueTelemetry({
           eventType: "desktop.cloud.command.accepted",
           severity: "info",
-          operation: "runtime.task.create",
+          operation: command.kind,
           correlationId: commandId,
           taskId: runtimeTaskId,
           attributes: { commandKind: command.kind },
@@ -576,6 +589,72 @@ export class CloudBridgeService {
         }, `telemetry:uncertain:${commandId}`);
         this.onEvent("error", "Cloud command completion is uncertain", {
           commandId,
+          code: errorCode(error),
+        });
+      }
+    }
+  }
+
+  async projectRuntimeTerminalStates(limit = 100) {
+    const records =
+      this.store.listAcceptedRuntimeMappingsPendingTerminal(limit);
+
+    for (const record of records) {
+      try {
+        const task = await this.runtimeClient.getTask(
+          record.runtimeTaskId,
+          false,
+        );
+        const terminal =
+          task?.progress?.terminal === true ||
+          ["completed", "failed", "blocked", "cancelled"].includes(
+            task?.status,
+          );
+        if (!terminal) continue;
+
+        const status = String(task.status ?? "unknown");
+        const revision = Number.isInteger(task?.progress?.revision)
+          ? task.progress.revision
+          : null;
+
+        this.queueIntegrationEvent(
+          "desktop.cloud.task.terminal",
+          record.commandId,
+          {
+            runtimeTaskId: record.runtimeTaskId,
+            status,
+            progressRevision: revision,
+          },
+          `terminal:${record.commandId}`,
+        );
+        this.queueTelemetry(
+          {
+            eventType: "desktop.cloud.task.terminal",
+            severity: status === "completed" ? "info" : "warn",
+            operation: "runtime.task.terminal",
+            correlationId: record.commandId,
+            taskId: record.runtimeTaskId,
+            attributes: {
+              runtimeStatus: status,
+              progressRevision: revision,
+            },
+          },
+          `telemetry:terminal:${record.commandId}`,
+        );
+        this.store.markRuntimeTerminal(record.commandId, {
+          status,
+          revision,
+        });
+        this.onEvent("info", "Runtime terminal state projected to Cloud", {
+          commandId: record.commandId,
+          runtimeTaskId: record.runtimeTaskId,
+          status,
+          progressRevision: revision,
+        });
+      } catch (error) {
+        this.onEvent("warn", "Runtime terminal projection deferred", {
+          commandId: record.commandId,
+          runtimeTaskId: record.runtimeTaskId,
           code: errorCode(error),
         });
       }

@@ -64,6 +64,18 @@ function createService({
   client = createClient(),
   runtimeClient = {
     createTask: vi.fn(async () => ({ id: "task_1" })),
+    startTask: vi.fn(async () => ({
+      id: "task_1",
+      accepted: true,
+      alreadyRunning: false,
+      status: "running",
+      progress: { terminal: false, revision: 2 },
+    })),
+    getTask: vi.fn(async () => ({
+      id: "task_1",
+      status: "running",
+      progress: { terminal: false, revision: 2 },
+    })),
   },
   store = createStore(),
   onAgentRequest = vi.fn(),
@@ -110,7 +122,10 @@ describe("CloudBridgeService", () => {
     expect(setup.runtimeClient.createTask).toHaveBeenCalledTimes(1);
     expect(setup.runtimeClient.createTask).toHaveBeenCalledWith(
       input.payload,
-      { requestId: "cloud:cmd_1" },
+      {
+        requestId: "cloud:cmd_1:create",
+        idempotencyKey: "cloud-command:cmd_1:create",
+      },
     );
     expect(setup.client.acceptCommand).toHaveBeenCalledTimes(2);
     expect(setup.client.acceptCommand).toHaveBeenLastCalledWith(
@@ -121,6 +136,81 @@ describe("CloudBridgeService", () => {
       status: "accepted",
       runtimeTaskId: "task_1",
     });
+  });
+
+  it("maps runtime.task.create-and-start to one durable Task start", async () => {
+    const setup = createService();
+    const input = command({
+      commandId: "cmd_start",
+      kind: "runtime.task.create-and-start",
+    });
+
+    await setup.service.processCommand(input);
+    await setup.service.processCommand(input);
+
+    expect(setup.runtimeClient.createTask).toHaveBeenCalledTimes(1);
+    expect(setup.runtimeClient.startTask).toHaveBeenCalledTimes(1);
+    expect(setup.runtimeClient.startTask).toHaveBeenCalledWith(
+      "task_1",
+      {
+        requestId: "cloud:cmd_start:start",
+        idempotencyKey: "cloud-command:cmd_start:start",
+      },
+    );
+    expect(setup.client.acceptCommand).toHaveBeenCalledTimes(2);
+    expect(setup.store.getCommand("cmd_start")).toMatchObject({
+      status: "accepted",
+      runtimeTaskId: "task_1",
+      runtimeTerminalProjectedAt: null,
+    });
+  });
+
+  it("projects canonical Runtime terminal truth to Cloud exactly once", async () => {
+    const runtimeClient = {
+      createTask: vi.fn(async () => ({ id: "task_terminal" })),
+      startTask: vi.fn(async () => ({
+        id: "task_terminal",
+        accepted: true,
+        status: "running",
+        progress: { terminal: false, revision: 2 },
+      })),
+      getTask: vi.fn(async () => ({
+        id: "task_terminal",
+        status: "completed",
+        progress: { terminal: true, revision: 9 },
+      })),
+    };
+    const client = createClient();
+    const setup = createService({ client, runtimeClient });
+    const input = command({
+      commandId: "cmd_terminal",
+      kind: "runtime.task.create-and-start",
+    });
+
+    await setup.service.processCommand(input);
+    await setup.service.projectRuntimeTerminalStates();
+    await setup.service.flushOutbox();
+    await setup.service.projectRuntimeTerminalStates();
+    await setup.service.flushOutbox();
+
+    expect(runtimeClient.getTask).toHaveBeenCalledTimes(1);
+    expect(setup.store.getCommand("cmd_terminal")).toMatchObject({
+      runtimeTerminalStatus: "completed",
+      runtimeTerminalRevision: 9,
+    });
+    expect(client.postEvent).toHaveBeenCalledTimes(2);
+    expect(client.postEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "desktop.cloud.task.terminal",
+        correlationId: "cmd_terminal",
+        payload: expect.objectContaining({
+          runtimeTaskId: "task_terminal",
+          status: "completed",
+          progressRevision: 9,
+        }),
+      }),
+    );
+    expect(client.postTelemetry).toHaveBeenCalled();
   });
 
   it("keeps accepted mapping when the Cloud ACK fails after Runtime success", async () => {
@@ -258,7 +348,10 @@ describe("CloudBridgeService", () => {
           },
         ],
       },
-      { requestId: "cloud:cmd_sanitize" },
+      {
+        requestId: "cloud:cmd_sanitize:create",
+        idempotencyKey: "cloud-command:cmd_sanitize:create",
+      },
     );
   });
 

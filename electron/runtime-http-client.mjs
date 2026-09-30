@@ -109,6 +109,7 @@ export class RuntimeHttpClient {
       timeoutMs: options.timeoutMs ?? 15_000,
       signal: options.signal,
       requestId: options.requestId,
+      idempotencyKey: options.idempotencyKey,
     });
   }
 

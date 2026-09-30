@@ -131,9 +131,12 @@ It proves:
 
 - Runtime API/version is reachable;
 - `runtime.task.create` becomes one real Runtime task;
+- `runtime.task.create-and-start@1` creates one durable Runtime Task and starts it through `tasks.start`;
 - duplicate delivery reuses the same `commandId -> runtimeTaskId` mapping;
-- duplicate delivery does not create a second Runtime task;
-- the local journal stores digest/mapping metadata rather than the raw command payload;
+- duplicate delivery does not create or start a second Runtime task;
+- stable Runtime replay keys are derived from Cloud `commandId` for create/start phases;
+- canonical Runtime terminal status/revision is projected exactly once as `desktop.cloud.task.terminal@1`;
+- the local journal stores digest/mapping/terminal metadata rather than the raw command payload;
 - the probe task is deleted after verification.
 
 ## Still pending
