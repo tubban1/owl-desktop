@@ -37,10 +37,13 @@ function runtimeClient() {
 
 function runtimeIdempotencyKey(context, method, params) {
   const logicalRequestId = context.logicalRequestId ?? context.runtimeRequestId;
+  const replayScope = context.clientIdempotencyKey
+    ? `client:${context.clientIdempotencyKey}`
+    : `transport:${context.transportSessionId}:${logicalRequestId}`;
   const digest = createHash("sha256")
     .update(JSON.stringify({
       owner: context.runtimeSessionId,
-      logicalRequestId,
+      replayScope,
       method,
       params: params ?? null,
     }))

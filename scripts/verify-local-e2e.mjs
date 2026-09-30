@@ -90,7 +90,7 @@ try {
     { cwd: repo, encoding: "utf8" },
   );
   if (parsed.stdout !== direct || parsed.exitCode !== 0) {
-    throw new Error("MCP Git status does not match direct Git status.");
+    throw new Error(`MCP Git status does not match direct Git status.\nMCP=${JSON.stringify(parsed.stdout)} (${String(parsed.stdout).length} bytes)\nDIRECT=${JSON.stringify(direct)} (${direct.length} bytes)\nEXIT=${parsed.exitCode}`);
   }
 
   const retry = await first.client.callTool({

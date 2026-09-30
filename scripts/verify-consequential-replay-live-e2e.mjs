@@ -215,7 +215,7 @@ try {
 
   console.log("PASS first consequential Runtime execution completed before injected response loss");
   console.log("PASS exact MCP JSON-RPC request replay returned the canonical prior response");
-  console.log("PASS stable owner + logical request mapped to Runtime consequential replay identity");
+  console.log("PASS MCP transport-scoped replay identity mapped to Runtime idempotency authority");
   console.log("PASS non-idempotent append executed exactly once");
   console.log(JSON.stringify({
     ok: true,

@@ -107,6 +107,10 @@ export async function startOwlMcpHttpServer({
       res.once("close", onClosed);
 
       const body = req.body ?? {};
+      const suppliedIdempotencyKey =
+        typeof req.headers["x-owl-idempotency-key"] === "string"
+          ? req.headers["x-owl-idempotency-key"].trim().slice(0, 256)
+          : undefined;
       const runtimeRequestId =
         body?.id !== undefined
           ? `owl-mcp:${transportSessionId}:${String(body.id)}`
@@ -126,6 +130,7 @@ export async function startOwlMcpHttpServer({
             runtimeRequestId,
             logicalRequestId:
               body?.id !== undefined ? String(body.id) : runtimeRequestId,
+            clientIdempotencyKey: suppliedIdempotencyKey || undefined,
             signal: requestAbort.signal,
             agentInbox,
             onEvent,
