@@ -4,6 +4,7 @@ import type {
   AgentInboxSummary,
   AgentRequest,
   AgentRequestStatus,
+  CloudAccountStatus,
   CloudBridgeStatus,
   DesktopEnvironment,
   HostStatus,
@@ -28,6 +29,10 @@ declare global {
       listActivity(): Promise<ActivityEntry[]>;
       refreshRuntime(): Promise<RuntimeSnapshot>;
       cloudStatus(): Promise<CloudBridgeStatus>;
+      cloudAccountStatus(): Promise<CloudAccountStatus>;
+      cloudLogin(): Promise<{ status: string; provider: string; region: string | null; redirectUri: string }>;
+      cloudLogout(): Promise<CloudAccountStatus>;
+      onCloudAccountUpdated(callback: (value: CloudAccountStatus) => void): () => void;
       cloudProbe(): Promise<{ ok?: boolean; service?: string; contractVersion?: string }>;
       cloudStart(): Promise<CloudBridgeStatus>;
       cloudStop(): Promise<CloudBridgeStatus>;

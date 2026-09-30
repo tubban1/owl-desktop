@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
@@ -9,6 +10,8 @@ import { TunnelSupervisor } from "./services/tunnel-supervisor.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
 import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
+import { CloudAccountAuth } from "./services/cloud-account-auth.mjs";
+import { CloudEnrollmentService } from "./services/cloud-enrollment-service.mjs";
 import { CloudBridgeStore } from "./services/cloud-bridge-store.mjs";
 import { CloudBridgeService } from "./services/cloud-bridge-service.mjs";
 import { AgentInboxStore } from "./services/agent-inbox-store.mjs";
@@ -21,6 +24,9 @@ let store;
 let identityVault;
 let tunnelSupervisor;
 let cloudBridgeStore;
+let cloudAccountAuth;
+let cloudEnrollmentService;
+let pendingCloudAuthCallbackUrl = null;
 let agentInbox;
 let cloudBridge;
 let runtimeAgentRequestConsumer;
@@ -31,6 +37,14 @@ let cloudBridgeState = {
   status: "stopped",
   running: false,
   lastErrorCode: null,
+};
+let cloudAccountState = {
+  status: "signed_out",
+  account: null,
+  access: null,
+  deviceId: null,
+  lastErrorCode: null,
+  lastErrorMessage: null,
 };
 let mcpServer;
 let mcpState = { status: "stopped", url: null, error: null };
@@ -148,6 +162,156 @@ function cloudDeviceCredential() {
     store.readSecret("OWL_CLOUD_DEVICE_CREDENTIAL", "owl-cloud") ??
     store.readSecret("OWL_CLOUD_DEVICE_CREDENTIAL")
   );
+}
+
+function cloudAccountClient() {
+  const settings = store.getSettings();
+  return new CloudHttpClient({
+    baseUrl: settings.cloudBaseUrl,
+  });
+}
+
+function ensureCloudEnrollmentService() {
+  const settings = store.getSettings();
+  if (!settings.cloudBaseUrl?.trim()) {
+    throw new Error("OWL Cloud base URL is not configured.");
+  }
+  const client = cloudAccountClient();
+  cloudAccountAuth = new CloudAccountAuth({ cloudClient: client });
+  cloudEnrollmentService = new CloudEnrollmentService({
+    cloudClient: client,
+    auth: cloudAccountAuth,
+    store,
+    platform: `${process.platform}-${process.arch}`,
+    displayName: os.hostname() || "This Mac",
+    capabilities: {
+      cloudBridge: "m1-polling-v1",
+      mcp: "streamable-http-v1",
+    },
+    runtimeCompatibility: {
+      desktopVersion: app.getVersion(),
+      runtimeApi: "0.1",
+    },
+  });
+  return cloudEnrollmentService;
+}
+
+function cloudAccountSnapshot() {
+  return {
+    ...cloudAccountState,
+    deviceId:
+      cloudAccountState.deviceId ??
+      store?.getSettings()?.cloudDeviceId ??
+      null,
+  };
+}
+
+async function beginCloudAccountLogin() {
+  const service = ensureCloudEnrollmentService();
+  cloudAccountState = {
+    ...cloudAccountState,
+    status: "authorizing",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+  };
+  const started = await service.begin();
+  await shell.openExternal(started.authorizationUrl);
+  record("info", "cloud", "OWL LAB account login opened in system browser", {
+    provider: started.provider,
+    region: started.region,
+  });
+  return {
+    status: cloudAccountState.status,
+    provider: started.provider,
+    region: started.region,
+    redirectUri: started.redirectUri,
+  };
+}
+
+async function completeCloudAccountLogin(url) {
+  try {
+    const service = cloudEnrollmentService ?? ensureCloudEnrollmentService();
+    const enrolled = await service.complete(url);
+    cloudAccountState = {
+      status: "ready",
+      account: enrolled.account ?? null,
+      access: enrolled.access ?? null,
+      deviceId: enrolled.device?.deviceId ?? null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+    };
+    record("info", "cloud", "OWL LAB account and device enrollment completed", {
+      deviceId: cloudAccountState.deviceId,
+      canRun: enrolled.access?.canRun === true,
+    });
+    const settings = store.getSettings();
+    if (settings.cloudEnabled) await startCloudBridge();
+    mainWindow?.webContents?.send("cloud:account-updated", cloudAccountSnapshot());
+    return cloudAccountSnapshot();
+  } catch (error) {
+    cloudAccountState = {
+      ...cloudAccountState,
+      status: "error",
+      lastErrorCode: error?.code ?? "CLOUD_LOGIN_FAILED",
+      lastErrorMessage: error instanceof Error ? error.message : String(error),
+    };
+    record("error", "cloud", "OWL LAB account login failed", {
+      code: cloudAccountState.lastErrorCode,
+      message: cloudAccountState.lastErrorMessage,
+    });
+    mainWindow?.webContents?.send("cloud:account-updated", cloudAccountSnapshot());
+    throw error;
+  }
+}
+
+async function resumeCloudAccountSession() {
+  try {
+    const service = ensureCloudEnrollmentService();
+    service.recoverDeviceIdFromCredential();
+    const resumed = await service.resumeFromRefreshToken();
+    if (!resumed) {
+      cloudAccountState = {
+        ...cloudAccountState,
+        status: store.getSettings().cloudDeviceId ? "device_enrolled" : "signed_out",
+        deviceId: store.getSettings().cloudDeviceId || null,
+      };
+      return cloudAccountSnapshot();
+    }
+    cloudAccountState = {
+      status: "ready",
+      account: resumed.account ?? null,
+      access: resumed.access ?? null,
+      deviceId: resumed.deviceId ?? null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+    };
+    return cloudAccountSnapshot();
+  } catch (error) {
+    cloudAccountState = {
+      ...cloudAccountState,
+      status: "needs_login",
+      lastErrorCode: error?.code ?? "CLOUD_SESSION_RESUME_FAILED",
+      lastErrorMessage: error instanceof Error ? error.message : String(error),
+    };
+    return cloudAccountSnapshot();
+  }
+}
+
+function logoutCloudAccount() {
+  const service = cloudEnrollmentService ?? ensureCloudEnrollmentService();
+  service.clearAccountSession();
+  cloudAccountState = {
+    status: store.getSettings().cloudDeviceId ? "device_enrolled" : "signed_out",
+    account: null,
+    access: null,
+    deviceId: store.getSettings().cloudDeviceId || null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+  };
+  record("info", "cloud", "OWL LAB account signed out", {
+    deviceEnrollmentPreserved: Boolean(cloudAccountState.deviceId),
+  });
+  return cloudAccountSnapshot();
 }
 
 function createAgentRequest(input) {
@@ -432,6 +596,48 @@ async function runtimeSnapshot() {
   return result;
 }
 
+function registerCloudAuthProtocol() {
+  if (process.defaultApp) {
+    const appEntry = process.argv[1] ? path.resolve(process.argv[1]) : undefined;
+    if (appEntry) {
+      app.setAsDefaultProtocolClient("owl-desktop", process.execPath, [appEntry]);
+    }
+  } else {
+    app.setAsDefaultProtocolClient("owl-desktop");
+  }
+}
+
+function isCloudAuthCallbackUrl(value) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "owl-desktop:" &&
+      url.host === "auth" &&
+      url.pathname === "/callback"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function acceptCloudAuthCallbackUrl(url) {
+  if (!isCloudAuthCallbackUrl(url)) return false;
+  if (!store) {
+    pendingCloudAuthCallbackUrl = url;
+    return true;
+  }
+  void completeCloudAccountLogin(url).catch(() => undefined);
+  return true;
+}
+
+app.on("open-url", (event, url) => {
+  if (!isCloudAuthCallbackUrl(url)) return;
+  event.preventDefault();
+  acceptCloudAuthCallbackUrl(url);
+});
+
+registerCloudAuthProtocol();
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1420,
@@ -471,6 +677,9 @@ function registerIpc() {
 
   ipcMain.handle("runtime:refresh", () => runtimeSnapshot());
   ipcMain.handle("cloud:status", () => cloudBridgeSnapshot());
+  ipcMain.handle("cloud:account-status", () => cloudAccountSnapshot());
+  ipcMain.handle("cloud:login", () => beginCloudAccountLogin());
+  ipcMain.handle("cloud:logout", () => logoutCloudAccount());
   ipcMain.handle("cloud:probe", () => probeCloud());
   ipcMain.handle("cloud:start", () => startCloudBridge());
   ipcMain.handle("cloud:stop", () => stopCloudBridge());
@@ -787,7 +996,9 @@ const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, argv) => {
+    const callbackUrl = argv.find((value) => isCloudAuthCallbackUrl(value));
+    if (callbackUrl) acceptCloudAuthCallbackUrl(callbackUrl);
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
@@ -824,8 +1035,16 @@ if (!hasLock) {
     });
     registerIpc();
     record("info", "desktop", "OWL Desktop started", { version: app.getVersion() });
-    await startMcp();
     const settings = store.getSettings();
+    if (settings.cloudBaseUrl?.trim()) {
+      await resumeCloudAccountSession();
+    }
+    if (pendingCloudAuthCallbackUrl) {
+      const callbackUrl = pendingCloudAuthCallbackUrl;
+      pendingCloudAuthCallbackUrl = null;
+      await completeCloudAccountLogin(callbackUrl).catch(() => undefined);
+    }
+    await startMcp();
     if (settings.autoConnectRuntime) {
       await startRuntimeEventBridge().catch((error) => {
         record("error", "runtime-events", "Runtime event bridge start failed", {

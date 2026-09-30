@@ -113,6 +113,10 @@ export class CloudHttpClient {
     return this.request("/health");
   }
 
+  authConfig() {
+    return this.request("/auth/config");
+  }
+
   bootstrap(userJwt) {
     return this.request("/v1/bootstrap", {
       method: "POST",

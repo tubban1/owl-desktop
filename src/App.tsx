@@ -5,7 +5,7 @@ import {
   Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
   AlertTriangle,
 } from "lucide-react";
-import type { AccountMeta, ActivityEntry, AgentRequest, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
+import type { AccountMeta, ActivityEntry, AgentRequest, CloudAccountStatus, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
 
 type Page = "overview" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
@@ -54,6 +54,7 @@ export default function App() {
   const [env, setEnv] = useState<DesktopEnvironment | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
+  const [cloudAccount, setCloudAccount] = useState<CloudAccountStatus | null>(null);
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [accounts, setAccounts] = useState<AccountMeta[]>([]);
   const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
@@ -101,14 +102,21 @@ export default function App() {
       window.owlDesktop.listSecrets(),
       window.owlDesktop.listAccounts(),
       window.owlDesktop.listAgentRequests({ limit: 100 }),
-    ]).then(([nextEnv, nextSettings, nextSecrets, nextAccounts, nextAgentRequests]) => {
+      window.owlDesktop.cloudAccountStatus(),
+    ]).then(([nextEnv, nextSettings, nextSecrets, nextAccounts, nextAgentRequests, nextCloudAccount]) => {
       setEnv(nextEnv);
       setSettings(nextSettings);
       setSecrets(nextSecrets);
       setAccounts(nextAccounts);
       setAgentRequests(nextAgentRequests);
+      setCloudAccount(nextCloudAccount);
       if (nextSettings.autoConnectRuntime) void refresh();
     });
+    const unsubscribe = window.owlDesktop.onCloudAccountUpdated((value) => {
+      setCloudAccount(value);
+      void refresh();
+    });
+    return unsubscribe;
   }, []);
 
   const runtimeVersion = snapshot?.info?.runtimeVersion ?? "Not connected";
@@ -492,11 +500,14 @@ export default function App() {
           </section>
           <section className="panel cloud-bridge-panel">
             <div className="panel-heading">
-              <div><span className="eyebrow">OWL CLOUD BRIDGE</span><h3>Device control-plane transport</h3></div>
-              {cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}
+              <div><span className="eyebrow">OWL LAB ACCOUNT</span><h3>Account, device enrollment & control plane</h3></div>
+              <span className="neutral-pill">{cloudAccount?.status?.replaceAll("_", " ") ?? "signed out"}</span>
             </div>
             <div className="about-grid">
-              <span>Device</span><code>{snapshot?.cloud.deviceId ?? "Not enrolled"}</code>
+              <span>Account</span><strong>{cloudAccount?.status === "ready" ? "Authenticated" : cloudAccount?.status?.replaceAll("_", " ") ?? "Signed out"}</strong>
+              <span>Run access</span><strong>{cloudAccount?.access?.canRun === true ? "Granted" : "Not granted"}</strong>
+              <span>Device</span><code>{cloudAccount?.deviceId ?? snapshot?.cloud.deviceId ?? "Not enrolled"}</code>
+              <span>Bridge</span><strong>{cloudOnline ? "Connected" : cloudStatusLabel}</strong>
               <span>Last heartbeat</span><strong>{formatTime(snapshot?.cloud.lastHeartbeatAt ?? undefined)}</strong>
               <span>Last command poll</span><strong>{formatTime(snapshot?.cloud.lastPollAt ?? undefined)}</strong>
               <span>Outbox</span><strong>{snapshot?.cloud.outboxPending ?? 0} pending</strong>
@@ -504,6 +515,7 @@ export default function App() {
               <span>Uncertain</span><strong>{snapshot?.cloud.commandCounts.uncertain ?? 0}</strong>
             </div>
             <div className="runtime-version cloud-actions">
+              {cloudAccount?.status === "ready" ? <button className="secondary" onClick={async () => { const next = await window.owlDesktop.cloudLogout(); setCloudAccount(next); }}>Sign out</button> : <button className="primary" disabled={!settings?.cloudBaseUrl?.trim() || cloudAccount?.status === "authorizing"} onClick={async () => { try { await window.owlDesktop.cloudLogin(); setCloudAccount(await window.owlDesktop.cloudAccountStatus()); setNotice("Continue sign-in in your browser"); } catch (error) { setNotice(error instanceof Error ? error.message : "Cloud login failed"); } window.setTimeout(() => setNotice(""), 2400); }}>{cloudAccount?.status === "authorizing" ? "Waiting for browser…" : "Sign in to OWL LAB"}</button>}
               <button className="secondary" onClick={async () => { try { const result = await window.owlDesktop.cloudProbe(); setNotice(`Cloud ${result.contractVersion ?? "v1"} reachable`); } catch { setNotice("Cloud probe failed"); } window.setTimeout(() => setNotice(""), 1800); }}>Probe Cloud</button>
               <button className="secondary" onClick={async () => { await window.owlDesktop.cloudStart(); await refresh(); }}>Start bridge</button>
               <button className="secondary" onClick={async () => { await window.owlDesktop.cloudSync(); await refresh(); }}>Sync now</button>

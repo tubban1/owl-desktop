@@ -99,6 +99,29 @@ export type TunnelStatus = {
 
 
 
+export type CloudAccountStatus = {
+  status:
+    | "signed_out"
+    | "authorizing"
+    | "ready"
+    | "device_enrolled"
+    | "needs_login"
+    | "error";
+  account: null | Record<string, unknown>;
+  access: null | {
+    deviceId?: string;
+    organizationId?: string;
+    role?: string;
+    canView?: boolean;
+    canRun?: boolean;
+    canSchedule?: boolean;
+    canApprove?: boolean;
+  };
+  deviceId: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+};
+
 export type CloudBridgeCommandRecord = {
   commandId: string;
   deviceId: string;
