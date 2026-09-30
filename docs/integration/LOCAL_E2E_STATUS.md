@@ -279,14 +279,14 @@ This closes the Gate 6 invariants for queued intent, at-least-once delivery, com
 Canonical tested set:
 
 ~~~text
-OWL Desktop main
-6c7e714
+OWL Desktop release assembly
+40552b9
 
 OWL Cloud feat/cloud-m1-control-plane
 1d556aa
 
-OWL Runtime feature/1.x-runtime-integration-freeze
-b841815
+OWL Runtime main
+d6320d2
 ~~~
 
 The canonical matrix is `docs/contracts/COMPATIBILITY_MATRIX.md`.
@@ -303,9 +303,53 @@ Gate 7 now has executable fail-closed behavior, not only documentation:
 
 Frankfurt live provider evidence confirms Cognito PKCE, both RemoteCommand v1 kinds and the authenticated ApprovalDecision route are deployed.
 
-## Next serial gate
+## I8 — Dogfood / soak / production promotion
 
-The only remaining product-promotion phase is **I8 — Dogfood / soak / production promotion**.
+**AUTOMATED RELEASE ASSEMBLY CLOSED. PRODUCTION PROMOTION IS NOT YET CLOSED.**
+
+Current release-candidate set:
+
+~~~text
+OWL Desktop release assembly
+40552b9
+
+OWL Cloud feat/cloud-m1-control-plane
+1d556aa
+
+OWL Runtime main
+d6320d2
+~~~
+
+Automated release evidence completed on 2026-09-30:
+
+- Desktop release staging refuses any Runtime checkout other than the pinned canonical Runtime main SHA;
+- canonical Runtime `d6320d2` stages as `1.0.0-rc.4` / API `0.1`;
+- Tunnel 0.0.15 arm64+x64 is reconstructed from pinned vendor artifacts and SHA-verified;
+- Runtime Host `fan.fde.owl.runtime@1.0.0` is built as a universal arm64+x86_64 native app and included in Desktop resources;
+- the OWL LAB Desktop icon is generated reproducibly from the tracked SVG source and appears as packaged `icon.icns`;
+- unsigned arm64 and x64 app bundles both build successfully;
+- `npm run verify:packaged-smoke` confirms both bundles contain the correct Desktop identity, canonical Runtime, both Tunnel architectures, custom icon and universal Runtime Host;
+- unsigned arm64+x64 DMG/ZIP installers, blockmaps and `latest-mac.yml` are generated successfully;
+- `hdiutil verify` reports both generated DMGs as checksum VALID.
+
+The macOS release preflight now fails only on signing/notarization prerequisites:
+
+~~~text
+OWL Runtime Host must carry a non-ad-hoc Developer ID signature
+No valid Developer ID Application signing identity is available
+APPLE_TEAM_ID is required
+Notarization credentials are missing
+~~~
+
+Remaining Gate 8 evidence before production promotion:
+
+1. provide the Apple Developer ID Application identity and notarization credentials;
+2. build signed + notarized arm64/x64 release artifacts and re-run the same package verifiers;
+3. perform signed clean-install dogfood from DMG on a clean macOS profile or clean machine;
+4. run the cross-repo Desktop ↔ Cloud ↔ Runtime soak with reconnect/fault injection for the agreed release window;
+5. rehearse update + rollback between two signed release candidates.
+
+For Product 1.0, update/rollback is intentionally an **explicit signed-installer process** with the previous signed artifact retained. An automatic background updater is deferred to 1.x; it must not be introduced before the signing, artifact-integrity and rollback chain can be verified end to end.
 
 ~~~text
 I2 Desktop ↔ Runtime CLOSED
@@ -314,5 +358,6 @@ I2 Desktop ↔ Runtime CLOSED
 → I5 Approval E2E CLOSED
 → I6 Offline / reconnect CLOSED
 → I7 Compatibility Matrix CLOSED
-→ I8 Dogfood / soak / signed production release
+→ I8 automated assembly CLOSED
+→ I8 signed dogfood / soak / rollback rehearsal PENDING
 ~~~
