@@ -7,6 +7,22 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const releaseConfig = fs.readFileSync(
+  path.join(root, "electron-builder.release.yml"),
+  "utf8",
+);
+if (!/^productName:\s*OWL LAB Desktop\s*$/m.test(releaseConfig)) {
+  throw new Error("Release config productName must be OWL LAB Desktop.");
+}
+if (
+  !/from:\s*vendor\/helper/.test(releaseConfig) ||
+  !/to:\s*helper/.test(releaseConfig)
+) {
+  throw new Error("Release config must package OWL LAB Helper.");
+}
+if (!/notarize:\s*true/.test(releaseConfig)) {
+  throw new Error("Release config must require macOS notarization.");
+}
 const protocol = JSON.parse(
   fs.readFileSync(path.join(root, "vendor/owl-tunnel/protocol.json"), "utf8"),
 );

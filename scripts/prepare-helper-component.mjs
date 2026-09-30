@@ -182,8 +182,18 @@ try {
     );
   }
 
+  const identityProbe = spawnSync(
+    "/usr/bin/security",
+    ["find-identity", "-v", "-p", "codesigning"],
+    { encoding: "utf8" },
+  );
+  const discoveredIdentity =
+    (identityProbe.stdout ?? "")
+      .match(/"([^"]*Developer ID Application[^"]*)"/)?.[1] ?? null;
   const signingIdentity =
-    process.env.OWL_HELPER_SIGNING_IDENTITY?.trim();
+    process.env.OWL_HELPER_SIGNING_IDENTITY?.trim() ||
+    process.env.CSC_NAME?.trim() ||
+    discoveredIdentity;
   if (signingIdentity) {
     run("/usr/bin/codesign", [
       "--force",

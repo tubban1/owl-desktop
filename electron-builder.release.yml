@@ -1,5 +1,5 @@
 appId: ai.owl.desktop
-productName: OWL Desktop
+productName: OWL LAB Desktop
 asar: true
 compression: maximum
 artifactName: '${productName}-${version}-${arch}.${ext}'
@@ -17,6 +17,8 @@ extraResources:
     to: owl-tunnel
   - from: vendor/runtime-host
     to: runtime-host
+  - from: vendor/helper
+    to: helper
 mac:
   category: public.app-category.developer-tools
   target:
