@@ -102,6 +102,53 @@ if (!hostPackaged) {
   throw new Error("OWL Runtime Host is not included in Desktop extraResources.");
 }
 
+const helperApp = path.join(root, "vendor/helper/OWL LAB Helper.app");
+const helperBinary = path.join(
+  helperApp,
+  "Contents/MacOS/ComputerMCPHelper",
+);
+if (!fs.existsSync(helperBinary)) {
+  throw new Error("Universal OWL LAB Helper is missing.");
+}
+const helperLipo = spawnSync("/usr/bin/lipo", ["-info", helperBinary], {
+  encoding: "utf8",
+});
+const helperArch = `${helperLipo.stdout ?? ""} ${helperLipo.stderr ?? ""}`;
+if (
+  helperLipo.status !== 0 ||
+  !/arm64/.test(helperArch) ||
+  !/x86_64/.test(helperArch)
+) {
+  throw new Error(`OWL LAB Helper is not universal: ${helperArch}`);
+}
+const helperPlist = path.join(helperApp, "Contents/Info.plist");
+const helperBundle = spawnSync(
+  "/usr/libexec/PlistBuddy",
+  ["-c", "Print :CFBundleIdentifier", helperPlist],
+  { encoding: "utf8" },
+);
+const helperVersion = spawnSync(
+  "/usr/libexec/PlistBuddy",
+  ["-c", "Print :CFBundleShortVersionString", helperPlist],
+  { encoding: "utf8" },
+);
+if (
+  helperBundle.status !== 0 ||
+  helperVersion.status !== 0 ||
+  helperBundle.stdout.trim() !== "fan.fde.owl.helper" ||
+  helperVersion.stdout.trim() !== "1.0.0"
+) {
+  throw new Error(
+    `Unexpected OWL LAB Helper identity: ${helperBundle.stdout.trim()}@${helperVersion.stdout.trim()}`,
+  );
+}
+const helperPackaged = (pkg.build?.extraResources ?? []).some(
+  (entry) => entry.from === "vendor/helper" && entry.to === "helper",
+);
+if (!helperPackaged) {
+  throw new Error("OWL LAB Helper is not included in Desktop extraResources.");
+}
+
 console.log(
   JSON.stringify(
     {
@@ -117,6 +164,11 @@ console.log(
       runtimeHost: {
         bundleIdentifier: hostIdentity.bundleIdentifier,
         version: hostIdentity.version,
+        architectures: ["arm64", "x86_64"],
+      },
+      helper: {
+        bundleIdentifier: helperBundle.stdout.trim(),
+        version: helperVersion.stdout.trim(),
         architectures: ["arm64", "x86_64"],
       },
       extraResources: true,

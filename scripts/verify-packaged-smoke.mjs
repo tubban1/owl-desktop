@@ -102,6 +102,33 @@ for (const { arch, app } of apps) {
   ) {
     throw new Error(`Unexpected Runtime Host identity for ${arch}`);
   }
+
+  const helperApp = path.join(resources, "helper/OWL LAB Helper.app");
+  const helper = path.join(
+    helperApp,
+    "Contents/MacOS/ComputerMCPHelper",
+  );
+  const helperInfo = run("/usr/bin/file", [helper]);
+  if (!/arm64/.test(helperInfo) || !/x86_64/.test(helperInfo)) {
+    throw new Error(`Packaged Helper is not universal for ${arch}`);
+  }
+  const helperPlist = path.join(helperApp, "Contents/Info.plist");
+  const helperBundle = run("/usr/libexec/PlistBuddy", [
+    "-c",
+    "Print :CFBundleIdentifier",
+    helperPlist,
+  ]);
+  const helperVersion = run("/usr/libexec/PlistBuddy", [
+    "-c",
+    "Print :CFBundleShortVersionString",
+    helperPlist,
+  ]);
+  if (
+    helperBundle !== "fan.fde.owl.helper" ||
+    helperVersion !== "1.0.0"
+  ) {
+    throw new Error(`Unexpected Helper identity for ${arch}`);
+  }
 }
 
 console.log(
@@ -117,6 +144,11 @@ console.log(
       tunnelArchitecturesInEachBundle: ["arm64", "x64"],
       runtimeHost: {
         bundleIdentifier: "fan.fde.owl.runtime",
+        version: "1.0.0",
+        universal: true,
+      },
+      helper: {
+        bundleIdentifier: "fan.fde.owl.helper",
         version: "1.0.0",
         universal: true,
       },

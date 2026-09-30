@@ -18,12 +18,12 @@ const contract = JSON.parse(
 const output = path.join(
   desktopRoot,
   "vendor",
-  "runtime-host",
-  "OWL Runtime.app",
+  "helper",
+  "OWL LAB Helper.app",
 );
 const binaryDir = path.join(output, "Contents", "MacOS");
 const resourcesDir = path.join(output, "Contents", "Resources");
-const binary = path.join(binaryDir, "OwlRuntimeHost");
+const binary = path.join(binaryDir, "ComputerMCPHelper");
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -44,7 +44,11 @@ function run(command, args, options = {}) {
 }
 
 function repoHead(repo) {
-  if (!fs.existsSync(path.join(repo, "macos-runtime-host", "OwlRuntimeHost.swift"))) {
+  if (
+    !fs.existsSync(
+      path.join(repo, "macos-helper", "ComputerMCPHelper.swift"),
+    )
+  ) {
     return null;
   }
   try {
@@ -73,7 +77,7 @@ function resolveRuntimeSource() {
   }
 
   const temp = fs.mkdtempSync(
-    path.join(os.tmpdir(), "owl-runtime-host-source-"),
+    path.join(os.tmpdir(), "owl-helper-source-"),
   );
   const repository = contract.repository || "tubban1/owl-runtime";
   run("git", ["init", "-q", temp]);
@@ -87,13 +91,15 @@ function resolveRuntimeSource() {
     ["fetch", "--depth", "1", "origin", contract.gitSha],
     { cwd: temp },
   );
-  run("git", ["checkout", "--detach", "-q", "FETCH_HEAD"], { cwd: temp });
+  run("git", ["checkout", "--detach", "-q", "FETCH_HEAD"], {
+    cwd: temp,
+  });
 
   const head = repoHead(temp);
   if (head !== contract.gitSha) {
     fs.rmSync(temp, { recursive: true, force: true });
     throw new Error(
-      `Fetched Runtime Host source mismatch: expected ${contract.gitSha}, got ${head ?? "unavailable"}.`,
+      `Fetched Helper source mismatch: expected ${contract.gitSha}, got ${head ?? "unavailable"}.`,
     );
   }
   return { root: temp, temporary: true };
@@ -103,15 +109,17 @@ const resolved = resolveRuntimeSource();
 const runtimeRoot = resolved.root;
 const source = path.join(
   runtimeRoot,
-  "macos-runtime-host",
-  "OwlRuntimeHost.swift",
+  "macos-helper",
+  "ComputerMCPHelper.swift",
 );
-const plist = path.join(runtimeRoot, "macos-runtime-host", "Info.plist");
+const plist = path.join(runtimeRoot, "macos-helper", "Info.plist");
 
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), "owl-runtime-host-build-"));
+const temp = fs.mkdtempSync(
+  path.join(os.tmpdir(), "owl-lab-helper-build-"),
+);
 try {
-  const arm64 = path.join(temp, "OwlRuntimeHost.arm64");
-  const x64 = path.join(temp, "OwlRuntimeHost.x64");
+  const arm64 = path.join(temp, "ComputerMCPHelper.arm64");
+  const x64 = path.join(temp, "ComputerMCPHelper.x64");
 
   run("/usr/bin/arch", [
     "-arm64",
@@ -151,23 +159,31 @@ try {
   const lipo = run("/usr/bin/lipo", ["-info", binary]);
   if (!/arm64/.test(lipo) || !/x86_64/.test(lipo)) {
     throw new Error(
-      `Universal Runtime Host verification failed: ${lipo}`,
+      `Universal Helper verification failed: ${lipo}`,
     );
   }
 
-  const status = run(binary, ["--status"]);
-  const parsed = JSON.parse(status);
+  const bundleId = run("/usr/libexec/PlistBuddy", [
+    "-c",
+    "Print :CFBundleIdentifier",
+    path.join(output, "Contents", "Info.plist"),
+  ]);
+  const version = run("/usr/libexec/PlistBuddy", [
+    "-c",
+    "Print :CFBundleShortVersionString",
+    path.join(output, "Contents", "Info.plist"),
+  ]);
   if (
-    parsed.bundleIdentifier !== "fan.fde.owl.runtime" ||
-    parsed.version !== "1.0.0"
+    bundleId !== "fan.fde.owl.helper" ||
+    version !== "1.0.0"
   ) {
     throw new Error(
-      `Unexpected Runtime Host identity: ${status}`,
+      `Unexpected Helper identity: ${bundleId}@${version}`,
     );
   }
 
   const signingIdentity =
-    process.env.OWL_RUNTIME_HOST_SIGNING_IDENTITY?.trim();
+    process.env.OWL_HELPER_SIGNING_IDENTITY?.trim();
   if (signingIdentity) {
     run("/usr/bin/codesign", [
       "--force",
@@ -189,8 +205,8 @@ try {
           resolved.temporary
             ? "pinned-fetch"
             : "local-exact-checkout",
-        bundleIdentifier: parsed.bundleIdentifier,
-        version: parsed.version,
+        bundleIdentifier: bundleId,
+        version,
         architectures: ["arm64", "x64"],
         signed: Boolean(signingIdentity),
         output,

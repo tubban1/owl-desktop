@@ -45,6 +45,30 @@ if (!fs.existsSync(hostBinary)) {
   }
 }
 
+const helperApp = "vendor/helper/OWL LAB Helper.app";
+const helperBinary = `${helperApp}/Contents/MacOS/ComputerMCPHelper`;
+if (!fs.existsSync(helperBinary)) {
+  failures.push("Signed universal OWL LAB Helper artifact is missing.");
+} else {
+  const lipo = spawnSync("/usr/bin/lipo", ["-info", helperBinary], {
+    encoding: "utf8",
+  });
+  const info = `${lipo.stdout ?? ""} ${lipo.stderr ?? ""}`;
+  if (!/arm64/.test(info) || !/x86_64/.test(info)) {
+    failures.push("OWL LAB Helper release artifact must contain arm64 and x86_64.");
+  }
+  const helperSignature = spawnSync("/usr/bin/codesign", [
+    "-dv",
+    "--verbose=2",
+    helperApp,
+  ], { encoding: "utf8" });
+  const signatureText =
+    `${helperSignature.stdout ?? ""} ${helperSignature.stderr ?? ""}`;
+  if (!/TeamIdentifier=\S+/.test(signatureText) || /Signature=adhoc/.test(signatureText)) {
+    failures.push("OWL LAB Helper must carry a non-ad-hoc Developer ID signature.");
+  }
+}
+
 const identities = spawnSync(
   "/usr/bin/security",
   ["find-identity", "-v", "-p", "codesigning"],

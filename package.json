@@ -16,12 +16,12 @@
     "stage:runtime": "node scripts/stage-runtime-component.mjs",
     "stage:tunnel": "node scripts/stage-tunnel-component.mjs",
     "package:mac": "npm run package:mac:arm64",
-    "package:mac:arm64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:icon && npm run build && electron-builder --mac --arm64",
-    "package:mac:x64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:icon && npm run build && electron-builder --mac --x64",
-    "package:mac:smoke:arm64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:icon && npm run build && electron-builder --mac --arm64 --dir",
-    "package:mac:smoke:x64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:icon && npm run build && electron-builder --mac --x64 --dir",
+    "package:mac:arm64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon && npm run build && electron-builder --mac --arm64",
+    "package:mac:x64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon && npm run build && electron-builder --mac --x64",
+    "package:mac:smoke:arm64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon && npm run build && electron-builder --mac --arm64 --dir",
+    "package:mac:smoke:x64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon && npm run build && electron-builder --mac --x64 --dir",
     "verify:mac:release": "node scripts/verify-macos-release-env.mjs",
-    "package:mac:release": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:icon && npm run verify:mac:release && npm run build && electron-builder --config electron-builder.release.yml --mac --arm64 --x64",
+    "package:mac:release": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon && npm run verify:mac:release && npm run build && electron-builder --config electron-builder.release.yml --mac --arm64 --x64",
     "start": "electron .",
     "verify:cloud-bridge-live": "node scripts/verify-cloud-bridge-live-e2e.mjs",
     "verify:cloud-bridge-http-live": "node scripts/verify-cloud-bridge-http-live-e2e.mjs",
@@ -29,11 +29,13 @@
     "verify:skill-discovery-live": "node scripts/verify-skill-discovery-live-e2e.mjs",
     "verify:runtime-agent-request-consumer": "node scripts/verify-runtime-agent-request-consumer.mjs",
     "verify:runtime-agent-request-live": "node scripts/verify-runtime-agent-request-live-e2e.mjs",
-    "verify:release-components": "npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:icon && node scripts/verify-release-components.mjs",
+    "verify:release-components": "node scripts/verify-release-components.mjs",
     "prepare:tunnel": "node scripts/prepare-tunnel-components.mjs",
     "prepare:runtime-host": "node scripts/prepare-runtime-host-component.mjs",
     "prepare:icon": "node scripts/prepare-macos-icon.mjs",
-    "verify:packaged-smoke": "node scripts/verify-packaged-smoke.mjs"
+    "verify:packaged-smoke": "node scripts/verify-packaged-smoke.mjs",
+    "prepare:helper": "node scripts/prepare-helper-component.mjs",
+    "prepare:release-components": "npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
@@ -82,6 +84,10 @@
       {
         "from": "vendor/runtime-host",
         "to": "runtime-host"
+      },
+      {
+        "from": "vendor/helper",
+        "to": "helper"
       }
     ],
     "mac": {
