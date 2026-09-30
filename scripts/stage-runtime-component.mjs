@@ -14,6 +14,12 @@ const runtimeRoot = path.resolve(
     path.join(desktopRoot, "..", "owl-runtime"),
 );
 const output = path.join(desktopRoot, "vendor", "owl-runtime");
+const runtimeContract = JSON.parse(
+  fs.readFileSync(
+    path.join(desktopRoot, "docs/contracts/OWL_RUNTIME_COMPONENT_V1.json"),
+    "utf8",
+  ),
+);
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -43,6 +49,16 @@ const sha = run("git", ["rev-parse", "HEAD"], {
   cwd: runtimeRoot,
   capture: true,
 });
+if (sha !== runtimeContract.gitSha) {
+  throw new Error(
+    `OWL Runtime checkout is not the pinned release provider. Expected ${runtimeContract.gitSha}, received ${sha}. Set OWL_RUNTIME_REPO to a checkout of the pinned SHA.`,
+  );
+}
+if (runtimePackage.version !== runtimeContract.runtimeVersion) {
+  throw new Error(
+    `OWL Runtime version mismatch. Expected ${runtimeContract.runtimeVersion}, received ${runtimePackage.version}.`,
+  );
+}
 
 fs.rmSync(output, { recursive: true, force: true });
 fs.mkdirSync(output, { recursive: true });
@@ -80,7 +96,7 @@ const manifest = {
   component: "owl-runtime",
   version: runtimePackage.version,
   gitSha: sha,
-  apiVersion: "0.1",
+  apiVersion: runtimeContract.apiVersion,
   fingerprint,
   entrypoint: "dist/server.js",
   nodeHost: "electron-run-as-node",

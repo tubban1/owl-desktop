@@ -10,6 +10,26 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
 const protocol = JSON.parse(
   fs.readFileSync(path.join(root, "vendor/owl-tunnel/protocol.json"), "utf8"),
 );
+const runtimeContract = JSON.parse(
+  fs.readFileSync(
+    path.join(root, "docs/contracts/OWL_RUNTIME_COMPONENT_V1.json"),
+    "utf8",
+  ),
+);
+const runtimeManifest = JSON.parse(
+  fs.readFileSync(path.join(root, "vendor/owl-runtime/component.json"), "utf8"),
+);
+if (runtimeManifest.gitSha !== runtimeContract.gitSha) {
+  throw new Error(
+    `Staged OWL Runtime SHA mismatch: expected ${runtimeContract.gitSha}, got ${runtimeManifest.gitSha}`,
+  );
+}
+if (
+  runtimeManifest.version !== runtimeContract.runtimeVersion ||
+  runtimeManifest.apiVersion !== runtimeContract.apiVersion
+) {
+  throw new Error("Staged OWL Runtime version/API does not match the pinned contract.");
+}
 
 if (protocol.protocolVersion !== "owl-tunnel-consumer-v1") {
   throw new Error("Unexpected OWL Tunnel consumer protocol version.");
@@ -56,6 +76,9 @@ console.log(
   JSON.stringify(
     {
       ok: true,
+      runtimeGitSha: runtimeManifest.gitSha,
+      runtimeVersion: runtimeManifest.version,
+      runtimeApiVersion: runtimeManifest.apiVersion,
       protocolVersion: protocol.protocolVersion,
       vendorVersion: protocol.vendorVersion,
       vendorGitSha: protocol.vendorGitSha,
