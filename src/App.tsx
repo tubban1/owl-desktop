@@ -5,7 +5,7 @@ import {
   Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
   AlertTriangle,
 } from "lucide-react";
-import type { AccountMeta, AgentRequest, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
+import type { AccountMeta, ActivityEntry, AgentRequest, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
 
 type Page = "overview" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
@@ -24,6 +24,14 @@ const nav = [
 
 const pretty = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
 const formatTime = (value?: string) => value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
+const formatLogSource = (value: string) => ({
+  desktop: "OWL Desktop",
+  runtime: "OWL Runtime",
+  "runtime-events": "Runtime Events",
+  mcp: "OWL MCP",
+  cloud: "Cloud Bridge",
+  tunnel: "OWL Tunnel",
+}[value] ?? value.replaceAll("-", " ").replace(/\b\w/g, (char) => char.toUpperCase()));
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange(v: boolean): void }) {
   return <button className={"toggle " + (checked ? "on" : "")} onClick={() => onChange(!checked)} aria-pressed={checked}><span /></button>;
@@ -49,6 +57,7 @@ export default function App() {
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [accounts, setAccounts] = useState<AccountMeta[]>([]);
   const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
+  const [liveActivity, setLiveActivity] = useState<ActivityEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [secretDraft, setSecretDraft] = useState({ name: "", project: "global", value: "" });
   const [accountDraft, setAccountDraft] = useState({
@@ -78,6 +87,7 @@ export default function App() {
         window.owlDesktop.listAgentRequests({ limit: 100 }),
       ]);
       setSnapshot(nextSnapshot);
+      setLiveActivity(nextSnapshot.activity ?? []);
       setAgentRequests(nextAgentRequests);
     } finally {
       setBusy(false);
@@ -154,7 +164,22 @@ export default function App() {
     window.setTimeout(() => setNotice(""), 1800);
   };
 
-  const activityRows = useMemo(() => snapshot?.activity ?? [], [snapshot]);
+  useEffect(() => {
+    if (page !== "logs") return;
+    let cancelled = false;
+    const pollActivity = async () => {
+      const rows = await window.owlDesktop.listActivity().catch(() => null);
+      if (!cancelled && rows) setLiveActivity(rows);
+    };
+    void pollActivity();
+    const timer = window.setInterval(() => void pollActivity(), 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [page]);
+
+  const activityRows = useMemo(() => liveActivity.length > 0 ? liveActivity : (snapshot?.activity ?? []), [liveActivity, snapshot]);
   const logSources = useMemo(() => Array.from(new Set(activityRows.map((entry) => entry.source))).sort(), [activityRows]);
   const filteredActivityRows = useMemo(() => {
     const query = logQuery.trim().toLowerCase();
@@ -433,17 +458,17 @@ export default function App() {
             </div>
             <select value={logSource} onChange={(event) => setLogSource(event.target.value)} aria-label="Log source">
               <option value="all">All sources</option>
-              {logSources.map((source) => <option key={source} value={source}>{source}</option>)}
+              {logSources.map((source) => <option key={source} value={source}>{formatLogSource(source)}</option>)}
             </select>
             <input value={logQuery} onChange={(event) => setLogQuery(event.target.value)} placeholder="Search message or context…" aria-label="Search logs" />
-            <span className="log-count">{filteredActivityRows.length} / {activityRows.length}</span>
+            <span className="log-count">Live · 1s · {filteredActivityRows.length} / {activityRows.length}</span>
           </section>
           <section className="readable-log-list">
             {filteredActivityRows.map((entry) => <article className={"readable-log-entry " + entry.level} key={entry.id}>
               <div className="readable-log-status"><span className={"log-dot " + entry.level} /><strong>{entry.level === "error" ? "Error" : entry.level === "warn" ? "Warning" : "Info"}</strong></div>
               <div className="readable-log-body">
                 <div className="readable-log-heading"><strong>{entry.message}</strong><time>{formatTime(entry.at)}</time></div>
-                <div className="readable-log-meta"><span>{entry.source}</span>{entry.meta && Object.keys(entry.meta).length > 0 && <details><summary>Context</summary><pre>{pretty(entry.meta)}</pre></details>}</div>
+                <div className="readable-log-meta"><span>{formatLogSource(entry.source)}</span>{entry.meta && Object.keys(entry.meta).length > 0 && <details><summary>Context</summary><pre>{pretty(entry.meta)}</pre></details>}</div>
               </div>
             </article>)}
             {filteredActivityRows.length === 0 && <div className="empty log-empty">No events match these filters.</div>}

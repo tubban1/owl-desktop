@@ -1,5 +1,6 @@
 import type {
   AccountMeta,
+  ActivityEntry,
   AgentInboxSummary,
   AgentRequest,
   AgentRequestStatus,
@@ -24,6 +25,7 @@ declare global {
   interface Window {
     owlDesktop: {
       environment(): Promise<DesktopEnvironment>;
+      listActivity(): Promise<ActivityEntry[]>;
       refreshRuntime(): Promise<RuntimeSnapshot>;
       cloudStatus(): Promise<CloudBridgeStatus>;
       cloudProbe(): Promise<{ ok?: boolean; service?: string; contractVersion?: string }>;

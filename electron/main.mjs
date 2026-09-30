@@ -461,6 +461,7 @@ function createWindow() {
 }
 
 function registerIpc() {
+  ipcMain.handle("desktop:activity:list", () => activity.slice(0, 200));
   ipcMain.handle("desktop:environment", () => ({
     appVersion: app.getVersion(),
     platform: process.platform,
