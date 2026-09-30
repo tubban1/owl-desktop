@@ -74,20 +74,40 @@ Desktop may spawn/supervise the process; Runtime remains execution authority.
 
 ## CR-DESKTOP-005 — Consequential request replay / idempotency
 
-**Need:** Local E2E Gate 3 requires transport retry to never duplicate a consequential side effect after the first attempt may already have reached Runtime.
+**Status:** **Delivered and live fault-injection accepted.**
 
-Current Runtime HTTP request IDs provide cancellation ownership, but the public contract does not yet define completed-request replay or duplicate-request suppression.
+Accepted Runtime provider:
 
-Requested semantics:
+~~~text
+852fdb4eb7595800eb1c3e64e822b15cf5528ef6
+~~~
 
-- idempotency/replay key scoped to stable logical session identity
-- duplicate in-flight request returns or joins the original execution
-- duplicate completed request returns the canonical prior result/receipt
-- bounded retention policy is explicit
-- uncertain completion remains explicit; Desktop must not retry through another backend
-- consequential calls cannot rely on Desktop-local dedupe as execution truth
+Accepted Desktop consumer code:
 
-Acceptance: fault injection after Runtime acceptance and before MCP response delivery proves one consequential execution and one canonical receipt.
+~~~text
+779c00b51cbfb99d82e5e4413ac91a99d2b9e96c
+~~~
+
+Runtime owns canonical consequential replay through logical-session-scoped idempotency keys and durable replay receipts. Desktop does not maintain a second execution dedupe database.
+
+Desktop/MCP mapping:
+
+- cancellation identity remains request/transport scoped;
+- replay identity is transport-independent;
+- stable logical owner + MCP logical request + Runtime method/params deterministically map to one `x-owl-idempotency-key`;
+- reconnecting the MCP transport does not change the replay identity when the same stable owner/request is replayed;
+- Runtime rejects a conflicting payload under the same replay identity instead of guessing.
+
+Live Gate 3 fault injection proved:
+
+1. a non-idempotent `fs.write(append)` executed through Desktop-owned OWL MCP;
+2. Runtime completed the side effect;
+3. a proxy intentionally destroyed the downstream MCP response after the upstream response had completed;
+4. the exact same MCP JSON-RPC request was replayed;
+5. Runtime returned the canonical prior result;
+6. the target file contained exactly one append.
+
+Acceptance: **PASS — one consequential execution, one canonical result, no duplicate side effect after response loss.**
 
 ## CR-DESKTOP-006 — Named browser profile/session binding
 
