@@ -213,6 +213,7 @@ export class CloudBridgeService {
     buildPresence = async () => ({}),
     onEvent = () => {},
     onAgentRequest = () => {},
+    onAuthRejected = () => {},
   }) {
     this.client = client;
     this.runtimeClient = runtimeClient;
@@ -229,6 +230,7 @@ export class CloudBridgeService {
     this.buildPresence = buildPresence;
     this.onEvent = onEvent;
     this.onAgentRequest = onAgentRequest;
+    this.onAuthRejected = onAuthRejected;
     this.running = false;
     this.timer = null;
     this.syncing = false;
@@ -329,6 +331,14 @@ export class CloudBridgeService {
   noteError(error) {
     this.state.status = "degraded";
     this.state.lastErrorCode = errorCode(error);
+    if (
+      error?.status === 401 ||
+      ["UNAUTHORIZED", "DEVICE_REVOKED", "INVALID_DEVICE_CREDENTIAL"].includes(
+        this.state.lastErrorCode,
+      )
+    ) {
+      Promise.resolve(this.onAuthRejected(error)).catch(() => undefined);
+    }
     this.state.lastErrorAt = new Date().toISOString();
     this.onEvent("warn", "Cloud Bridge sync failed", {
       code: this.state.lastErrorCode,

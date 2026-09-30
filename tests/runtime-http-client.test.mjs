@@ -61,6 +61,60 @@ describe("RuntimeHttpClient", () => {
     );
   });
 
+  it("maps Runtime access-state operations to the public access contract", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        result: { schemaVersion: 1, mode: "enforced", state: "READY" },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new RuntimeHttpClient({
+      baseUrl: "http://127.0.0.1:8788",
+      sessionId: "owl-desktop:access-session",
+    });
+
+    await client.runtimeAccess();
+    await client.authorizeRuntimeAccess(
+      {
+        deviceId: "dev_1",
+        organizationId: "org_1",
+        principalId: "usr_1",
+        canRun: true,
+        leaseExpiresAt: "2026-10-01T00:00:00.000Z",
+      },
+      { idempotencyKey: "runtime-access-authorize:test" },
+    );
+    await client.lockRuntimeAccess("ACCOUNT_LOGGED_OUT");
+    await client.revokeRuntimeAccess("CLOUD_DEVICE_AUTH_REJECTED");
+
+    const payloads = fetchMock.mock.calls.map(([, options]) =>
+      JSON.parse(options.body),
+    );
+    expect(payloads.map((payload) => payload.method)).toEqual([
+      "access.get",
+      "access.authorize",
+      "access.lock",
+      "access.revoke",
+    ]);
+    expect(payloads[1].params).toMatchObject({
+      deviceId: "dev_1",
+      organizationId: "org_1",
+      principalId: "usr_1",
+      canRun: true,
+    });
+    expect(fetchMock.mock.calls[1][1].headers["x-owl-idempotency-key"]).toBe(
+      "runtime-access-authorize:test",
+    );
+    expect(payloads[2].params).toEqual({ reasonCode: "ACCOUNT_LOGGED_OUT" });
+    expect(payloads[3].params).toEqual({
+      reasonCode: "CLOUD_DEVICE_AUTH_REJECTED",
+    });
+  });
+
   it("propagates external cancellation to the Runtime HTTP request", async () => {
     const fetchMock = vi.fn().mockImplementation((_url, options) =>
       new Promise((_resolve, reject) => {

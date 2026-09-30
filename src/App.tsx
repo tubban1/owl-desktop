@@ -74,6 +74,10 @@ export default function App() {
   const [logQuery, setLogQuery] = useState("");
 
   const online = snapshot?.mode === "live";
+  const runtimeAccess = snapshot?.runtimeAccess ?? cloudAccount?.runtimeAccess ?? null;
+  const executionReady =
+    online &&
+    (runtimeAccess?.mode === "compat" || runtimeAccess?.state === "READY");
   const cloudOnline = snapshot?.cloud.status === "connected";
   const cloudStatusLabel = snapshot?.cloud.status
     ? snapshot.cloud.status.replaceAll("_", " ")
@@ -237,7 +241,7 @@ export default function App() {
           <SectionHeader title="Good evening." description="Your local OWL LAB execution stack, sessions and operational health in one place." action={<button className="primary" onClick={refresh}><RefreshCw size={15} />Refresh Runtime</button>} />
           <section className={"hero-status " + (online ? "healthy" : "warning")}>
             <div className="hero-icon">{online ? <CheckCircle2 size={24} /> : <WifiOff size={24} />}</div>
-            <div className="hero-copy"><span>LOCAL EXECUTION AUTHORITY</span><h2>{online ? "OWL Runtime is ready" : "OWL Runtime is not connected"}</h2><p>{online ? "Desktop is reading canonical execution state through RuntimeClient v" + apiVersion + "." : (snapshot?.error ?? "Start OWL Runtime or update the endpoint in Settings.")}</p></div>
+            <div className="hero-copy"><span>LOCAL EXECUTION AUTHORITY</span><h2>{!online ? "OWL Runtime is not connected" : executionReady ? "OWL Runtime is ready" : `OWL Runtime is ${runtimeAccess?.state?.toLowerCase() ?? "locked"}`}</h2><p>{!online ? (snapshot?.error ?? "Start OWL Runtime or update the endpoint in Settings.") : executionReady ? "Desktop is reading canonical execution state through RuntimeClient v" + apiVersion + "." : "Read-only state remains available, but new Runtime mutations require a valid OWL LAB execution lease."}</p></div>
             <div className="hero-side"><strong>{online ? snapshot?.latencyMs + " ms" : "—"}</strong><span>last probe</span></div>
           </section>
           <div className="metrics-grid">
@@ -505,7 +509,9 @@ export default function App() {
             </div>
             <div className="about-grid">
               <span>Account</span><strong>{cloudAccount?.status === "ready" ? "Authenticated" : cloudAccount?.status?.replaceAll("_", " ") ?? "Signed out"}</strong>
-              <span>Run access</span><strong>{cloudAccount?.access?.canRun === true ? "Granted" : "Not granted"}</strong>
+              <span>Cloud run access</span><strong>{cloudAccount?.access?.canRun === true ? "Granted" : "Not granted"}</strong>
+              <span>Runtime access</span><strong>{runtimeAccess?.state ?? "Unknown"}{runtimeAccess?.mode ? ` · ${runtimeAccess.mode}` : ""}</strong>
+              <span>Lease expires</span><strong>{runtimeAccess?.grant?.expiresAt ? new Date(runtimeAccess.grant.expiresAt).toLocaleString() : "—"}</strong>
               <span>Device</span><code>{cloudAccount?.deviceId ?? snapshot?.cloud.deviceId ?? "Not enrolled"}</code>
               <span>Bridge</span><strong>{cloudOnline ? "Connected" : cloudStatusLabel}</strong>
               <span>Last heartbeat</span><strong>{formatTime(snapshot?.cloud.lastHeartbeatAt ?? undefined)}</strong>

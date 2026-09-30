@@ -99,6 +99,23 @@ export type TunnelStatus = {
 
 
 
+export type RuntimeAccessState = {
+  schemaVersion: 1;
+  mode: "compat" | "enforced";
+  state: "LOCKED" | "READY" | "REVOKED";
+  updatedAt: string;
+  reasonCode: string | null;
+  grant: null | {
+    grantId: string;
+    deviceId: string;
+    organizationId: string | null;
+    principalId: string | null;
+    issuedAt: string;
+    expiresAt: string;
+    evidenceDigest: string;
+  };
+};
+
 export type CloudAccountStatus = {
   status:
     | "signed_out"
@@ -117,6 +134,7 @@ export type CloudAccountStatus = {
     canSchedule?: boolean;
     canApprove?: boolean;
   };
+  runtimeAccess: RuntimeAccessState | null;
   deviceId: string | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
@@ -264,6 +282,7 @@ export type RuntimeSnapshot = {
   checkedAt: string;
   latencyMs: number;
   info: null | { apiVersion?: string; runtimeVersion?: string; transport?: string };
+  runtimeAccess: RuntimeAccessState | null;
   health: unknown;
   tasks: unknown;
   approvals: unknown;

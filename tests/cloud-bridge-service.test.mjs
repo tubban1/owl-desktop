@@ -67,12 +67,14 @@ function createService({
   },
   store = createStore(),
   onAgentRequest = vi.fn(),
+  onAuthRejected = vi.fn(),
 } = {}) {
   return {
     client,
     runtimeClient,
     store,
     onAgentRequest,
+    onAuthRejected,
     service: new CloudBridgeService({
       client,
       runtimeClient,
@@ -86,6 +88,7 @@ function createService({
         runtimeCompatibility: { runtimeApiVersion: "0.1" },
       }),
       onAgentRequest,
+      onAuthRejected,
     }),
   };
 }
@@ -339,6 +342,30 @@ describe("CloudBridgeService", () => {
     expect(setup.store.getCommand("cmd_runtime_reject")).toMatchObject({
       status: "rejected",
     });
+  });
+
+  it("notifies the Desktop access broker when Cloud rejects device authentication", async () => {
+    const authError = new Error("Device revoked");
+    authError.code = "UNAUTHORIZED";
+    authError.status = 401;
+    const client = createClient({
+      heartbeat: vi.fn(async () => {
+        throw authError;
+      }),
+    });
+    const onAuthRejected = vi.fn();
+    const setup = createService({ client, onAuthRejected });
+
+    await setup.service.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onAuthRejected).toHaveBeenCalledTimes(1);
+    expect(onAuthRejected).toHaveBeenCalledWith(authError);
+    expect(setup.service.snapshot()).toMatchObject({
+      status: "degraded",
+      lastErrorCode: "UNAUTHORIZED",
+    });
+    await setup.service.stop();
   });
 
   it("heartbeats, polls and drains durable outbox in a sync cycle", async () => {

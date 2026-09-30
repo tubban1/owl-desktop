@@ -60,6 +60,30 @@ export class RuntimeHttpClient {
     const info = await this.invoke("info");
     return { ...info, transport: "http" };
   }
+  runtimeAccess() {
+    return this.invoke("access.get", undefined, { timeoutMs: 5000 });
+  }
+  authorizeRuntimeAccess(request, options = {}) {
+    return this.invoke("access.authorize", request, {
+      timeoutMs: options.timeoutMs ?? 10_000,
+      requestId: options.requestId,
+      idempotencyKey: options.idempotencyKey,
+    });
+  }
+  lockRuntimeAccess(reasonCode = "LOCKED_BY_DESKTOP", options = {}) {
+    return this.invoke("access.lock", { reasonCode }, {
+      timeoutMs: options.timeoutMs ?? 10_000,
+      requestId: options.requestId,
+      idempotencyKey: options.idempotencyKey,
+    });
+  }
+  revokeRuntimeAccess(reasonCode = "DEVICE_REVOKED", options = {}) {
+    return this.invoke("access.revoke", { reasonCode }, {
+      timeoutMs: options.timeoutMs ?? 10_000,
+      requestId: options.requestId,
+      idempotencyKey: options.idempotencyKey,
+    });
+  }
   health() { return this.invoke("health", { op: "status" }); }
   listEvents(request = {}) {
     return this.invoke("events.list", request, {

@@ -19,6 +19,7 @@ import { RuntimeAgentRequestEventConsumer } from "./services/runtime-agent-reque
 import { RuntimeAgentRequestEventBridge } from "./services/runtime-agent-request-event-bridge.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const RUNTIME_ACCESS_LEASE_MS = 12 * 60 * 60 * 1000;
 let mainWindow;
 let store;
 let identityVault;
@@ -42,6 +43,7 @@ let cloudAccountState = {
   status: "signed_out",
   account: null,
   access: null,
+  runtimeAccess: null,
   deviceId: null,
   lastErrorCode: null,
   lastErrorMessage: null,
@@ -206,6 +208,60 @@ function cloudAccountSnapshot() {
   };
 }
 
+async function syncRuntimeAccessFromCloud(account, access, deviceId) {
+  const client = runtimeClient();
+  if (!deviceId || access?.canRun !== true) {
+    return await client.lockRuntimeAccess("CLOUD_RUN_NOT_GRANTED", {
+      idempotencyKey: `runtime-access-lock:${deviceId ?? "none"}:cloud-run-not-granted`,
+    });
+  }
+
+  const leaseExpiresAt = new Date(
+    Date.now() + RUNTIME_ACCESS_LEASE_MS,
+  ).toISOString();
+  return await client.authorizeRuntimeAccess(
+    {
+      deviceId,
+      organizationId:
+        access?.organizationId ?? account?.organizationId ?? undefined,
+      principalId: account?.userId ?? undefined,
+      canRun: true,
+      leaseExpiresAt,
+      evidence: {
+        source: "owl-cloud-effective-access-v1",
+        role: access?.role ?? account?.role ?? null,
+        canView: access?.canView === true,
+        canRun: true,
+        canSchedule: access?.canSchedule === true,
+        canApprove: access?.canApprove === true,
+      },
+    },
+    {
+      idempotencyKey: `runtime-access-authorize:${deviceId}:${leaseExpiresAt}`,
+    },
+  );
+}
+
+async function safeSyncRuntimeAccess(account, access, deviceId) {
+  try {
+    const state = await syncRuntimeAccessFromCloud(account, access, deviceId);
+    record("info", "runtime-access", "Runtime access projection updated", {
+      state: state?.state ?? null,
+      reasonCode: state?.reasonCode ?? null,
+      deviceId,
+      expiresAt: state?.grant?.expiresAt ?? null,
+    });
+    return state;
+  } catch (error) {
+    record("warn", "runtime-access", "Runtime access projection failed", {
+      code: error?.code ?? null,
+      message: error instanceof Error ? error.message : String(error),
+      deviceId,
+    });
+    return await runtimeClient().runtimeAccess().catch(() => null);
+  }
+}
+
 async function beginCloudAccountLogin() {
   const service = ensureCloudEnrollmentService();
   cloudAccountState = {
@@ -232,10 +288,16 @@ async function completeCloudAccountLogin(url) {
   try {
     const service = cloudEnrollmentService ?? ensureCloudEnrollmentService();
     const enrolled = await service.complete(url);
+    const runtimeAccess = await safeSyncRuntimeAccess(
+      enrolled.account ?? null,
+      enrolled.access ?? null,
+      enrolled.device?.deviceId ?? null,
+    );
     cloudAccountState = {
       status: "ready",
       account: enrolled.account ?? null,
       access: enrolled.access ?? null,
+      runtimeAccess,
       deviceId: enrolled.device?.deviceId ?? null,
       lastErrorCode: null,
       lastErrorMessage: null,
@@ -270,17 +332,31 @@ async function resumeCloudAccountSession() {
     service.recoverDeviceIdFromCredential();
     const resumed = await service.resumeFromRefreshToken();
     if (!resumed) {
+      const deviceId = store.getSettings().cloudDeviceId || null;
+      const runtimeAccess = await runtimeClient()
+        .lockRuntimeAccess("ACCOUNT_LOGIN_REQUIRED", {
+          idempotencyKey: `runtime-access-lock:${deviceId ?? "none"}:account-login-required`,
+        })
+        .catch(() => null);
       cloudAccountState = {
         ...cloudAccountState,
-        status: store.getSettings().cloudDeviceId ? "device_enrolled" : "signed_out",
-        deviceId: store.getSettings().cloudDeviceId || null,
+        status: deviceId ? "device_enrolled" : "signed_out",
+        access: null,
+        runtimeAccess,
+        deviceId,
       };
       return cloudAccountSnapshot();
     }
+    const runtimeAccess = await safeSyncRuntimeAccess(
+      resumed.account ?? null,
+      resumed.access ?? null,
+      resumed.deviceId ?? null,
+    );
     cloudAccountState = {
       status: "ready",
       account: resumed.account ?? null,
       access: resumed.access ?? null,
+      runtimeAccess,
       deviceId: resumed.deviceId ?? null,
       lastErrorCode: null,
       lastErrorMessage: null,
@@ -297,19 +373,27 @@ async function resumeCloudAccountSession() {
   }
 }
 
-function logoutCloudAccount() {
+async function logoutCloudAccount() {
   const service = cloudEnrollmentService ?? ensureCloudEnrollmentService();
   service.clearAccountSession();
+  const deviceId = store.getSettings().cloudDeviceId || null;
+  const runtimeAccess = await runtimeClient()
+    .lockRuntimeAccess("ACCOUNT_LOGGED_OUT", {
+      idempotencyKey: `runtime-access-lock:${deviceId ?? "none"}:account-logged-out`,
+    })
+    .catch(() => null);
   cloudAccountState = {
-    status: store.getSettings().cloudDeviceId ? "device_enrolled" : "signed_out",
+    status: deviceId ? "device_enrolled" : "signed_out",
     account: null,
     access: null,
-    deviceId: store.getSettings().cloudDeviceId || null,
+    runtimeAccess,
+    deviceId,
     lastErrorCode: null,
     lastErrorMessage: null,
   };
   record("info", "cloud", "OWL LAB account signed out", {
     deviceEnrollmentPreserved: Boolean(cloudAccountState.deviceId),
+    runtimeAccess: runtimeAccess?.state ?? null,
   });
   return cloudAccountSnapshot();
 }
@@ -432,6 +516,23 @@ async function startCloudBridge() {
     onAgentRequest(input) {
       createAgentRequest(input);
     },
+    async onAuthRejected(error) {
+      const revoked = await runtimeClient()
+        .revokeRuntimeAccess("CLOUD_DEVICE_AUTH_REJECTED", {
+          idempotencyKey: `runtime-access-revoke:${settings.cloudDeviceId}:cloud-device-auth-rejected`,
+        })
+        .catch(() => null);
+      cloudAccountState = {
+        ...cloudAccountState,
+        runtimeAccess: revoked,
+      };
+      record("error", "runtime-access", "Runtime access revoked after Cloud device authentication rejection", {
+        deviceId: settings.cloudDeviceId,
+        code: error?.code ?? null,
+        runtimeState: revoked?.state ?? null,
+      });
+      mainWindow?.webContents?.send("cloud:account-updated", cloudAccountSnapshot());
+    },
   });
 
   try {
@@ -540,9 +641,10 @@ async function runtimeSnapshot() {
   const client = runtimeClient();
 
   const started = Date.now();
-  const [info, health, tasks, approvals, processes, diagnostics, host] =
+  const [info, runtimeAccess, health, tasks, approvals, processes, diagnostics, host] =
     await Promise.allSettled([
       client.info(),
+      client.runtimeAccess(),
       client.health(),
       client.tasks(),
       client.approvals(),
@@ -557,6 +659,8 @@ async function runtimeSnapshot() {
     checkedAt: new Date().toISOString(),
     latencyMs: Date.now() - started,
     info: info.status === "fulfilled" ? info.value : null,
+    runtimeAccess:
+      runtimeAccess.status === "fulfilled" ? runtimeAccess.value : null,
     health: health.status === "fulfilled" ? health.value : null,
     tasks: tasks.status === "fulfilled" ? tasks.value : null,
     approvals: approvals.status === "fulfilled" ? approvals.value : null,
