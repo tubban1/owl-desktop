@@ -72,6 +72,36 @@ for (const arch of ["arm64", "x64"]) {
   }
 }
 
+const hostApp = path.join(root, "vendor/runtime-host/OWL Runtime.app");
+const hostBinary = path.join(hostApp, "Contents/MacOS/OwlRuntimeHost");
+if (!fs.existsSync(hostBinary)) {
+  throw new Error("Universal OWL Runtime Host is missing.");
+}
+const hostLipo = spawnSync("/usr/bin/lipo", ["-info", hostBinary], {
+  encoding: "utf8",
+});
+const hostArch = `${hostLipo.stdout ?? ""} ${hostLipo.stderr ?? ""}`;
+if (hostLipo.status !== 0 || !/arm64/.test(hostArch) || !/x86_64/.test(hostArch)) {
+  throw new Error(`OWL Runtime Host is not universal: ${hostArch}`);
+}
+const hostStatus = spawnSync(hostBinary, ["--status"], { encoding: "utf8" });
+if (hostStatus.status !== 0) {
+  throw new Error(hostStatus.stderr || "OWL Runtime Host --status failed.");
+}
+const hostIdentity = JSON.parse(hostStatus.stdout);
+if (
+  hostIdentity.bundleIdentifier !== "fan.fde.owl.runtime" ||
+  hostIdentity.version !== "1.0.0"
+) {
+  throw new Error(`Unexpected OWL Runtime Host identity: ${hostStatus.stdout}`);
+}
+const hostPackaged = (pkg.build?.extraResources ?? []).some(
+  (entry) => entry.from === "vendor/runtime-host" && entry.to === "runtime-host",
+);
+if (!hostPackaged) {
+  throw new Error("OWL Runtime Host is not included in Desktop extraResources.");
+}
+
 console.log(
   JSON.stringify(
     {
@@ -84,6 +114,11 @@ console.log(
       vendorGitSha: protocol.vendorGitSha,
       mcpTransport: protocol.mcpTransport,
       packagedArchitectures: ["arm64", "x64"],
+      runtimeHost: {
+        bundleIdentifier: hostIdentity.bundleIdentifier,
+        version: hostIdentity.version,
+        architectures: ["arm64", "x86_64"],
+      },
       extraResources: true,
     },
     null,

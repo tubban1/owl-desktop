@@ -4,3 +4,4 @@ release
 vendor
 .DS_Store
 *.log
+build/icon.icns
