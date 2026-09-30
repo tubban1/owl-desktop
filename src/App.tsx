@@ -59,6 +59,9 @@ export default function App() {
     secret: "",
   });
   const [notice, setNotice] = useState("");
+  const [logLevel, setLogLevel] = useState<"all" | "warn" | "error">("all");
+  const [logSource, setLogSource] = useState("all");
+  const [logQuery, setLogQuery] = useState("");
 
   const online = snapshot?.mode === "live";
   const cloudOnline = snapshot?.cloud.status === "connected";
@@ -152,6 +155,18 @@ export default function App() {
   };
 
   const activityRows = useMemo(() => snapshot?.activity ?? [], [snapshot]);
+  const logSources = useMemo(() => Array.from(new Set(activityRows.map((entry) => entry.source))).sort(), [activityRows]);
+  const filteredActivityRows = useMemo(() => {
+    const query = logQuery.trim().toLowerCase();
+    return activityRows.filter((entry) => {
+      if (logLevel === "warn" && entry.level !== "warn" && entry.level !== "error") return false;
+      if (logLevel === "error" && entry.level !== "error") return false;
+      if (logSource !== "all" && entry.source !== logSource) return false;
+      if (!query) return true;
+      const haystack = `${entry.source} ${entry.message} ${JSON.stringify(entry.meta ?? {})}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [activityRows, logLevel, logSource, logQuery]);
   const pendingAgentRequests = useMemo(
     () => agentRequests.filter((request) => request.status === "pending"),
     [agentRequests],
@@ -411,9 +426,29 @@ export default function App() {
         </>}
 
         {page === "logs" && <>
-          <SectionHeader title="Live Logs" description="Desktop-local activity today; Runtime event streaming will attach through the public contract." action={<button className="secondary" onClick={refresh}><RefreshCw size={15} />Refresh</button>} />
-          <section className="log-console"><div className="console-head"><span /><span /><span /><strong>desktop.activity</strong></div>{activityRows.map((entry) => <div className="console-row" key={entry.id}><time>{formatTime(entry.at)}</time><span className={"level " + entry.level}>{entry.level.toUpperCase()}</span><span className="source">{entry.source}</span><p>{entry.message}</p></div>)}{activityRows.length === 0 && <div className="empty console-empty">No events captured yet.</div>}</section>
-          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RUNTIME DIAGNOSTICS</span><h3>Latest support projection</h3></div></div><pre className="code-block tall">{pretty(snapshot?.diagnostics)}</pre></section>
+          <SectionHeader title="Live Logs" description="Readable operational events across Desktop, Runtime, MCP and Cloud. Filter the signal first; raw diagnostics stay available below." action={<button className="secondary" onClick={refresh}><RefreshCw size={15} />Refresh</button>} />
+          <section className="log-toolbar">
+            <div className="log-filter-group" role="group" aria-label="Log severity">
+              {(["all", "warn", "error"] as const).map((level) => <button key={level} className={logLevel === level ? "active" : ""} onClick={() => setLogLevel(level)}>{level === "all" ? "All" : level === "warn" ? "Warnings +" : "Errors"}</button>)}
+            </div>
+            <select value={logSource} onChange={(event) => setLogSource(event.target.value)} aria-label="Log source">
+              <option value="all">All sources</option>
+              {logSources.map((source) => <option key={source} value={source}>{source}</option>)}
+            </select>
+            <input value={logQuery} onChange={(event) => setLogQuery(event.target.value)} placeholder="Search message or context…" aria-label="Search logs" />
+            <span className="log-count">{filteredActivityRows.length} / {activityRows.length}</span>
+          </section>
+          <section className="readable-log-list">
+            {filteredActivityRows.map((entry) => <article className={"readable-log-entry " + entry.level} key={entry.id}>
+              <div className="readable-log-status"><span className={"log-dot " + entry.level} /><strong>{entry.level === "error" ? "Error" : entry.level === "warn" ? "Warning" : "Info"}</strong></div>
+              <div className="readable-log-body">
+                <div className="readable-log-heading"><strong>{entry.message}</strong><time>{formatTime(entry.at)}</time></div>
+                <div className="readable-log-meta"><span>{entry.source}</span>{entry.meta && Object.keys(entry.meta).length > 0 && <details><summary>Context</summary><pre>{pretty(entry.meta)}</pre></details>}</div>
+              </div>
+            </article>)}
+            {filteredActivityRows.length === 0 && <div className="empty log-empty">No events match these filters.</div>}
+          </section>
+          <section className="panel diagnostics-panel"><div className="panel-heading"><div><span className="eyebrow">RAW SUPPORT DATA</span><h3>Runtime diagnostics</h3></div><span className="neutral-pill">Support / debugging</span></div><p className="panel-help">This machine-readable projection is intentionally separated from the human event stream above.</p><pre className="code-block tall">{pretty(snapshot?.diagnostics)}</pre></section>
         </>}
 
         {page === "runtime" && <>

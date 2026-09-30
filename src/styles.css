@@ -112,13 +112,32 @@ nav button.active { background: #151a18; color: #d5f8df; }
 .code-block.tall { max-height: 360px; } .code-block.compact { max-height: 180px; margin-top: 10px; }
 .contract-note { display: flex; gap: 11px; margin-top: 10px; padding: 13px 15px; border: 1px solid rgba(82, 126, 96, .25); border-radius: 10px; color: #7fbd91; background: rgba(54, 91, 65, .08); }
 .contract-note strong { font-size: 11px; } .contract-note p { margin: 4px 0 0; color: #68736b; font-size: 10px; }
-.log-console { border: 1px solid #202429; background: #090b0d; border-radius: 12px; overflow: hidden; min-height: 220px; }
-.console-head { height: 38px; display: flex; gap: 6px; align-items: center; padding: 0 12px; border-bottom: 1px solid #1b1f23; }
-.console-head span { width: 8px; height: 8px; border-radius: 50%; background: #2e3439; } .console-head strong { margin-left: 5px; color: #596269; font-size: 9px; font-weight: 500; }
-.console-row { display: grid; grid-template-columns: 72px 54px 70px 1fr; gap: 9px; padding: 7px 12px; border-bottom: 1px solid #111417; font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; }
-.console-row time { color: #444c52; } .console-row .level { color: #7acb91; font-weight: 700; } .console-row .level.warn { color: #dca36f; } .console-row .level.error { color: #e67b7b; }
-.console-row .source { color: #66727b; } .console-row p { margin: 0; color: #98a2a9; }
-.console-empty { padding: 24px; }
+.log-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 11px 12px; border: 1px solid #20262b; border-radius: 12px; background: #0d1114; }
+.log-toolbar select, .log-toolbar input { height: 34px; border: 1px solid #293037; border-radius: 8px; background: #090c0f; color: #b9c1c7; padding: 0 10px; font-size: 11px; }
+.log-toolbar input { flex: 1; min-width: 220px; }
+.log-filter-group { display: flex; gap: 4px; padding: 3px; border: 1px solid #242a2f; border-radius: 9px; background: #090c0f; }
+.log-filter-group button { border: 0; border-radius: 6px; background: transparent; color: #69737b; padding: 6px 10px; font-size: 10px; cursor: pointer; }
+.log-filter-group button.active { background: #20272c; color: #d0d6da; }
+.log-count { margin-left: auto; color: #59636a; font-size: 10px; }
+.readable-log-list { display: grid; border: 1px solid #20262b; border-radius: 12px; background: #0a0d0f; overflow: hidden; }
+.readable-log-entry { display: grid; grid-template-columns: 94px minmax(0, 1fr); gap: 14px; padding: 13px 14px; border-top: 1px solid #151a1e; }
+.readable-log-entry:first-child { border-top: 0; }
+.readable-log-entry.warn { background: rgba(157, 109, 54, .035); }
+.readable-log-entry.error { background: rgba(157, 65, 65, .045); }
+.readable-log-status { display: flex; gap: 8px; align-items: flex-start; padding-top: 2px; color: #78838a; font-size: 10px; }
+.readable-log-status strong { font-weight: 700; }
+.readable-log-body { min-width: 0; }
+.readable-log-heading { display: flex; justify-content: space-between; gap: 18px; align-items: baseline; }
+.readable-log-heading strong { color: #c5cbd0; font-size: 11px; line-height: 1.45; font-weight: 600; }
+.readable-log-heading time { flex: 0 0 auto; color: #515b62; font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; }
+.readable-log-meta { margin-top: 5px; color: #667078; font-size: 10px; }
+.readable-log-meta > span { display: inline-flex; padding: 2px 6px; border: 1px solid #252b30; border-radius: 5px; background: #0b0f11; font-family: "SFMono-Regular", Consolas, monospace; }
+.readable-log-meta details { margin-top: 8px; }
+.readable-log-meta summary { width: max-content; color: #6f7d85; cursor: pointer; }
+.readable-log-meta pre { margin: 8px 0 0; max-height: 180px; overflow: auto; padding: 10px; border: 1px solid #1d2327; border-radius: 7px; background: #07090b; color: #89939a; font-size: 9px; line-height: 1.5; }
+.log-empty { padding: 28px 14px; }
+.panel-help { margin: -2px 0 12px; color: #626d74; font-size: 10px; }
+.diagnostics-panel { margin-top: 0; }
 .runtime-summary h3 { margin: 8px 0; font-size: 15px; } .runtime-summary p { color: #687078; font-size: 10px; }
 .runtime-version { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 17px; }
 .runtime-version span { padding: 5px 7px; border: 1px solid #24292e; border-radius: 6px; color: #899199; font-size: 9px; }
