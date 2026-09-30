@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
@@ -11,6 +12,7 @@ import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
 import { CloudBridgeStore } from "./services/cloud-bridge-store.mjs";
 import { CloudBridgeService } from "./services/cloud-bridge-service.mjs";
+import { CloudEnrollmentService } from "./services/cloud-enrollment-service.mjs";
 import { AgentInboxStore } from "./services/agent-inbox-store.mjs";
 import { RuntimeAgentRequestEventConsumer } from "./services/runtime-agent-request-consumer.mjs";
 import { RuntimeAgentRequestEventBridge } from "./services/runtime-agent-request-event-bridge.mjs";
@@ -27,6 +29,9 @@ let runtimeAgentRequestConsumer;
 let runtimeAgentRequestEventBridge;
 let runtimeAgentRequestConsumerStateFile;
 let runtimeAgentRequestBridgeStateFile;
+let cloudEnrollment;
+let cloudEnrollmentBaseUrl = null;
+let pendingCloudCallbackUrl = null;
 let cloudBridgeState = {
   status: "stopped",
   running: false,
@@ -67,7 +72,8 @@ function runtimeToken() {
   );
 }
 
-function runtimeClient() {
+function runtimeClient({ allowLocked = false } = {}) {
+  if (!allowLocked) assertDesktopAccessReady("runtime");
   const settings = store.getSettings();
   return new RuntimeHttpClient({
     baseUrl: settings.runtimeBaseUrl,
@@ -119,6 +125,10 @@ function createRuntimeEventBridge() {
 }
 
 async function startRuntimeEventBridge() {
+  if (desktopAccessSnapshot().state !== "ready") {
+    stopRuntimeEventBridge();
+    return runtimeEventBridgeSnapshot();
+  }
   if (!runtimeAgentRequestConsumer) return runtimeEventBridgeSnapshot();
   const bridge = createRuntimeEventBridge();
   return await bridge.start();
@@ -150,6 +160,149 @@ function cloudDeviceCredential() {
   );
 }
 
+
+function deleteSecretByName(name, project) {
+  const entry = store
+    .listSecrets()
+    .find(
+      (secret) =>
+        secret.name === name &&
+        (!project || secret.project === project),
+    );
+  if (entry) store.deleteSecret(entry.id);
+  return { ok: true };
+}
+
+async function buildCloudDeviceRegistration() {
+  const info = await runtimeClient({ allowLocked: true }).info().catch(() => null);
+  return {
+    displayName: `${os.hostname()} · OWL Desktop`,
+    platform: `${process.platform}-${process.arch}`,
+    capabilities: {
+      cloudBridge: "m1-polling-v1",
+      agentInbox: "v1",
+    },
+    runtimeCompatibility: {
+      desktopVersion: app.getVersion(),
+      runtimeApiVersion: info?.apiVersion ?? null,
+      runtimeVersion: info?.runtimeVersion ?? null,
+      platform: process.platform,
+      arch: process.arch,
+    },
+  };
+}
+
+function ensureCloudEnrollment() {
+  const settings = store.getSettings();
+  const baseUrl = settings.cloudBaseUrl?.trim();
+  if (!baseUrl) {
+    const error = new Error("OWL Cloud base URL is not configured.");
+    error.code = "CLOUD_BASE_URL_MISSING";
+    throw error;
+  }
+
+  if (cloudEnrollment && cloudEnrollmentBaseUrl === baseUrl) {
+    return cloudEnrollment;
+  }
+
+  cloudEnrollmentBaseUrl = baseUrl;
+  cloudEnrollment = new CloudEnrollmentService({
+    client: new CloudHttpClient({ baseUrl }),
+    openExternal: (url) => shell.openExternal(url),
+    storeSecret: (input) => store.upsertSecret(input),
+    readSecret: (name, project) => store.readSecret(name, project),
+    deleteSecret: (name, project) => deleteSecretByName(name, project),
+    updateSettings: (patch) => store.updateSettings(patch),
+    buildDeviceRegistration: buildCloudDeviceRegistration,
+    initialDeviceId:
+      settings.cloudDeviceId && cloudDeviceCredential()
+        ? settings.cloudDeviceId
+        : null,
+    onEvent(level, message, meta) {
+      record(level, "cloud", message, meta);
+    },
+  });
+  return cloudEnrollment;
+}
+
+function cloudEnrollmentSnapshot() {
+  if (cloudEnrollment) return cloudEnrollment.snapshot();
+  const settings = store.getSettings();
+  const deviceId =
+    settings.cloudDeviceId && cloudDeviceCredential()
+      ? settings.cloudDeviceId
+      : null;
+  return {
+    status: deviceId ? "device_enrolled" : "idle",
+    startedAt: null,
+    completedAt: null,
+    account: null,
+    deviceId,
+    lastErrorCode: null,
+  };
+}
+
+function desktopAccessSnapshot() {
+  const enrollment = cloudEnrollmentSnapshot();
+  const ready = Boolean(
+    enrollment.status === "ready" &&
+      enrollment.account &&
+      enrollment.deviceId &&
+      cloudDeviceCredential(),
+  );
+  return {
+    version: 1,
+    state: ready ? "ready" : "locked",
+    reasonCode: ready
+      ? null
+      : enrollment.lastErrorCode ?? "CLOUD_LOGIN_REQUIRED",
+    account: enrollment.account,
+    deviceId: enrollment.deviceId,
+  };
+}
+
+function assertDesktopAccessReady(operation = "operation") {
+  const access = desktopAccessSnapshot();
+  if (access.state !== "ready") {
+    const error = new Error(
+      `DESKTOP_CLOUD_LOGIN_REQUIRED: ${operation} requires an authenticated OWL LAB account and enrolled device.`,
+    );
+    error.code = "DESKTOP_CLOUD_LOGIN_REQUIRED";
+    throw error;
+  }
+  return access;
+}
+
+async function beginCloudEnrollment() {
+  const enrollment = ensureCloudEnrollment();
+  const result = await enrollment.begin();
+  mainWindow?.webContents.send("cloud:enrollment-changed", result);
+  return result;
+}
+
+async function handleCloudAuthCallback(url) {
+  const enrollment = ensureCloudEnrollment();
+  const result = await enrollment.handleCallback(url);
+  if (result.status === "ready") {
+    await startAuthorizedServices();
+  }
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send("cloud:enrollment-changed", result);
+  }
+  return result;
+}
+
+async function logoutCloudAccount() {
+  const enrollment = ensureCloudEnrollment();
+  const result = await enrollment.logoutAccount();
+  await stopAuthorizedServices();
+  mainWindow?.webContents.send("cloud:enrollment-changed", result);
+  return result;
+}
+
 function createAgentRequest(input) {
   if (!agentInbox) return null;
   const result = agentInbox.create(input);
@@ -170,7 +323,9 @@ async function buildCloudPresence() {
     capabilities: {
       cloudBridge: "m1-polling-v1",
       agentInbox: "v1",
+      // Legacy discovery retained during the M1 transition.
       supportedRemoteCommands: ["runtime.task.create"],
+      supportedRemoteCommandContracts: ["runtime.task.create@1"],
       runtimeReachable: Boolean(info),
       mcpAvailable: mcpState.status === "running",
       tunnelAvailable: tunnelSupervisor?.status().state === "running",
@@ -228,6 +383,14 @@ async function startCloudBridge() {
   const settings = store.getSettings();
   await stopCloudBridge();
 
+  if (desktopAccessSnapshot().state !== "ready") {
+    cloudBridgeState = {
+      status: "needs_login",
+      running: false,
+      lastErrorCode: "DESKTOP_CLOUD_LOGIN_REQUIRED",
+    };
+    return cloudBridgeSnapshot();
+  }
   if (!settings.cloudEnabled) return cloudBridgeSnapshot();
 
   if (!settings.cloudBaseUrl?.trim()) {
@@ -286,6 +449,28 @@ async function startCloudBridge() {
   return cloudBridgeSnapshot();
 }
 
+async function startAuthorizedServices() {
+  assertDesktopAccessReady("authorized services");
+  const settings = store.getSettings();
+  await startMcp();
+  if (settings.autoConnectRuntime) {
+    await startRuntimeEventBridge();
+  }
+  if (settings.tunnelEnabled && settings.tunnelAutoStart) {
+    await startTunnel();
+  }
+  if (settings.cloudEnabled && settings.cloudAutoStart) {
+    await startCloudBridge();
+  }
+}
+
+async function stopAuthorizedServices() {
+  await stopCloudBridge();
+  stopRuntimeEventBridge();
+  await tunnelSupervisor?.stop().catch(() => undefined);
+  await stopMcp();
+}
+
 async function probeCloud() {
   const settings = store.getSettings();
   if (!settings.cloudBaseUrl?.trim()) {
@@ -321,6 +506,10 @@ function effectiveTunnelBinary(settings) {
 
 async function startTunnel() {
   const settings = store.getSettings();
+  if (desktopAccessSnapshot().state !== "ready") {
+    await tunnelSupervisor.stop();
+    return tunnelSupervisor.status();
+  }
   if (!settings.tunnelEnabled) {
     await tunnelSupervisor.stop();
     return tunnelSupervisor.status();
@@ -343,6 +532,15 @@ async function stopMcp() {
 
 async function startMcp() {
   const settings = store.getSettings();
+  if (desktopAccessSnapshot().state !== "ready") {
+    await stopMcp();
+    mcpState = {
+      status: "locked",
+      url: null,
+      error: "DESKTOP_CLOUD_LOGIN_REQUIRED",
+    };
+    return mcpState;
+  }
   if (!settings.mcpEnabled) {
     await stopMcp();
     return mcpState;
@@ -373,16 +571,18 @@ async function startMcp() {
 
 async function runtimeSnapshot() {
   const settings = store.getSettings();
-  const client = runtimeClient();
+  const client = runtimeClient({ allowLocked: true });
 
   const started = Date.now();
+  const access = desktopAccessSnapshot();
+  const authorized = access.state === "ready";
   const [info, health, tasks, approvals, processes, diagnostics, host] =
     await Promise.allSettled([
       client.info(),
       client.health(),
-      client.tasks(),
-      client.approvals(),
-      client.processes(),
+      authorized ? client.tasks() : Promise.resolve(null),
+      authorized ? client.approvals() : Promise.resolve(null),
+      authorized ? client.processes() : Promise.resolve(null),
       settings.diagnosticsEnabled ? client.diagnostics(40) : Promise.resolve(null),
       runtimeHostSupervisor().status(),
     ]);
@@ -411,6 +611,7 @@ async function runtimeSnapshot() {
     host: host.status === "fulfilled" ? host.value : null,
     tunnel: tunnelSupervisor?.status() ?? { state: "stopped" },
     cloud: cloudBridgeSnapshot(),
+    access,
     agentInbox: agentInbox?.summary() ?? {
       pending: 0,
       claimed: 0,
@@ -469,7 +670,11 @@ function registerIpc() {
   }));
 
   ipcMain.handle("runtime:refresh", () => runtimeSnapshot());
+  ipcMain.handle("desktop:access", () => desktopAccessSnapshot());
   ipcMain.handle("cloud:status", () => cloudBridgeSnapshot());
+  ipcMain.handle("cloud:enrollment-status", () => cloudEnrollmentSnapshot());
+  ipcMain.handle("cloud:enroll", () => beginCloudEnrollment());
+  ipcMain.handle("cloud:logout-account", () => logoutCloudAccount());
   ipcMain.handle("cloud:probe", () => probeCloud());
   ipcMain.handle("cloud:start", () => startCloudBridge());
   ipcMain.handle("cloud:stop", () => stopCloudBridge());
@@ -654,8 +859,14 @@ function registerIpc() {
     skillManagerPort().uninstall(skillId, version));
 
   ipcMain.handle("host:status", () => runtimeHostSupervisor().status());
-  ipcMain.handle("host:restart", () => runtimeHostSupervisor().restartService());
-  ipcMain.handle("host:stop", () => runtimeHostSupervisor().stopService());
+  ipcMain.handle("host:restart", () => {
+    assertDesktopAccessReady("Runtime Host restart");
+    return runtimeHostSupervisor().restartService();
+  });
+  ipcMain.handle("host:stop", () => {
+    assertDesktopAccessReady("Runtime Host stop");
+    return runtimeHostSupervisor().stopService();
+  });
   ipcMain.handle("tunnel:status", () => tunnelSupervisor.status());
   ipcMain.handle("tunnel:start", () => startTunnel());
   ipcMain.handle("tunnel:stop", () => tunnelSupervisor.stop());
@@ -709,6 +920,10 @@ function registerIpc() {
       } else {
         await tunnelSupervisor.stop();
       }
+    }
+    if ("cloudBaseUrl" in (patch ?? {})) {
+      cloudEnrollment = undefined;
+      cloudEnrollmentBaseUrl = null;
     }
     if (
       "cloudEnabled" in (patch ?? {}) ||
@@ -782,11 +997,43 @@ function registerIpc() {
   });
 }
 
+const CLOUD_PROTOCOL = "owl-desktop";
+
+function cloudCallbackFromArgs(argv = []) {
+  return argv.find(
+    (value) =>
+      typeof value === "string" &&
+      value.startsWith(`${CLOUD_PROTOCOL}://auth/`),
+  );
+}
+
+function dispatchCloudCallback(url) {
+  pendingCloudCallbackUrl = url;
+  if (!store) return;
+  const callback = pendingCloudCallbackUrl;
+  pendingCloudCallbackUrl = null;
+  void handleCloudAuthCallback(callback).catch((error) => {
+    record("error", "cloud", "Cloud auth callback failed", {
+      code: error?.code ?? "CLOUD_AUTH_CALLBACK_FAILED",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  if (url?.startsWith(`${CLOUD_PROTOCOL}://auth/`)) {
+    dispatchCloudCallback(url);
+  }
+});
+
 const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, argv) => {
+    const callback = cloudCallbackFromArgs(argv);
+    if (callback) dispatchCloudCallback(callback);
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
@@ -794,6 +1041,16 @@ if (!hasLock) {
   });
 
   app.whenReady().then(async () => {
+    if (process.defaultApp && process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(
+        CLOUD_PROTOCOL,
+        process.execPath,
+        [path.resolve(process.argv[1])],
+      );
+    } else {
+      app.setAsDefaultProtocolClient(CLOUD_PROTOCOL);
+    }
+
     store = new DesktopStore();
     identityVault = new IdentityVault();
     cloudBridgeStore = new CloudBridgeStore({
@@ -815,38 +1072,36 @@ if (!hasLock) {
       inbox: agentInbox,
       stateFile: runtimeAgentRequestConsumerStateFile,
     });
-    createRuntimeEventBridge();
     tunnelSupervisor = new TunnelSupervisor({
       onEvent(level, message, meta) {
         record(level, "tunnel", message, meta);
       },
     });
     registerIpc();
-    record("info", "desktop", "OWL Desktop started", { version: app.getVersion() });
-    await startMcp();
-    const settings = store.getSettings();
-    if (settings.autoConnectRuntime) {
-      await startRuntimeEventBridge().catch((error) => {
-        record("error", "runtime-events", "Runtime event bridge start failed", {
+    record("info", "desktop", "OWL LAB Desktop started", { version: app.getVersion() });
+    let restoredEnrollment = cloudEnrollmentSnapshot();
+    try {
+      restoredEnrollment = await ensureCloudEnrollment().resume();
+    } catch (error) {
+      record("warn", "cloud", "Cloud account restore unavailable", {
+        code: error?.code ?? "CLOUD_AUTH_RESUME_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (restoredEnrollment.status === "ready") {
+      await startAuthorizedServices().catch((error) => {
+        record("error", "desktop", "Authorized service startup failed", {
           code: error?.code ?? null,
           message: error instanceof Error ? error.message : String(error),
         });
       });
+    } else {
+      await stopAuthorizedServices();
     }
-    if (settings.tunnelEnabled && settings.tunnelAutoStart) {
-      await startTunnel().catch((error) => {
-        record("error", "tunnel", "Tunnel auto-start failed", {
-          message: error instanceof Error ? error.message : String(error),
-        });
-      });
-    }
-    if (settings.cloudEnabled && settings.cloudAutoStart) {
-      await startCloudBridge().catch((error) => {
-        record("error", "cloud", "Cloud Bridge auto-start failed", {
-          code: error?.code ?? null,
-          message: error instanceof Error ? error.message : String(error),
-        });
-      });
+    if (pendingCloudCallbackUrl) {
+      const callback = pendingCloudCallbackUrl;
+      pendingCloudCallbackUrl = null;
+      void handleCloudAuthCallback(callback);
     }
     createWindow();
 

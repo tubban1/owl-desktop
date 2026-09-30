@@ -132,7 +132,7 @@ export type CloudBridgeStatus = {
   lastErrorCode?: string | null;
   lastErrorAt?: string | null;
   recoveredUncertain?: number;
-  supportedCommandKinds?: string[];
+  supportedCommandContracts?: string[];
   commandCounts: {
     processing: number;
     accepted: number;
@@ -143,6 +143,29 @@ export type CloudBridgeStatus = {
   commands: CloudBridgeCommandRecord[];
 };
 
+
+export type CloudEnrollmentStatus = {
+  status:
+    | "idle"
+    | "waiting_for_browser"
+    | "exchanging_code"
+    | "bootstrapping"
+    | "registering_device"
+    | "ready"
+    | "device_enrolled"
+    | "error";
+  startedAt: string | null;
+  completedAt: string | null;
+  account: null | {
+    userId: string | null;
+    organizationId: string | null;
+    membershipId: string | null;
+    role: string | null;
+    email: string | null;
+  };
+  deviceId: string | null;
+  lastErrorCode: string | null;
+};
 
 export type AgentRequestPriority = "low" | "normal" | "high" | "urgent";
 export type AgentRequestStatus = "pending" | "claimed" | "completed" | "cancelled";
@@ -236,6 +259,14 @@ export type RuntimeEventBridgeStatus = {
   };
 };
 
+export type DesktopAccessStatus = {
+  version: 1;
+  state: "locked" | "ready";
+  reasonCode: string | null;
+  account: CloudEnrollmentStatus["account"];
+  deviceId: string | null;
+};
+
 export type RuntimeSnapshot = {
   mode: "live" | "offline";
   checkedAt: string;
@@ -249,7 +280,7 @@ export type RuntimeSnapshot = {
   error: string | null;
   metrics: { tasks: number; approvals: number; processes: number };
   mcp: {
-    status: "stopped" | "starting" | "running" | "error";
+    status: "stopped" | "starting" | "running" | "error" | "locked";
     url: string | null;
     error: string | null;
     sessionCount: number;
@@ -265,6 +296,7 @@ export type RuntimeSnapshot = {
   host: HostStatus | null;
   tunnel: TunnelStatus;
   cloud: CloudBridgeStatus;
+  access: DesktopAccessStatus;
   agentInbox: AgentInboxSummary;
   runtimeEvents: RuntimeEventBridgeStatus;
   accounts: AccountMeta[];

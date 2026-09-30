@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
-const SUPPORTED_COMMAND_KINDS = new Set([
-  "runtime.task.create",
+const SUPPORTED_COMMAND_CONTRACTS = new Set([
+  "runtime.task.create@1",
 ]);
 
 function isObject(value) {
@@ -229,6 +229,7 @@ export class CloudBridgeService {
     this.buildPresence = buildPresence;
     this.onEvent = onEvent;
     this.onAgentRequest = onAgentRequest;
+    this.runtimeReplaySupported = false;
     this.running = false;
     this.timer = null;
     this.syncing = false;
@@ -248,7 +249,7 @@ export class CloudBridgeService {
       ...this.state,
       running: this.running,
       deviceId: this.deviceId,
-      supportedCommandKinds: [...SUPPORTED_COMMAND_KINDS],
+      supportedCommandContracts: [...SUPPORTED_COMMAND_CONTRACTS],
       ...this.store.snapshot(),
     };
   }
@@ -259,7 +260,19 @@ export class CloudBridgeService {
       throw new Error("OWL Cloud deviceId is not configured.");
     }
 
-    const recovered = this.store.recoverProcessingAsUncertain();
+    const compacted = this.store.compactTerminalCommands();
+    try {
+      const capabilities = await this.runtimeClient.capabilities(
+        "consequential request replay",
+      );
+      this.runtimeReplaySupported =
+        capabilities?.extensions?.consequentialRequestReplay?.version === 1;
+    } catch {
+      this.runtimeReplaySupported = false;
+    }
+    const recovered = this.runtimeReplaySupported
+      ? []
+      : this.store.recoverProcessingAsUncertain();
     this.state.recoveredUncertain += recovered.length;
     for (const commandId of recovered) {
       this.queueIntegrationEvent(
@@ -292,6 +305,8 @@ export class CloudBridgeService {
     this.onEvent("info", "Cloud Bridge starting", {
       deviceId: this.deviceId,
       recoveredUncertain: recovered.length,
+      compactedTerminalMappings: compacted.length,
+      runtimeReplaySupported: this.runtimeReplaySupported,
     });
 
     await this.syncOnce({ forceHeartbeat: true }).catch((error) => {
@@ -410,14 +425,22 @@ export class CloudBridgeService {
             : {}),
         });
         this.noteContact();
+        return;
       } else if (record.status === "rejected") {
         await this.client.rejectCommand(
           commandId,
           record.rejectionReason || "Rejected locally",
         );
         this.noteContact();
+        return;
+      } else if (record.status === "uncertain") {
+        return;
+      } else if (
+        record.status === "processing" &&
+        !this.runtimeReplaySupported
+      ) {
+        return;
       }
-      return;
     }
 
     if (command.deviceId !== this.deviceId) {
@@ -435,14 +458,18 @@ export class CloudBridgeService {
       return await this.rejectNewCommand(commandId, "COMMAND_EXPIRED_LOCAL");
     }
 
-    if (!SUPPORTED_COMMAND_KINDS.has(command.kind)) {
+    const kindVersion = Number.isInteger(command.kindVersion)
+      ? command.kindVersion
+      : 1;
+    const commandContract = `${command.kind}@${kindVersion}`;
+    if (!SUPPORTED_COMMAND_CONTRACTS.has(commandContract)) {
       return await this.rejectNewCommand(
         commandId,
-        `UNSUPPORTED_COMMAND_KIND:${boundedString(command.kind, 80)}`,
+        `UNSUPPORTED_COMMAND_CONTRACT:${boundedString(commandContract, 96)}`,
       );
     }
 
-    if (command.kind === "runtime.task.create") {
+    if (command.kind === "runtime.task.create" && kindVersion === 1) {
       let request;
       try {
         request = validateTaskCreatePayload(command.payload);
@@ -455,7 +482,8 @@ export class CloudBridgeService {
 
       try {
         const task = await this.runtimeClient.createTask(request, {
-          requestId: `cloud:${commandId}`,
+          requestId: `cloud:${commandId}:${randomUUID()}`,
+          idempotencyKey: `cloud:${commandId}`,
         });
         const runtimeTaskId =
           typeof task?.id === "string"
@@ -504,16 +532,34 @@ export class CloudBridgeService {
           throw error;
         }
 
-        if (error?.runtimeResponded === true) {
+        const runtimeCode = errorCode(error);
+        if (
+          this.runtimeReplaySupported &&
+          runtimeCode === "IDEMPOTENCY_REQUEST_IN_PROGRESS"
+        ) {
+          this.onEvent("warn", "Runtime canonical request still in progress", {
+            commandId,
+            code: runtimeCode,
+          });
+          throw error;
+        }
+
+        if (
+          runtimeCode === "IDEMPOTENCY_OUTCOME_UNCERTAIN" ||
+          runtimeCode === "IDEMPOTENCY_REPLAY_EXPIRED" ||
+          runtimeCode === "IDEMPOTENCY_RECEIPT_PERSIST_FAILED"
+        ) {
+          this.store.markUncertain(commandId, runtimeCode);
+        } else if (error?.runtimeResponded === true) {
           this.store.markRejected(
             commandId,
-            `RUNTIME_REJECTED:${errorCode(error)}`,
+            `RUNTIME_REJECTED:${runtimeCode}`,
           );
           this.queueTelemetry({
             eventType: "desktop.cloud.command.rejected",
             severity: "warn",
             operation: "runtime.task.create",
-            errorCode: errorCode(error),
+            errorCode: runtimeCode,
             errorFingerprint: errorFingerprint(error),
             correlationId: commandId,
             recoverable: false,
@@ -521,13 +567,20 @@ export class CloudBridgeService {
           }, `telemetry:rejected:${commandId}`);
           await this.client.rejectCommand(
             commandId,
-            `RUNTIME_REJECTED:${errorCode(error)}`,
+            `RUNTIME_REJECTED:${runtimeCode}`,
           );
           this.noteContact();
           return;
+        } else if (this.runtimeReplaySupported) {
+          this.onEvent(
+            "warn",
+            "Runtime response lost; retaining command for idempotent replay",
+            { commandId, code: runtimeCode },
+          );
+          throw error;
+        } else {
+          this.store.markUncertain(commandId, runtimeCode);
         }
-
-        this.store.markUncertain(commandId, errorCode(error));
         this.onAgentRequest({
           type: "cloud.command.reconcile",
           producer: "desktop",
@@ -695,5 +748,7 @@ export class CloudBridgeService {
 }
 
 export function supportedCloudCommandKinds() {
-  return [...SUPPORTED_COMMAND_KINDS];
+  return [...SUPPORTED_COMMAND_CONTRACTS].map(
+    (contract) => contract.split("@")[0],
+  );
 }

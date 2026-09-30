@@ -1,82 +1,108 @@
-# Desktop -> OWL Cloud contract requests
+# Desktop → OWL Cloud contract requests
 
-Status: **Active integration backlog**.
+Status: **CR-CLOUD-001/002/003 provider contracts resolved in Frankfurt. Desktop consumer implementation is in PR #13; live product E2E remains the final gate.**
 
-These requests belong to the Cloud control-plane provider. Desktop must not patch around them by inventing Cloud semantics.
+These requests belong to the Cloud control-plane provider. Desktop must not patch around missing Cloud semantics by inventing its own provider rules.
 
 ## CR-CLOUD-001 — Versioned RemoteCommand kind registry
 
-**Need:** Cloud currently models `RemoteCommand.kind` as an open string. Desktop needs a frozen mapping from Cloud command kinds to versioned payload schemas before enabling additional Runtime adapters.
+Status: **RESOLVED BY CLOUD / CONSUMED BY DESKTOP**
 
-Requested contract:
-
-- stable command kind identifier;
-- command payload version;
-- JSON schema or equivalent machine-readable payload contract;
-- required Cloud effective access for creation;
-- intended Runtime public API mapping;
-- whether the command is consequential;
-- expiry/cancellation semantics;
-- compatibility/deprecation metadata.
-
-Example candidate:
+Cloud publishes:
 
 ```text
-kind: runtime.task.create
-version: 1
-requiredCloudAccess: canRun
+GET /contracts/remote-command-kinds/v1
+```
+
+Current frozen mapping:
+
+```text
+runtime.task.create@1
+requiredCloudAccess: run
 runtimeMapping: tasks.create
 ```
 
-Desktop must reject unknown or unsupported kinds. It must never treat an arbitrary `kind` string as a Runtime RPC method name.
+Cloud rejects unsupported `kind + kindVersion` before queueing.
 
-Acceptance:
+Desktop PR #13 now:
 
-1. Cloud conformance fixtures publish supported kind/version payloads.
-2. Desktop compatibility tests consume those fixtures.
-3. Unsupported kind/version is rejected without touching Runtime.
-4. Payload evolution does not silently change the meaning of an existing kind/version.
+- includes `kindVersion` in the durable command digest;
+- accepts only `runtime.task.create@1`;
+- rejects unsupported kind/version before touching Runtime;
+- preserves the Cloud → Runtime `commandId → runtimeTaskId` mapping.
+
+The kind string is never interpreted as an arbitrary Runtime RPC method name.
 
 ## CR-CLOUD-002 — Device enrollment handoff for Desktop
 
-**Need:** Desktop needs a product-safe Cognito sign-in/bootstrap/device-registration handoff without handling provider secrets manually.
+Status: **RESOLVED BY CLOUD / DESKTOP CONSUMER IMPLEMENTED**
 
-Requested semantics:
+Cloud live provider:
 
-- user signs in through the supported OWL account flow;
-- Desktop receives a short-lived authenticated account session;
-- Desktop calls bootstrap;
-- Desktop registers the local installation;
-- one-time device credential is returned;
-- Desktop persists it only in the OS credential store;
-- deviceId is persisted as non-secret configuration;
-- credential rotate/revoke UX is defined;
-- logout does not silently revoke an enrolled device unless explicitly requested.
+```text
+GET /auth/config
+Authorization Code + PKCE S256
+no client secret
+owl-desktop://auth/callback
+```
 
-Acceptance:
+Desktop PR #13 implements:
 
-1. Fresh Desktop can enroll without shell/AWS/manual database steps.
-2. Renderer never receives the stored device credential after enrollment.
-3. Old credential stops authenticating after rotate/revoke.
-4. Local-only mode remains usable without Cloud enrollment.
+```text
+system browser login
+→ deep-link callback
+→ PKCE code exchange in Electron main process
+→ Cloud bootstrap
+→ Cloud device registration
+→ device credential stored in OS-backed Vault
+→ deviceId stored as non-secret settings
+→ Cloud Bridge start
+```
+
+Security invariants:
+
+- Renderer never receives PKCE verifier, JWTs, refresh token or device credential;
+- refresh token and device credential use OS-backed encrypted storage;
+- logout clears the human account session but does not silently revoke the enrolled device;
+- normal OWL LAB Desktop/Runtime use requires an authenticated account plus enrolled device;
+- before authorization, Desktop exposes only the LOCKED enrollment/recovery shell and Runtime health/version/diagnostics;
+- a bounded offline execution lease may preserve previously authorized local work during temporary Cloud loss; this must not become an implicit permanent local-only mode.
+
+Remaining acceptance item: execute the flow on the real Mac against Frankfurt and capture live product evidence.
 
 ## CR-CLOUD-003 — Terminal command replay horizon
 
-**Need:** Desktop must retain `commandId -> Runtime identity` mappings long enough to prevent duplicate consequential execution, but an unbounded local journal is not a production retention policy.
+Status: **RESOLVED BY CLOUD / CONSUMED BY DESKTOP**
 
-Cloud should define:
+Cloud freezes:
 
-- whether a command in `accepted`, `rejected`, `expired`, or `cancelled_before_accept` can ever be delivered again;
-- the maximum replay/redelivery horizon after a terminal acknowledgement;
-- whether device re-enrollment can cause historical commands to be replayed;
-- whether command IDs are globally unique forever or unique only within a bounded retention window;
-- the minimum dedupe retention Desktop must preserve.
+- at-least-once delivery while non-terminal;
+- no pull redelivery after terminal commit;
+- no historical command replay after device re-enrollment;
+- `commandId` is never reused;
+- Desktop terminal dedupe retention minimum = 604800 seconds (7 days);
+- `uncertain` records must not be auto-pruned by age.
 
-Until this is frozen, Desktop keeps terminal mappings rather than pruning them automatically.
+Desktop PR #13 now compacts only old `accepted/rejected` mappings after the 7-day safety window.
 
-Acceptance:
+`uncertain` mappings remain durable until explicitly reconciled.
 
-1. Cloud publishes a normative terminal replay horizon.
-2. Desktop journal retention is at least that horizon plus a safety margin.
-3. A command replayed inside the horizon never creates a second Runtime action.
-4. Journal compaction never deletes `uncertain` records automatically.
+## Final integration gate
+
+The remaining closure path is product E2E, not another contract request:
+
+```text
+Cognito login
+→ bootstrap
+→ Desktop register device
+→ OS Vault
+→ Cloud RemoteCommand
+→ Desktop
+→ real OWL Runtime task
+→ runtimeTaskId
+→ Cloud accept
+→ event / telemetry
+→ disconnect
+→ reconnect
+→ reconciliation
+```

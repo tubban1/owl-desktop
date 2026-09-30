@@ -1,64 +1,118 @@
 # OWL Cloud Bridge M1 implementation status
 
-Status: **Desktop M1 polling transport implemented**  
+Status: **Desktop M1 transport + product enrollment implemented; Frankfurt live product E2E pending**  
 Provider baseline: **OWL Cloud HTTP API v1 / Frankfurt dev**
 
 ## Implemented in OWL Desktop
 
-Desktop now owns the local device-side Cloud Bridge transport:
+Desktop owns the local device-side Cloud Bridge transport:
 
 ```text
 OWL Cloud
-  -> device credential HTTP API
+  → device credential HTTP API
 OWL Desktop Cloud Bridge
-  -> command adapter / durable local bridge journal
+  → versioned command adapter / durable local bridge journal
 RuntimeClient
-  -> OWL Runtime
+  → OWL Runtime
 ```
 
 Implemented surfaces:
 
+- Cognito Authorization Code + PKCE S256 account login;
+- `owl-desktop://auth/callback` deep-link handling;
+- account bootstrap;
+- device registration;
+- OS-encrypted device credential storage;
+- OS-encrypted account refresh-token storage;
+- account logout that preserves explicit device enrollment;
 - device presence heartbeat;
 - at-least-once RemoteCommand polling;
+- `kind + kindVersion` compatibility enforcement;
 - durable commandId dedupe journal;
-- command payload digest conflict detection;
+- command payload/version digest conflict detection;
 - explicit Cloud accept/reject;
 - Runtime execution identity mapping;
+- 7-day terminal journal compaction;
+- `uncertain` records never age-pruned;
 - durable Desktop integration-event outbox;
 - durable privacy-bounded telemetry outbox;
 - reconnect/retry with stable event IDs;
 - local bridge health/status projection;
-- OS-encrypted device credential consumption;
 - Settings/Runtime/Overview UX.
 
-The Cloud event transport exists, but Desktop currently emits only Desktop-owned integration events. It does not fabricate Runtime execution events while the canonical Runtime event stream is unavailable.
+The Cloud event transport exists, but Desktop must not fabricate Runtime execution events. Runtime-origin execution truth remains Runtime-owned.
+
+## Product access gate
+
+Normal OWL LAB Desktop/Runtime use now requires a restored or freshly authenticated Cloud account plus an enrolled device.
+
+Pre-login behavior is intentionally limited:
+
+- Runtime Host may remain reachable for version / health / diagnostics;
+- OWL MCP stays stopped;
+- OWL Tunnel stays stopped;
+- Runtime AgentRequest event bridge stays stopped;
+- Cloud RemoteCommand polling stays stopped;
+- normal Runtime mutations fail closed with `DESKTOP_CLOUD_LOGIN_REQUIRED`.
+
+Desktop restores the human account session from the OS-vault refresh token on restart. This avoids forcing an interactive browser login on every launch.
+
+Temporary offline authorization is a later bounded-lease step; the current gate does not claim permanent offline/local-only authority.
+
+## Product enrollment
+
+The normal product path is now implemented in Desktop PR #13:
+
+```text
+GET /auth/config
+→ generate state + PKCE verifier/challenge
+→ open system browser
+→ Cognito Managed Login
+→ owl-desktop://auth/callback
+→ verify state
+→ exchange code + verifier in Electron main process
+→ POST /v1/bootstrap
+→ POST /v1/devices
+→ OS Vault stores one-time device credential
+→ cloudDeviceId stored as non-secret config
+→ Cloud Bridge starts
+```
+
+Renderer receives only sanitized enrollment status and canonical account/device identifiers.
+
+It never receives:
+
+- PKCE verifier;
+- id/access/refresh tokens;
+- device credential.
 
 ## Current command adapter
 
-Cloud `RemoteCommand.kind` is currently an open string in the provider contract.
-
-Desktop therefore does **not** proxy arbitrary Cloud kinds into Runtime RPC.
-
-The only enabled mapping is:
+Cloud provider registry:
 
 ```text
-runtime.task.create
-  -> Runtime public tasks.create
+GET /contracts/remote-command-kinds/v1
 ```
 
-The payload must match Runtime's public task request shape using public routed actions.
+Desktop currently supports exactly:
 
-Unknown kinds are rejected explicitly.
+```text
+runtime.task.create@1
+  → Runtime public tasks.create
+```
+
+Unknown or unsupported kind/version is rejected before Runtime.
 
 ## Idempotency and uncertainty
 
-Cloud delivery is at least once.
+Cloud delivery is at least once while non-terminal.
 
-Before a new command is sent to Runtime, Desktop persists a journal record containing:
+Before a new command crosses into Runtime, Desktop durably records:
 
 - commandId;
-- target deviceId;
+- deviceId;
 - kind;
+- kindVersion;
 - SHA-256 command digest;
 - processing state.
 
@@ -67,95 +121,82 @@ The raw command payload is not copied into the journal.
 After Runtime returns a canonical task identity, Desktop persists:
 
 ```text
-commandId -> runtimeTaskId
+commandId → runtimeTaskId
 ```
 
 before acknowledging Cloud.
 
-Repeated delivery of an accepted command replays only the same Cloud accept mapping. It does not execute Runtime again.
+Repeated delivery replays only the same Cloud acknowledgement; Runtime is not executed twice.
 
-If Desktop restarts while a command is still marked `processing`, the command becomes `uncertain` and is never automatically re-executed. This is intentionally fail-closed because the Runtime request may already have crossed the side-effect boundary.
+If Desktop restarts during a Runtime request, the mapping becomes `uncertain` and is never automatically re-executed.
 
-If Runtime returns an explicit structured rejection, Desktop may reject the Cloud command.
+Cloud now guarantees terminal commands are not redelivered after terminal commit. Desktop retains accepted/rejected mappings for at least seven days and may compact them after that safety window. `uncertain` mappings are never compacted merely because of age.
 
-## Outbox
+## Outbox and telemetry
 
 Desktop maintains a durable bridge outbox for:
 
 - Desktop-owned Event Envelope v1 integration messages;
 - Provider Observability v1 telemetry.
 
-Retries preserve the same event identity. Cloud performs idempotent ingest.
+Retries preserve event identity. Cloud performs idempotent ingest.
 
-Telemetry contains bounded operational metadata only. It must not contain:
+Telemetry is bounded operational metadata only and must not contain command payloads, user prompts/content, credentials, secret values or raw files/messages.
 
-- RemoteCommand payloads;
-- user prompts/content;
-- credentials;
-- secret values;
-- raw file/message contents.
+## Verification
 
-## Device credential
+Automated PR #13 gates:
 
-Desktop expects:
+- unit tests: PASS;
+- Electron main/preload/service syntax: PASS;
+- TypeScript + renderer build: PASS;
+- existing Runtime 1.x Skill integration: PASS.
 
-```text
-Secret name: OWL_CLOUD_DEVICE_CREDENTIAL
-Scope:       owl-cloud
-```
-
-The value is stored using Electron OS-backed `safeStorage`.
-
-It is never returned to the renderer.
-
-## Live provider probe
-
-Frankfurt dev health endpoint was reached successfully during implementation:
-
-```text
-service: owl-cloud
-contractVersion: v1
-```
-
-The Cloud provider already has deployed device-side M1 routes for presence, command pull/acknowledgement, event ingest and telemetry ingest.
-
-## Local live bridge evidence
-
-A repeatable verifier exercises the bridge against the real local Runtime:
+The existing local live verifier remains:
 
 ```bash
 npm run verify:cloud-bridge-live
 ```
 
-It proves:
+It proves one real Runtime task mapping and duplicate-delivery idempotency against a local Runtime.
 
-- Runtime API/version is reachable;
-- `runtime.task.create` becomes one real Runtime task;
-- duplicate delivery reuses the same `commandId -> runtimeTaskId` mapping;
-- duplicate delivery does not create a second Runtime task;
-- the local journal stores digest/mapping metadata rather than the raw command payload;
-- the probe task is deleted after verification.
+## Remaining product E2E
 
-## Still pending
+Do not mark the Cloud product loop fully closed until the actual Mac runs:
 
-### Product enrollment
+```text
+Cognito login
+→ bootstrap
+→ Desktop enrollment
+→ OS Vault
+→ Frankfurt RemoteCommand
+→ Desktop
+→ real Runtime task
+→ Cloud accept
+→ event/telemetry
+→ disconnect
+→ reconnect
+→ reconciliation
+```
 
-Desktop does not yet implement the normal human Cognito sign-in + bootstrap + device registration UX.
+Once this evidence passes, Desktop ↔ Cloud M1 is product-level closed.
 
-The HTTP client already exposes account-authenticated bootstrap and registration methods, but no credentials are fabricated or scraped.
 
-### Runtime event producer
+## Runtime R1 replay integration
 
-CR-DESKTOP-002 remains relevant. Desktop has a durable Cloud event transport/outbox, but it must not invent Runtime execution events while Runtime lacks the canonical event streaming/subscription surface needed by the bridge.
+When Runtime advertises:
 
-### RemoteCommand kind registry
+~~~text
+extensions.consequentialRequestReplay.version = 1
+~~~
 
-Cloud needs a frozen versioned RemoteCommand kind/payload contract. Until then Desktop supports only the one proven adapter above.
+Cloud RemoteCommand `runtime.task.create@1` uses:
 
-### Retention gate
+~~~text
+idempotencyKey = cloud:<commandId>
+requestId      = cloud:<commandId>:<unique-attempt-id>
+~~~
 
-Terminal command mappings are intentionally not auto-pruned yet. Cloud must define the maximum terminal replay horizon before Desktop can compact the dedupe journal safely. This is tracked as CR-CLOUD-003.
+Transport response loss no longer immediately becomes a permanent Desktop-local uncertain state. Desktop safely retries the same logical mutation; Runtime returns the canonical durable result or an explicit `IDEMPOTENCY_OUTCOME_UNCERTAIN`.
 
-### Cloud E2E
-
-Full Gate 4 still requires a real enrolled Desktop credential and a Cloud-created command reaching the real Runtime, followed by event/projection reconciliation and reconnect fault evidence.
+With an older Runtime that does not advertise R1, Desktop preserves the previous fail-closed behavior.

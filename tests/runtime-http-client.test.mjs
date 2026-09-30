@@ -54,6 +54,32 @@ describe("RuntimeHttpClient", () => {
     expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
   });
 
+  it("sends a stable idempotency key separately from the transport request ID", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: { id: "task_1" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new RuntimeHttpClient({
+      baseUrl: "http://127.0.0.1:8788",
+      sessionId: "owl-desktop:test-session",
+    });
+
+    await client.createTask(
+      { label: "once", steps: [{ id: "one", action: "git.status" }] },
+      {
+        requestId: "transport-attempt-2",
+        idempotencyKey: "cloud:cmd_42",
+      },
+    );
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.headers["x-owl-request-id"]).toBe("transport-attempt-2");
+    expect(options.headers["x-owl-idempotency-key"]).toBe("cloud:cmd_42");
+  });
+
   it("maps User Skill and workflow discovery methods to public Runtime RPC", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
