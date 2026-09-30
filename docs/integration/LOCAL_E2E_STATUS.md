@@ -169,14 +169,57 @@ Evidence:
 Canonical Runtime access implementation is on the Runtime integration branch at `919eeed`.
 Canonical Desktop binding is on `main` at `082a526`.
 
-## Next serial gate
+## I4 — Cloud RemoteCommand → Desktop → Runtime → terminal Cloud projection
 
-The next integration phase is **I4 — Cloud RemoteCommand → Desktop → Runtime → terminal Cloud projection**.
+**CLOSED for the tested dev contract.**
+
+Canonical implementation pair:
 
 ~~~text
-I2 Desktop ↔ Runtime complete
+OWL Cloud feat/cloud-m1-control-plane @ 9f71e4e
+OWL Desktop main @ 9254ea5
+OWL Runtime integration baseline @ 919eeed
+~~~
+
+The versioned Cloud registry now exposes:
+
+~~~text
+runtime.task.create@1
+→ tasks.create
+
+runtime.task.create-and-start@1
+→ tasks.create
+→ tasks.start
+→ desktop.cloud.task.terminal@1
+~~~
+
+The HTTP live gate `npm run verify:cloud-bridge-http-live` uses a real HTTP Cloud transport implementation, Desktop `CloudHttpClient + CloudBridgeService`, and a real enforced Runtime instance. It proved:
+
+- device presence, command pull, accept, event ingest and telemetry all traverse HTTP;
+- `runtime.task.create-and-start@1` creates exactly one Runtime Task and starts it durably;
+- create/start each use stable Runtime replay identity derived from Cloud `commandId`;
+- a deliberate duplicate delivery replays the same `commandId → runtimeTaskId` mapping and does not create/start a second Task;
+- Runtime reached canonical `completed` with progress revision 8 in the acceptance run;
+- Desktop emitted exactly one `desktop.cloud.task.terminal@1` event and one bounded terminal telemetry record;
+- Cloud terminal projection matched the exact Runtime task status/revision;
+- the local bridge journal retained only digest/mapping/terminal metadata and not the raw command payload.
+
+Frankfurt dev deployment was updated on 2026-09-30 and CloudFormation reached `UPDATE_COMPLETE`. Live read-back from:
+
+~~~text
+GET /contracts/remote-command-kinds/v1
+~~~
+
+confirmed both `runtime.task.create@1` and `runtime.task.create-and-start@1` are deployed.
+
+## Next serial gate
+
+The next integration phase is **I5 — Approval E2E**.
+
+~~~text
+I2 Desktop ↔ Runtime CLOSED
 → I3 login + Device Enrollment + Runtime access CLOSED
-→ I4 RemoteCommand product E2E
-→ I5 Approval
+→ I4 RemoteCommand product E2E CLOSED
+→ I5 Approval E2E
 → I6 Offline / reconnect
 ~~~

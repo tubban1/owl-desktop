@@ -32,6 +32,7 @@ export function cloudCommandDigest(command) {
     commandId: command?.commandId ?? null,
     deviceId: command?.deviceId ?? null,
     kind: command?.kind ?? null,
+    kindVersion: command?.kindVersion ?? null,
     payload: command?.payload ?? {},
     expiresAt: command?.expiresAt ?? null,
   };

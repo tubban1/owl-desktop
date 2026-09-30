@@ -453,6 +453,12 @@ export class CloudBridgeService {
         `UNSUPPORTED_COMMAND_KIND:${boundedString(command.kind, 80)}`,
       );
     }
+    if (command.kindVersion !== 1) {
+      return await this.rejectNewCommand(
+        commandId,
+        `UNSUPPORTED_COMMAND_VERSION:${boundedString(command.kind, 80)}@${boundedString(command.kindVersion, 20)}`,
+      );
+    }
 
     if (
       command.kind === "runtime.task.create" ||
