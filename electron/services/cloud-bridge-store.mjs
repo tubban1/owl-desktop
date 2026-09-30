@@ -45,6 +45,7 @@ function initialState() {
   return {
     version: 1,
     commands: {},
+    approvalDecisions: {},
     outbox: [],
   };
 }
@@ -59,7 +60,13 @@ export class CloudBridgeStore {
     if (value?.version !== 1 || typeof value.commands !== "object" || !Array.isArray(value.outbox)) {
       return initialState();
     }
-    return value;
+    return {
+      ...value,
+      approvalDecisions:
+        value.approvalDecisions && typeof value.approvalDecisions === "object"
+          ? value.approvalDecisions
+          : {},
+    };
   }
 
   write(state) {
@@ -82,6 +89,69 @@ export class CloudBridgeStore {
 
   getCommand(commandId) {
     return this.read().commands[commandId] ?? null;
+  }
+
+  getApprovalDecision(approvalDecisionId) {
+    return this.read().approvalDecisions[approvalDecisionId] ?? null;
+  }
+
+  beginApprovalDecision(decision, now = new Date().toISOString()) {
+    const state = this.read();
+    const existing = state.approvalDecisions[decision.approvalDecisionId];
+    const digest = createHash("sha256")
+      .update(
+        JSON.stringify(
+          canonicalize({
+            approvalDecisionId: decision.approvalDecisionId,
+            deviceId: decision.deviceId,
+            approvalId: decision.approvalId,
+            decision: decision.decision,
+            source: decision.source,
+          }),
+        ),
+      )
+      .digest("hex");
+    if (existing) {
+      return {
+        existing: true,
+        conflict: existing.digest !== digest,
+        record: existing,
+      };
+    }
+    const record = {
+      approvalDecisionId: decision.approvalDecisionId,
+      deviceId: decision.deviceId,
+      approvalId: decision.approvalId,
+      decision: decision.decision,
+      source: decision.source,
+      digest,
+      status: "processing",
+      receivedAt: now,
+      updatedAt: now,
+      runtimeOutcome: null,
+    };
+    state.approvalDecisions[decision.approvalDecisionId] = record;
+    this.write(state);
+    return { existing: false, conflict: false, record };
+  }
+
+  markApprovalDecisionAcknowledged(
+    approvalDecisionId,
+    runtimeOutcome,
+    now = new Date().toISOString(),
+  ) {
+    const state = this.read();
+    const record = state.approvalDecisions[approvalDecisionId];
+    if (!record) {
+      throw new Error(
+        `Unknown Cloud approval decision journal entry: ${approvalDecisionId}`,
+      );
+    }
+    record.status = "acknowledged";
+    record.runtimeOutcome = runtimeOutcome;
+    record.updatedAt = now;
+    this.write(state);
+    return record;
   }
 
   beginCommand(command, now = new Date().toISOString()) {

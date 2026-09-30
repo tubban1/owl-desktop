@@ -380,6 +380,17 @@ export class CloudBridgeService {
         await this.processCommand(command);
       }
 
+      const approvalBatch =
+        typeof this.client.pullApprovalDecisions === "function"
+          ? await this.client.pullApprovalDecisions(this.commandLimit)
+          : { decisions: [] };
+      const decisions = Array.isArray(approvalBatch?.decisions)
+        ? approvalBatch.decisions
+        : [];
+      for (const decision of decisions) {
+        await this.processApprovalDecision(decision);
+      }
+
       await this.projectRuntimeTerminalStates();
       await this.flushOutbox();
       return this.snapshot();
@@ -599,6 +610,110 @@ export class CloudBridgeService {
         });
       }
     }
+  }
+
+  async processApprovalDecision(decision) {
+    const approvalDecisionId =
+      typeof decision?.approvalDecisionId === "string"
+        ? decision.approvalDecisionId
+        : "";
+    const approvalId =
+      typeof decision?.approvalId === "string" ? decision.approvalId : "";
+    if (!approvalDecisionId || !approvalId) return;
+
+    const begun = this.store.beginApprovalDecision(decision);
+    if (begun.conflict) {
+      this.onEvent("error", "Cloud approval decision digest conflict", {
+        approvalDecisionId,
+        approvalId,
+      });
+      return;
+    }
+
+    if (begun.existing && begun.record.status === "acknowledged") {
+      await this.client.acknowledgeApprovalDecision(
+        approvalDecisionId,
+        begun.record.runtimeOutcome,
+      );
+      this.noteContact();
+      return;
+    }
+
+    if (!["approve", "deny"].includes(decision.decision)) {
+      this.onEvent("warn", "Cloud approval decision rejected locally", {
+        approvalDecisionId,
+        approvalId,
+        decision: boundedString(decision.decision, 40),
+      });
+      return;
+    }
+
+    const action =
+      decision.decision === "approve"
+        ? this.runtimeClient.approveApproval.bind(this.runtimeClient)
+        : this.runtimeClient.denyApproval.bind(this.runtimeClient);
+    const suffix = decision.decision === "approve" ? "approve" : "deny";
+
+    const result = await action(approvalId, {
+      requestId: `cloud-approval:${approvalDecisionId}:${suffix}`,
+      idempotencyKey: `cloud-approval:${approvalDecisionId}:${suffix}`,
+    });
+
+    const finalApproval =
+      typeof this.runtimeClient.getApproval === "function"
+        ? await this.runtimeClient
+            .getApproval(approvalId)
+            .catch(() => result?.approval ?? null)
+        : result?.approval ?? null;
+    const approvalState = String(finalApproval?.state ?? result?.approval?.state ?? "unknown");
+    const runtimeTaskId =
+      result?.task?.id ??
+      finalApproval?.ownerTaskId ??
+      result?.approval?.ownerTaskId ??
+      null;
+    const finalTask =
+      runtimeTaskId && typeof this.runtimeClient.getTask === "function"
+        ? await Promise.resolve(
+            this.runtimeClient.getTask(runtimeTaskId, false),
+          ).catch(() => result?.task ?? null)
+        : result?.task ?? null;
+    const taskStatus = finalTask?.status ?? result?.task?.status ?? null;
+    const outcome = {
+      approvalState,
+      ...(runtimeTaskId ? { runtimeTaskId } : {}),
+      ...(taskStatus ? { taskStatus } : {}),
+      consumed: approvalState === "consumed",
+    };
+
+    this.store.markApprovalDecisionAcknowledged(
+      approvalDecisionId,
+      outcome,
+    );
+    await this.client.acknowledgeApprovalDecision(
+      approvalDecisionId,
+      outcome,
+    );
+    this.noteContact();
+    this.queueIntegrationEvent(
+      "desktop.cloud.approval.acknowledged",
+      approvalDecisionId,
+      {
+        approvalId,
+        decision: decision.decision,
+        approvalState,
+        ...(runtimeTaskId ? { runtimeTaskId } : {}),
+        ...(taskStatus ? { taskStatus } : {}),
+      },
+      `approval:${approvalDecisionId}`,
+    );
+    this.onEvent("info", "Cloud approval decision applied to Runtime", {
+      approvalDecisionId,
+      approvalId,
+      decision: decision.decision,
+      approvalState,
+      runtimeTaskId,
+      taskStatus,
+    });
   }
 
   async projectRuntimeTerminalStates(limit = 100) {

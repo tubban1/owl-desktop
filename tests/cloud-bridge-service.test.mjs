@@ -478,6 +478,104 @@ describe("CloudBridgeService", () => {
     await setup.service.stop();
   });
 
+  it("applies one Cloud approval decision to Runtime exactly once and replays only the ack", async () => {
+    const client = createClient({
+      acknowledgeApprovalDecision: vi.fn(async (_id, outcome) => ({
+        state: "acknowledged",
+        runtimeOutcome: outcome,
+      })),
+    });
+    const runtimeClient = {
+      createTask: vi.fn(async () => ({ id: "task_1" })),
+      approveApproval: vi.fn(async () => ({
+        approval: {
+          id: "approval_1",
+          state: "consumed",
+          ownerTaskId: "task_approval",
+        },
+        task: {
+          id: "task_approval",
+          status: "completed",
+        },
+      })),
+      denyApproval: vi.fn(),
+      getTask: vi.fn(),
+    };
+    const setup = createService({ client, runtimeClient });
+    const decision = {
+      approvalDecisionId: "apd_1",
+      deviceId: "dev_1",
+      approvalId: "approval_1",
+      decision: "approve",
+      source: "control",
+    };
+
+    await setup.service.processApprovalDecision(decision);
+    await setup.service.processApprovalDecision(decision);
+
+    expect(runtimeClient.approveApproval).toHaveBeenCalledTimes(1);
+    expect(runtimeClient.approveApproval).toHaveBeenCalledWith(
+      "approval_1",
+      {
+        requestId: "cloud-approval:apd_1:approve",
+        idempotencyKey: "cloud-approval:apd_1:approve",
+      },
+    );
+    expect(client.acknowledgeApprovalDecision).toHaveBeenCalledTimes(2);
+    expect(setup.store.getApprovalDecision("apd_1")).toMatchObject({
+      status: "acknowledged",
+      runtimeOutcome: {
+        approvalState: "consumed",
+        runtimeTaskId: "task_approval",
+        taskStatus: "completed",
+        consumed: true,
+      },
+    });
+  });
+
+  it("maps a Cloud denial to Runtime deny without executing approval", async () => {
+    const client = createClient({
+      acknowledgeApprovalDecision: vi.fn(async () => ({ state: "acknowledged" })),
+    });
+    const runtimeClient = {
+      createTask: vi.fn(async () => ({ id: "task_1" })),
+      approveApproval: vi.fn(),
+      denyApproval: vi.fn(async () => ({
+        approval: {
+          id: "approval_deny",
+          state: "denied",
+          ownerTaskId: "task_deny",
+        },
+        task: {
+          id: "task_deny",
+          status: "failed",
+        },
+      })),
+      getTask: vi.fn(),
+    };
+    const setup = createService({ client, runtimeClient });
+
+    await setup.service.processApprovalDecision({
+      approvalDecisionId: "apd_deny",
+      deviceId: "dev_1",
+      approvalId: "approval_deny",
+      decision: "deny",
+      source: "control",
+    });
+
+    expect(runtimeClient.approveApproval).not.toHaveBeenCalled();
+    expect(runtimeClient.denyApproval).toHaveBeenCalledTimes(1);
+    expect(setup.store.getApprovalDecision("apd_deny")).toMatchObject({
+      status: "acknowledged",
+      runtimeOutcome: {
+        approvalState: "denied",
+        runtimeTaskId: "task_deny",
+        taskStatus: "failed",
+        consumed: false,
+      },
+    });
+  });
+
   it("heartbeats, polls and drains durable outbox in a sync cycle", async () => {
     const client = createClient();
     const setup = createService({ client });

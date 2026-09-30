@@ -149,6 +149,36 @@ export class CloudHttpClient {
     });
   }
 
+  createApprovalDecision(userJwt, deviceId, approvalId, decision, source = "control") {
+    return this.request(
+      `/v1/devices/${encodeURIComponent(deviceId)}/approvals/${encodeURIComponent(approvalId)}/decision`,
+      {
+        method: "POST",
+        auth: "user",
+        userJwt,
+        body: { decision, source },
+      },
+    );
+  }
+
+  pullApprovalDecisions(limit = 25) {
+    const bounded = Math.min(Math.max(Number(limit) || 25, 1), 100);
+    return this.request(`/device/v1/approval-decisions?limit=${bounded}`, {
+      auth: "device",
+    });
+  }
+
+  acknowledgeApprovalDecision(approvalDecisionId, outcome) {
+    return this.request(
+      `/device/v1/approval-decisions/${encodeURIComponent(approvalDecisionId)}/ack`,
+      {
+        method: "POST",
+        auth: "device",
+        body: outcome,
+      },
+    );
+  }
+
   pullCommands(limit = 25) {
     const bounded = Math.min(Math.max(Number(limit) || 25, 1), 100);
     return this.request(`/device/v1/commands?limit=${bounded}`, {

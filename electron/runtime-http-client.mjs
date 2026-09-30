@@ -92,6 +92,31 @@ export class RuntimeHttpClient {
   }
   tasks() { return this.invoke("tasks.list"); }
   approvals() { return this.invoke("approvals.list", {}); }
+  getApproval(approvalId) {
+    return this.invoke("approvals.get", { approvalId }, { timeoutMs: 10_000 });
+  }
+  approveApproval(approvalId, options = {}) {
+    return this.invoke(
+      "approvals.approve",
+      { approvalId, confirm: true },
+      {
+        timeoutMs: options.timeoutMs ?? 120_000,
+        requestId: options.requestId,
+        idempotencyKey: options.idempotencyKey,
+      },
+    );
+  }
+  denyApproval(approvalId, options = {}) {
+    return this.invoke(
+      "approvals.deny",
+      { approvalId, confirm: true },
+      {
+        timeoutMs: options.timeoutMs ?? 30_000,
+        requestId: options.requestId,
+        idempotencyKey: options.idempotencyKey,
+      },
+    );
+  }
   processes() { return this.invoke("process", { op: "list" }); }
   diagnostics(auditLimit = 40) { return this.invoke("diagnostics.get", { auditLimit }, 5000); }
   capabilities(goal = "") { return this.invoke("capabilities.get", { goal }, 5000); }
