@@ -35,7 +35,8 @@
     "prepare:icon": "node scripts/prepare-macos-icon.mjs",
     "verify:packaged-smoke": "node scripts/verify-packaged-smoke.mjs",
     "prepare:helper": "node scripts/prepare-helper-component.mjs",
-    "prepare:release-components": "npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon"
+    "prepare:release-components": "npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon",
+    "verify:local-bootstrap-live": "node scripts/verify-local-bootstrap-live.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",

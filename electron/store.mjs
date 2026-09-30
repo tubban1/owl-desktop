@@ -30,7 +30,9 @@ export class DesktopStore {
       tunnelId: "",
       cloudEnabled: false,
       cloudAutoStart: false,
-      cloudBaseUrl: process.env.OWL_CLOUD_BASE_URL?.trim() ?? "",
+      cloudBaseUrl:
+        process.env.OWL_CLOUD_BASE_URL?.trim() ||
+        "https://yh9cjtolx6.execute-api.eu-central-1.amazonaws.com",
       cloudDeviceId: "",
       cloudPollIntervalMs: 5000,
       cloudPresenceIntervalMs: 30000,

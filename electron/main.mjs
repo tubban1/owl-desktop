@@ -6,6 +6,7 @@ import { DesktopStore } from "./store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
+import { LocalRuntimeBootstrap } from "./services/local-runtime-bootstrap.mjs";
 import { TunnelSupervisor } from "./services/tunnel-supervisor.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
 import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
@@ -95,6 +96,70 @@ function runtimeClient() {
 
 function skillManagerPort() {
   return new RuntimeSkillManagerPort({ client: runtimeClient() });
+}
+
+function localRuntimeBootstrapPort(settings) {
+  try {
+    const url = new URL(settings.runtimeBaseUrl);
+    if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+      return null;
+    }
+    const port = Number(url.port || 8788);
+    return Number.isInteger(port) && port > 0 && port <= 65535
+      ? port
+      : 8788;
+  } catch {
+    return null;
+  }
+}
+
+async function ensurePackagedLocalRuntime(settings) {
+  if (!app.isPackaged) return null;
+  const port = localRuntimeBootstrapPort(settings);
+  if (!port) {
+    record(
+      "info",
+      "bootstrap",
+      "Local Runtime bootstrap skipped for non-loopback Runtime endpoint",
+      { runtimeBaseUrl: settings.runtimeBaseUrl },
+    );
+    return null;
+  }
+
+  record("info", "bootstrap", "Preparing bundled OWL Runtime", {
+    runtimeBaseUrl: settings.runtimeBaseUrl,
+    port,
+  });
+  const bootstrap = new LocalRuntimeBootstrap({
+    resourcesPath: process.resourcesPath,
+    desktopExecPath: process.execPath,
+    store,
+    runtimePort: port,
+    onEvent(level, message, meta) {
+      record(level, "bootstrap", message, meta);
+    },
+  });
+  try {
+    const result = await bootstrap.ensure();
+    record("info", "bootstrap", "Bundled OWL Runtime is ready", {
+      runtimeVersion: result.health?.runtimeVersion ?? null,
+      apiVersion: result.health?.apiVersion ?? null,
+      releaseDir: result.release?.releaseDir ?? null,
+      helperInstalled:
+        result.nativeApps?.find((item) => item.name === "Helper")?.installed ===
+        true,
+      runtimeHostInstalled:
+        result.nativeApps?.find((item) => item.name === "Runtime Host")
+          ?.installed === true,
+    });
+    return result;
+  } catch (error) {
+    record("error", "bootstrap", "Bundled OWL Runtime bootstrap failed", {
+      code: error?.code ?? "LOCAL_RUNTIME_BOOTSTRAP_FAILED",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 function runtimeEventBridgeSnapshot() {
@@ -1160,6 +1225,8 @@ if (!hasLock) {
     registerIpc();
     record("info", "desktop", "OWL Desktop started", { version: app.getVersion() });
     const settings = store.getSettings();
+    createWindow();
+    await ensurePackagedLocalRuntime(settings);
     if (settings.cloudBaseUrl?.trim()) {
       await resumeCloudAccountSession();
     }
@@ -1192,7 +1259,6 @@ if (!hasLock) {
         });
       });
     }
-    createWindow();
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
