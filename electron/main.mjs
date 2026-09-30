@@ -14,6 +14,7 @@ import { CloudAccountAuth } from "./services/cloud-account-auth.mjs";
 import { CloudEnrollmentService } from "./services/cloud-enrollment-service.mjs";
 import { CloudBridgeStore } from "./services/cloud-bridge-store.mjs";
 import { CloudBridgeService } from "./services/cloud-bridge-service.mjs";
+import { assertRuntimeCompatibility } from "./services/compatibility-v1.mjs";
 import { AgentInboxStore } from "./services/agent-inbox-store.mjs";
 import { RuntimeAgentRequestEventConsumer } from "./services/runtime-agent-request-consumer.mjs";
 import { RuntimeAgentRequestEventBridge } from "./services/runtime-agent-request-event-bridge.mjs";
@@ -418,7 +419,10 @@ async function buildCloudPresence() {
     capabilities: {
       cloudBridge: "m1-polling-v1",
       agentInbox: "v1",
-      supportedRemoteCommands: ["runtime.task.create"],
+      supportedRemoteCommands: [
+        "runtime.task.create@1",
+        "runtime.task.create-and-start@1",
+      ],
       runtimeReachable: Boolean(info),
       mcpAvailable: mcpState.status === "running",
       tunnelAvailable: tunnelSupervisor?.status().state === "running",
@@ -495,6 +499,22 @@ async function startCloudBridge() {
     return cloudBridgeSnapshot();
   }
 
+  const runtime = runtimeClient();
+  try {
+    assertRuntimeCompatibility(await runtime.info());
+  } catch (error) {
+    cloudBridgeState = {
+      status: "incompatible",
+      running: false,
+      lastErrorCode: error?.code ?? "RUNTIME_COMPATIBILITY_UNVERIFIED",
+    };
+    record("error", "compatibility", "Cloud Bridge blocked by Runtime compatibility gate", {
+      code: cloudBridgeState.lastErrorCode,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return cloudBridgeSnapshot();
+  }
+
   const client = new CloudHttpClient({
     baseUrl: settings.cloudBaseUrl,
     deviceCredential: cloudDeviceCredential(),
@@ -502,7 +522,7 @@ async function startCloudBridge() {
 
   cloudBridge = new CloudBridgeService({
     client,
-    runtimeClient: runtimeClient(),
+    runtimeClient: runtime,
     store: cloudBridgeStore,
     deviceId: settings.cloudDeviceId,
     appVersion: app.getVersion(),

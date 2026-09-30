@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 
-const SUPPORTED_COMMAND_KINDS = new Set([
-  "runtime.task.create",
-  "runtime.task.create-and-start",
-]);
+import {
+  OWL_COMPATIBILITY_V1,
+  supportsRemoteCommand,
+} from "./compatibility-v1.mjs";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -251,7 +251,9 @@ export class CloudBridgeService {
       ...this.state,
       running: this.running,
       deviceId: this.deviceId,
-      supportedCommandKinds: [...SUPPORTED_COMMAND_KINDS],
+      supportedCommandKinds: Object.entries(
+        OWL_COMPATIBILITY_V1.remoteCommands,
+      ).flatMap(([kind, versions]) => versions.map((version) => `${kind}@${version}`)),
       ...this.store.snapshot(),
     };
   }
@@ -458,16 +460,15 @@ export class CloudBridgeService {
       return await this.rejectNewCommand(commandId, "COMMAND_EXPIRED_LOCAL");
     }
 
-    if (!SUPPORTED_COMMAND_KINDS.has(command.kind)) {
-      return await this.rejectNewCommand(
-        commandId,
-        `UNSUPPORTED_COMMAND_KIND:${boundedString(command.kind, 80)}`,
+    if (!supportsRemoteCommand(command.kind, command.kindVersion)) {
+      const knownKind = ["runtime.task.create", "runtime.task.create-and-start"].includes(
+        command.kind,
       );
-    }
-    if (command.kindVersion !== 1) {
       return await this.rejectNewCommand(
         commandId,
-        `UNSUPPORTED_COMMAND_VERSION:${boundedString(command.kind, 80)}@${boundedString(command.kindVersion, 20)}`,
+        knownKind
+          ? `UNSUPPORTED_COMMAND_VERSION:${boundedString(command.kind, 80)}@${boundedString(command.kindVersion, 20)}`
+          : `UNSUPPORTED_COMMAND_KIND:${boundedString(command.kind, 80)}`,
       );
     }
 
