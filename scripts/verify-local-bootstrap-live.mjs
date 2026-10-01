@@ -56,6 +56,17 @@ if (!fs.existsSync(desktopExecPath)) {
 
 const secrets = new Map();
 const store = {
+  getSettings() {
+    return {
+      wakeName: "OWL",
+      wakeAliases: ["OWL Runtime", "AgentOS"],
+      allowedDirectories: [
+        path.join(home, "Desktop"),
+        path.join(home, "Documents"),
+        path.join(home, "Downloads"),
+      ],
+    };
+  },
   readSecret(name, project) {
     return secrets.get(`${project}:${name}`);
   },

@@ -194,6 +194,60 @@ describe("LocalRuntimeBootstrap", () => {
     expect(env).not.toContain(path.join(f.home, "Desktop"));
   });
 
+  it("accepts canonical realpaths for Runtime identity checks", async () => {
+    const f = fixture();
+    const aliasHome = path.join(f.root, "home-alias");
+    fs.symlinkSync(f.home, aliasHome, "dir");
+    const releaseDir = path.join(
+      aliasHome,
+      ".owl",
+      "releases",
+      "1.0.0-rc.4-test",
+    );
+    const stateRoot = path.join(aliasHome, ".owl-runtime");
+    fs.mkdirSync(releaseDir, { recursive: true });
+    fs.mkdirSync(stateRoot, { recursive: true });
+
+    const canonicalRelease = fs.realpathSync(releaseDir);
+    const canonicalState = fs.realpathSync(stateRoot);
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        service: "owl-runtime",
+        version: "1.0.0-rc.4",
+        publicApiVersion: "0.1",
+        runtime: {
+          mode: "production",
+          stateRoot: canonicalState,
+          codeRoot: canonicalRelease,
+        },
+      }),
+    });
+
+    const bootstrap = new LocalRuntimeBootstrap({
+      resourcesPath: f.resources,
+      desktopExecPath: "/Applications/OWL LAB Desktop.app/Contents/MacOS/OWL LAB Desktop",
+      store: f.store,
+      homeDir: aliasHome,
+      uid: 501,
+      runtimePort: 8788,
+      fetchImpl,
+    });
+
+    const probe = await bootstrap.probeRuntimeIdentity(8788, {
+      releaseDir,
+      manifest: { version: "1.0.0-rc.4" },
+    });
+
+    expect(probe).toMatchObject({
+      reachable: true,
+      exact: true,
+      stateRoot: canonicalState,
+      codeRoot: canonicalRelease,
+    });
+  });
+
   it("keeps an already healthy packaged Runtime running without launchd churn", async () => {
     const f = fixture();
     const releaseDir = path.join(

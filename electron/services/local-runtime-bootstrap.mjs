@@ -72,6 +72,18 @@ function shortSha(value) {
   return String(value || "").slice(0, 12);
 }
 
+function canonicalPath(value) {
+  if (!value) return "";
+  const resolved = path.resolve(value);
+  try {
+    return fs.realpathSync.native
+      ? fs.realpathSync.native(resolved)
+      : fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 function copyApp(source, destination) {
   const parent = path.dirname(destination);
   fs.mkdirSync(parent, { recursive: true });
@@ -469,15 +481,17 @@ export class LocalRuntimeBootstrap {
       }
       const payload = await response.json();
       const runtime = payload?.runtime ?? {};
-      const expectedCodeRoot = path.resolve(release.releaseDir);
-      const actualCodeRoot = runtime.codeRoot ? path.resolve(runtime.codeRoot) : "";
+      const expectedCodeRoot = canonicalPath(release.releaseDir);
+      const actualCodeRoot = canonicalPath(runtime.codeRoot);
+      const expectedStateRoot = canonicalPath(this.stateRoot);
+      const actualStateRoot = canonicalPath(runtime.stateRoot);
       const exact =
         payload?.ok === true &&
         payload?.service === "owl-runtime" &&
         payload?.version === release.manifest.version &&
         payload?.publicApiVersion === "0.1" &&
         runtime.mode === "production" &&
-        path.resolve(runtime.stateRoot ?? "") === path.resolve(this.stateRoot) &&
+        actualStateRoot === expectedStateRoot &&
         actualCodeRoot === expectedCodeRoot;
       return {
         reachable: true,
