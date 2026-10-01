@@ -458,3 +458,41 @@ PASS same logical owner reconnect
 ```
 
 This is also evidence that future self-dogfood verifiers must not wrap nested Runtime calls inside a conflicting outer write workspace lease.
+
+
+## AgentRequest / Skill Manager / Monitor closure
+
+Product-live verification now closes the previous uncertainty around AgentRequest and Skill Manager.
+
+### AgentRequest
+
+A real Runtime Skill Candidate validation failure produced `agent_request.proposed` into the Runtime durable public event journal. The currently running Desktop event bridge materialized that event into the canonical Desktop Inbox, and the currently running Desktop MCP at `:8790` successfully performed claim → release → reclaim → complete.
+
+A second live Candidate was repaired and produced `agent_request.withdrawn`; Desktop cancelled only the still-pending matching request. Completed coordination history remained completed.
+
+Permanent gate: `npm run verify:agent-request-product-live`.
+
+### Skill Manager
+
+The actual Desktop `RuntimeSkillManagerPort` completed submit → validate → compile test → run durable test Task → inspect evidence → promote → execute promoted User Skill → disable → re-enable → uninstall against canonical Runtime DEV.
+
+Permanent gate: `npm run verify:skill-manager-product-live`.
+
+### Monitor
+
+Desktop now includes a first-class Monitor page driven only by canonical Runtime/Desktop/Cloud projections. It shows execution topology, bounded live workload trends, AgentRequest lifecycle, Task lifecycle, Skill governance, safety/verification gates, activity-source distribution, attention queue and recent durable Tasks.
+
+The projection deliberately does not invent an aggregate verification success rate because the current lightweight Task list does not expose all per-step VerificationReceipts.
+
+Latest gate:
+
+```text
+24/24 test files PASS
+119/119 tests PASS
+verify:dev PASS
+verify:agent-request-product-live PASS
+verify:skill-manager-product-live PASS
+verify:local-e2e PASS
+```
+
+Next serialized gap: Verification Coverage.

@@ -4,15 +4,18 @@ import {
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
   Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
   AlertTriangle, ArrowRight, BrainCircuit, Clock3, FolderOpen, X,
+  ChartNoAxesCombined,
 } from "lucide-react";
 import type { AccountMeta, ActivityEntry, AgentRequest, CloudAccountStatus, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
 import { deriveWorkState } from "./workState";
+import { MonitorPage } from "./monitor/MonitorPage";
 
-type Page = "overview" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
+type Page = "overview" | "monitor" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
 
 const nav = [
   { id: "overview" as Page, label: "Home", icon: Gauge },
+  { id: "monitor" as Page, label: "Monitor", icon: ChartNoAxesCombined },
   { id: "agent-inbox" as Page, label: "Requests", icon: Inbox },
   { id: "logs" as Page, label: "Activity", icon: Activity },
   { id: "skills" as Page, label: "Skills", icon: Puzzle },
@@ -202,7 +205,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (page !== "overview") return;
+    if (page !== "overview" && page !== "monitor") return;
     const timer = window.setInterval(() => {
       setNow(Date.now());
       void refresh(false);
@@ -506,6 +509,13 @@ export default function App() {
             </section>
           </div>
         </>}
+
+        {page === "monitor" && <MonitorPage
+          snapshot={snapshot}
+          agentRequests={agentRequests}
+          activity={activityRows}
+          onRefresh={() => refresh(false)}
+        />}
 
         {page === "sessions" && <>
           <SectionHeader title="Sessions" description="Stable logical ownership identities used across Runtime reconnects." />

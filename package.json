@@ -33,6 +33,8 @@
     "verify:skill-discovery-live": "node scripts/verify-skill-discovery-live-e2e.mjs",
     "verify:runtime-agent-request-consumer": "node scripts/verify-runtime-agent-request-consumer.mjs",
     "verify:runtime-agent-request-live": "node scripts/verify-runtime-agent-request-live-e2e.mjs",
+    "verify:agent-request-product-live": "node scripts/verify-agent-request-live-e2e.mjs",
+    "verify:skill-manager-product-live": "node scripts/verify-skill-manager-live-e2e.mjs",
     "verify:release-components": "node scripts/verify-release-components.mjs",
     "prepare:tunnel": "node scripts/prepare-tunnel-components.mjs",
     "prepare:runtime-host": "node scripts/prepare-runtime-host-component.mjs",
