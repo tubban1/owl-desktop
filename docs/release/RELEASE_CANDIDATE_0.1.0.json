@@ -6,7 +6,9 @@
   "desktop": {
     "repository": "tubban1/owl-desktop",
     "assemblyGitSha": "27f6c3e",
-    "bundleIdentifier": "ai.owl.desktop"
+    "bundleIdentifier": "ai.owl.desktop",
+    "publishedToRepository": false,
+    "remoteMainAtAssembly": "e9cf174bb7fc6c51c25c30cdfeba8b195192dbc1"
   },
   "cloud": {
     "repository": "tubban1/owl-cloud",
@@ -77,6 +79,8 @@
     "artifactSha256Verify": "passed",
     "developerIdSigned": false,
     "notarized": false,
-    "blockingReason": "No valid Developer ID Application identity, APPLE_TEAM_ID, or notarization credentials are available on the current release machine."
+    "blockingReason": "No valid Developer ID Application identity, APPLE_TEAM_ID, or notarization credentials are available on the current release machine.",
+    "desktopSourcePublication": "pending",
+    "sourcePublicationReason": "Local main is a clean linear 15 commits ahead of origin/main, but OWL Runtime policy keeps git push disabled. GitHub connector bulk tree publication was not completed; no partial remote branch was created."
   }
 }

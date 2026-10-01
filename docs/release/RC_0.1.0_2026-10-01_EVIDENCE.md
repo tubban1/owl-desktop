@@ -128,3 +128,15 @@ OWL LAB Helper lacks non-ad-hoc Developer ID signature
 Therefore these artifacts are suitable for internal RC testing only. They must not be represented as a signed/notarized public release.
 
 The next public-release action is credential/provisioning work, not another code change.
+
+## Desktop source publication
+
+The Desktop code used for these artifacts is committed locally at `27f6c3e`, with release records at `11fb776`.
+
+After fetching GitHub, local Desktop main was confirmed to be a clean linear history 15 commits ahead of remote `main@e9cf174bb7fc6c51c25c30cdfeba8b195192dbc1` and 0 commits behind.
+
+OWL Runtime policy currently has Git push disabled. The available GitHub connector exposes low-level blob/tree/commit operations but no bulk source push operation; attempts to assemble the 46-file snapshot hit connector payload-wrapper limits before a remote branch or commit was created.
+
+No shell bypass was used and no partial remote integration branch was left behind.
+
+Therefore the internal RC is reproducible from the local committed source tree, but Desktop source publication to GitHub remains a separate governance step. Runtime source is already canonical on GitHub main at `4e24c19`.
