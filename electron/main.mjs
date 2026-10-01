@@ -1069,6 +1069,12 @@ function registerIpc() {
   }));
 
   ipcMain.handle("runtime:refresh", (_event, options) => runtimeSnapshot(options ?? {}));
+  ipcMain.handle("monitor:task-detail", (_event, taskId, includeResults = false) => {
+    if (typeof taskId !== "string" || !taskId.trim()) {
+      throw new Error("MONITOR_TASK_ID_REQUIRED");
+    }
+    return runtimeClient().getTask(taskId.trim(), Boolean(includeResults));
+  });
   ipcMain.handle("cloud:status", () => cloudBridgeSnapshot());
   ipcMain.handle("cloud:account-status", () => cloudAccountSnapshot());
   ipcMain.handle("cloud:login", () => beginCloudAccountLogin());

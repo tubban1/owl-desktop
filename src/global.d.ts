@@ -31,6 +31,10 @@ declare global {
       environment(): Promise<DesktopEnvironment>;
       listActivity(): Promise<ActivityEntry[]>;
       refreshRuntime(options?: { quiet?: boolean }): Promise<RuntimeSnapshot>;
+      monitorTaskDetail(
+        taskId: string,
+        includeResults?: boolean,
+      ): Promise<Record<string, unknown>>;
       cloudStatus(): Promise<CloudBridgeStatus>;
       cloudAccountStatus(): Promise<CloudAccountStatus>;
       cloudLogin(): Promise<{ status: string; provider: string; region: string | null; redirectUri: string }>;
