@@ -153,6 +153,158 @@ describe("LocalRuntimeBootstrap", () => {
     expect(launchAgent).toContain(".owl/current/dist/server.js");
   });
 
+
+  it("keeps an already healthy packaged Runtime running without launchd churn", async () => {
+    const f = fixture();
+    const releaseDir = path.join(
+      f.home,
+      ".owl",
+      "releases",
+      "1.0.0-rc.4-d6320d29941f",
+    );
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        service: "owl-runtime",
+        version: "1.0.0-rc.4",
+        publicApiVersion: "0.1",
+        runtime: {
+          mode: "production",
+          stateRoot: path.join(f.home, ".owl-runtime"),
+          codeRoot: releaseDir,
+        },
+      }),
+    });
+    const execFileImpl = vi.fn().mockResolvedValue({ stdout: "loaded" });
+
+    const bootstrap = new LocalRuntimeBootstrap({
+      resourcesPath: f.resources,
+      desktopExecPath: "/Applications/OWL LAB Desktop.app/Contents/MacOS/OWL LAB Desktop",
+      store: f.store,
+      homeDir: f.home,
+      uid: 501,
+      runtimePort: 8788,
+      fetchImpl,
+      execFileImpl,
+    });
+
+    const result = await bootstrap.ensure();
+
+    expect(result.launchd).toMatchObject({
+      skipped: true,
+      reason: "already_healthy",
+    });
+    expect(
+      execFileImpl.mock.calls.some(([, args]) => args?.[0] === "bootout"),
+    ).toBe(false);
+    expect(
+      execFileImpl.mock.calls.some(([, args]) => args?.[0] === "bootstrap"),
+    ).toBe(false);
+
+    const env = fs.readFileSync(path.join(f.home, ".owl", "runtime.env"), "utf8");
+    expect(env).toContain("OWL_RUNTIME_MODE=production");
+    expect(env).toContain(`OWL_STATE_ROOT=${path.join(f.home, ".owl-runtime")}`);
+  });
+
+  it("rejects a foreign Runtime already owning the configured port", async () => {
+    const f = fixture();
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        service: "owl-runtime",
+        version: "1.0.0-rc.4",
+        publicApiVersion: "0.1",
+        runtime: {
+          mode: "development",
+          stateRoot: path.join(f.home, ".owl-runtime-dev"),
+          codeRoot: "/tmp/owl-runtime-dev",
+        },
+      }),
+    });
+    const execFileImpl = vi.fn().mockRejectedValue(new Error("not loaded"));
+
+    const bootstrap = new LocalRuntimeBootstrap({
+      resourcesPath: f.resources,
+      desktopExecPath: "/Applications/OWL LAB Desktop.app/Contents/MacOS/OWL LAB Desktop",
+      store: f.store,
+      homeDir: f.home,
+      uid: 501,
+      runtimePort: 8788,
+      fetchImpl,
+      execFileImpl,
+    });
+
+    await expect(bootstrap.ensure()).rejects.toMatchObject({
+      code: "RUNTIME_PORT_CONFLICT",
+    });
+    expect(
+      execFileImpl.mock.calls.some(([, args]) => args?.[0] === "bootstrap"),
+    ).toBe(false);
+  });
+
+  it("retries launchctl bootstrap after a transient error 5 race", async () => {
+    const f = fixture();
+    const releaseDir = path.join(
+      f.home,
+      ".owl",
+      "releases",
+      "1.0.0-rc.4-d6320d29941f",
+    );
+    let healthCalls = 0;
+    const fetchImpl = vi.fn().mockImplementation(async () => {
+      healthCalls += 1;
+      if (healthCalls === 1) throw new Error("connect ECONNREFUSED");
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          service: "owl-runtime",
+          version: "1.0.0-rc.4",
+          publicApiVersion: "0.1",
+          runtime: {
+            mode: "production",
+            stateRoot: path.join(f.home, ".owl-runtime"),
+            codeRoot: releaseDir,
+          },
+        }),
+      };
+    });
+
+    let bootstrapAttempts = 0;
+    const execFileImpl = vi.fn().mockImplementation(async (_command, args) => {
+      if (args[0] === "print") throw new Error("not loaded");
+      if (args[0] === "bootstrap") {
+        bootstrapAttempts += 1;
+        if (bootstrapAttempts === 1) {
+          const error = new Error("Bootstrap failed: 5: Input/output error");
+          error.code = 5;
+          throw error;
+        }
+      }
+      return { stdout: "" };
+    });
+
+    const bootstrap = new LocalRuntimeBootstrap({
+      resourcesPath: f.resources,
+      desktopExecPath: "/Applications/OWL LAB Desktop.app/Contents/MacOS/OWL LAB Desktop",
+      store: f.store,
+      homeDir: f.home,
+      uid: 501,
+      runtimePort: 8788,
+      fetchImpl,
+      execFileImpl,
+    });
+
+    const result = await bootstrap.ensure();
+    expect(result.health).toMatchObject({
+      reachable: true,
+      mode: "production",
+    });
+    expect(bootstrapAttempts).toBe(2);
+  });
+
   it("is idempotent and preserves same-version native permission identities", async () => {
     const f = fixture();
     const events = [];

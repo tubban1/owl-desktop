@@ -10,30 +10,54 @@ function safeUnlink(file) {
 }
 
 export class TunnelSupervisor {
-  constructor({ onEvent = () => {} } = {}) {
+  constructor({
+    onEvent = () => {},
+    restartBaseDelayMs = 1_000,
+    restartMaxDelayMs = 30_000,
+  } = {}) {
     this.onEvent = onEvent;
     this.child = null;
     this.secretFile = null;
     this.startedAt = null;
     this.lastExit = null;
     this.config = null;
+    this.apiKey = null;
+    this.desiredRunning = false;
+    this.restartTimer = null;
+    this.restartAt = null;
+    this.restartAttempts = 0;
+    this.restartBaseDelayMs = Math.max(Number(restartBaseDelayMs) || 1_000, 10);
+    this.restartMaxDelayMs = Math.max(
+      Number(restartMaxDelayMs) || 30_000,
+      this.restartBaseDelayMs,
+    );
   }
 
   status() {
     return {
-      state: this.child ? "running" : "stopped",
+      state: this.child
+        ? "running"
+        : this.restartTimer
+          ? "restarting"
+          : "stopped",
       pid: this.child?.pid ?? null,
       startedAt: this.startedAt,
       lastExit: this.lastExit,
+      restartAt: this.restartAt,
+      restartAttempts: this.restartAttempts,
+      desiredRunning: this.desiredRunning,
       binaryPath: this.config?.binaryPath ?? null,
       tunnelIdConfigured: Boolean(this.config?.tunnelId),
       mcpUrl: this.config?.mcpUrl ?? null,
-      secretStorage: this.child ? "ephemeral-file-0600" : "os-encrypted-at-rest",
+      secretStorage: this.child
+        ? "ephemeral-file-0600"
+        : this.desiredRunning
+          ? "memory-until-restart"
+          : "os-encrypted-at-rest",
     };
   }
 
-  async start({ binaryPath, tunnelId, apiKey, mcpUrl }) {
-    if (this.child) return this.status();
+  validateConfig({ binaryPath, tunnelId, apiKey, mcpUrl }) {
     if (!binaryPath || !fs.existsSync(binaryPath)) {
       throw new Error("OWL Tunnel binary is missing.");
     }
@@ -46,6 +70,63 @@ export class TunnelSupervisor {
     if (!mcpUrl?.startsWith("http://127.0.0.1:")) {
       throw new Error("OWL Tunnel MCP target must be loopback.");
     }
+  }
+
+  clearRestartTimer() {
+    if (this.restartTimer) clearTimeout(this.restartTimer);
+    this.restartTimer = null;
+    this.restartAt = null;
+  }
+
+  scheduleRestart() {
+    if (!this.desiredRunning || this.child || this.restartTimer || !this.config || !this.apiKey) {
+      return;
+    }
+
+    const attempt = this.restartAttempts + 1;
+    const delayMs = Math.min(
+      this.restartMaxDelayMs,
+      this.restartBaseDelayMs * 2 ** Math.min(this.restartAttempts, 6),
+    );
+    this.restartAttempts = attempt;
+    this.restartAt = new Date(Date.now() + delayMs).toISOString();
+
+    this.onEvent("warn", "Tunnel restart scheduled", {
+      attempt,
+      delayMs,
+      restartAt: this.restartAt,
+    });
+
+    this.restartTimer = setTimeout(async () => {
+      this.restartTimer = null;
+      this.restartAt = null;
+      if (!this.desiredRunning) return;
+      try {
+        await this.spawnConfigured();
+      } catch (error) {
+        this.onEvent("error", "Tunnel restart failed", {
+          attempt,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        this.scheduleRestart();
+      }
+    }, delayMs);
+    this.restartTimer.unref?.();
+  }
+
+  async spawnConfigured() {
+    if (this.child) return this.status();
+    if (!this.config || !this.apiKey) {
+      throw new Error("OWL Tunnel restart configuration is unavailable.");
+    }
+
+    const { binaryPath, tunnelId, mcpUrl } = this.config;
+    this.validateConfig({
+      binaryPath,
+      tunnelId,
+      apiKey: this.apiKey,
+      mcpUrl,
+    });
 
     const tempDir = path.join(os.tmpdir(), "owl-desktop-tunnel");
     fs.mkdirSync(tempDir, { recursive: true, mode: 0o700 });
@@ -53,9 +134,8 @@ export class TunnelSupervisor {
       tempDir,
       `api-key-${process.pid}-${randomUUID()}`,
     );
-    fs.writeFileSync(secretFile, apiKey + "\n", { mode: 0o600 });
+    fs.writeFileSync(secretFile, this.apiKey + "\n", { mode: 0o600 });
     this.secretFile = secretFile;
-    this.config = { binaryPath, tunnelId, mcpUrl };
 
     const args = [
       "run",
@@ -101,7 +181,7 @@ export class TunnelSupervisor {
         code,
         signal,
       };
-      this.child = null;
+      if (this.child === child) this.child = null;
       this.startedAt = null;
       safeUnlink(this.secretFile);
       this.secretFile = null;
@@ -110,6 +190,7 @@ export class TunnelSupervisor {
         "Tunnel stopped",
         this.lastExit,
       );
+      this.scheduleRestart();
     });
 
     this.onEvent("info", "Tunnel started", {
@@ -118,21 +199,36 @@ export class TunnelSupervisor {
         ? `${tunnelId.slice(0, 8)}…${tunnelId.slice(-4)}`
         : tunnelId,
       mcpUrl,
+      restartAttempt: this.restartAttempts,
     });
     return this.status();
   }
 
+  async start({ binaryPath, tunnelId, apiKey, mcpUrl }) {
+    if (this.child) return this.status();
+    this.validateConfig({ binaryPath, tunnelId, apiKey, mcpUrl });
+    this.clearRestartTimer();
+    this.config = { binaryPath, tunnelId, mcpUrl };
+    this.apiKey = apiKey;
+    this.desiredRunning = true;
+    this.restartAttempts = 0;
+    return this.spawnConfigured();
+  }
+
   async stop() {
+    this.desiredRunning = false;
+    this.clearRestartTimer();
     const child = this.child;
     if (!child) {
       safeUnlink(this.secretFile);
       this.secretFile = null;
+      this.apiKey = null;
       return this.status();
     }
 
     await new Promise((resolve) => {
       const timeout = setTimeout(() => {
-        if (this.child) this.child.kill("SIGKILL");
+        if (this.child === child) child.kill("SIGKILL");
         resolve();
       }, 5_000);
       child.once("exit", () => {
@@ -144,6 +240,8 @@ export class TunnelSupervisor {
 
     safeUnlink(this.secretFile);
     this.secretFile = null;
+    this.apiKey = null;
+    this.restartAttempts = 0;
     return this.status();
   }
 

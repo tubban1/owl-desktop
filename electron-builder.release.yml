@@ -2,7 +2,7 @@ appId: ai.owl.desktop
 productName: OWL LAB Desktop
 asar: true
 compression: maximum
-artifactName: '${productName}-${version}-${arch}.${ext}'
+artifactName: 'OWL-LAB-Desktop-${version}-${arch}.${ext}'
 directories:
   output: release
 files:

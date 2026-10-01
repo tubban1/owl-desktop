@@ -40,6 +40,8 @@ function writeEnv(file, values) {
     "PORT",
     "OWL_WAKE_NAME",
     "ELECTRON_RUN_AS_NODE",
+    "OWL_RUNTIME_MODE",
+    "OWL_STATE_ROOT",
     "OWL_RUNTIME_ACCESS_MODE",
     "OWL_APPROVAL_MODE",
     "ALLOWED_DIRECTORIES",
@@ -328,6 +330,8 @@ export class LocalRuntimeBootstrap {
     if (!env.has("PORT")) env.set("PORT", String(this.runtimePort));
     if (!env.has("OWL_WAKE_NAME")) env.set("OWL_WAKE_NAME", "OWL");
     env.set("ELECTRON_RUN_AS_NODE", "1");
+    env.set("OWL_RUNTIME_MODE", "production");
+    env.set("OWL_STATE_ROOT", this.stateRoot);
     env.set("OWL_RUNTIME_ACCESS_MODE", "enforced");
     env.set("OWL_APPROVAL_MODE", "enforce");
     if (!env.has("ALLOWED_DIRECTORIES")) {
@@ -413,6 +417,67 @@ export class LocalRuntimeBootstrap {
     return { hostBinary, serverScript };
   }
 
+  async launchdLoaded() {
+    if (this.skipLaunchd) return false;
+    const target = `gui/${this.uid}/${this.launchdLabel}`;
+    try {
+      await this.execFileImpl("/bin/launchctl", ["print", target], {
+        timeout: 3_000,
+        maxBuffer: 1024 * 1024,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async probeRuntimeIdentity(port, release, timeoutMs = 1_000) {
+    if (this.skipLaunchd) {
+      return { reachable: false, exact: false, skipped: true };
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await this.fetchImpl(
+        `http://127.0.0.1:${port}/health`,
+        { signal: controller.signal },
+      );
+      if (!response.ok) {
+        return { reachable: true, exact: false, error: `HTTP ${response.status}` };
+      }
+      const payload = await response.json();
+      const runtime = payload?.runtime ?? {};
+      const expectedCodeRoot = path.resolve(release.releaseDir);
+      const actualCodeRoot = runtime.codeRoot ? path.resolve(runtime.codeRoot) : "";
+      const exact =
+        payload?.ok === true &&
+        payload?.service === "owl-runtime" &&
+        payload?.version === release.manifest.version &&
+        payload?.publicApiVersion === "0.1" &&
+        runtime.mode === "production" &&
+        path.resolve(runtime.stateRoot ?? "") === path.resolve(this.stateRoot) &&
+        actualCodeRoot === expectedCodeRoot;
+      return {
+        reachable: true,
+        exact,
+        payload,
+        runtimeVersion: payload?.version ?? null,
+        apiVersion: payload?.publicApiVersion ?? null,
+        mode: runtime.mode ?? null,
+        stateRoot: runtime.stateRoot ?? null,
+        codeRoot: runtime.codeRoot ?? null,
+      };
+    } catch (error) {
+      return {
+        reachable: false,
+        exact: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async restartLaunchd() {
     if (this.skipLaunchd) {
       return { skipped: true, label: this.launchdLabel };
@@ -422,11 +487,31 @@ export class LocalRuntimeBootstrap {
       timeout: 5_000,
       maxBuffer: 1024 * 1024,
     }).catch(() => undefined);
-    await this.execFileImpl(
-      "/bin/launchctl",
-      ["bootstrap", `gui/${this.uid}`, this.launchAgent],
-      { timeout: 8_000, maxBuffer: 1024 * 1024 },
-    );
+
+    const teardownDeadline = Date.now() + 4_000;
+    while (Date.now() < teardownDeadline) {
+      if (!(await this.launchdLoaded())) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    let bootstrapError = null;
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      try {
+        await this.execFileImpl(
+          "/bin/launchctl",
+          ["bootstrap", `gui/${this.uid}`, this.launchAgent],
+          { timeout: 8_000, maxBuffer: 1024 * 1024 },
+        );
+        bootstrapError = null;
+        break;
+      } catch (error) {
+        bootstrapError = error;
+        if (attempt >= 5) break;
+        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+      }
+    }
+    if (bootstrapError) throw bootstrapError;
+
     await this.execFileImpl(
       "/bin/launchctl",
       ["kickstart", "-k", target],
@@ -435,46 +520,32 @@ export class LocalRuntimeBootstrap {
     return { skipped: false, label: this.launchdLabel };
   }
 
-  async waitForHealth(token, port, timeoutMs = 20_000) {
+  async waitForHealth(_token, port, release, timeoutMs = 20_000) {
     if (this.skipLaunchd) {
       return { skipped: true, reachable: false };
     }
     const deadline = Date.now() + timeoutMs;
-    let lastError = null;
+    let lastProbe = null;
     while (Date.now() < deadline) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 1_000);
-      try {
-        const response = await this.fetchImpl(
-          `http://127.0.0.1:${port}/runtime/v0.1/info`,
-          {
-            headers: {
-              authorization: `Bearer ${token}`,
-            },
-            signal: controller.signal,
-          },
-        );
-        if (response.ok) {
-          const payload = await response.json();
-          if (payload?.ok === true && payload?.apiVersion === "0.1") {
-            return {
-              skipped: false,
-              reachable: true,
-              apiVersion: payload.apiVersion,
-              runtimeVersion: payload?.result?.runtimeVersion ?? null,
-            };
-          }
-        }
-        lastError = `HTTP ${response.status}`;
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
-      } finally {
-        clearTimeout(timer);
+      lastProbe = await this.probeRuntimeIdentity(port, release, 1_000);
+      if (lastProbe.exact) {
+        return {
+          skipped: false,
+          reachable: true,
+          apiVersion: lastProbe.apiVersion,
+          runtimeVersion: lastProbe.runtimeVersion,
+          mode: lastProbe.mode,
+          stateRoot: lastProbe.stateRoot,
+          codeRoot: lastProbe.codeRoot,
+        };
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
+    const mismatch = lastProbe?.reachable
+      ? `identity mismatch mode=${lastProbe.mode ?? "unknown"} codeRoot=${lastProbe.codeRoot ?? "unknown"}`
+      : lastProbe?.error ?? "unknown error";
     throw new Error(
-      `OWL Runtime did not become healthy on port ${port}: ${lastError ?? "unknown error"}`,
+      `OWL Runtime did not become the expected packaged Runtime on port ${port}: ${mismatch}`,
     );
   }
 
@@ -483,11 +554,51 @@ export class LocalRuntimeBootstrap {
     const release = this.installRuntimeRelease();
     const environment = this.ensureEnvironment();
     const launchAgent = this.writeLaunchAgent();
-    const launchd = await this.restartLaunchd();
-    const health = await this.waitForHealth(
-      environment.token,
-      environment.port,
-    );
+
+    let launchd;
+    let health;
+    if (this.skipLaunchd) {
+      launchd = { skipped: true, label: this.launchdLabel };
+      health = { skipped: true, reachable: false };
+    } else {
+      const loaded = await this.launchdLoaded();
+      const preflight = await this.probeRuntimeIdentity(
+        environment.port,
+        release,
+        800,
+      );
+
+      if (preflight.exact) {
+        launchd = {
+          skipped: true,
+          label: this.launchdLabel,
+          reason: "already_healthy",
+        };
+        health = {
+          skipped: false,
+          reachable: true,
+          apiVersion: preflight.apiVersion,
+          runtimeVersion: preflight.runtimeVersion,
+          mode: preflight.mode,
+          stateRoot: preflight.stateRoot,
+          codeRoot: preflight.codeRoot,
+        };
+      } else {
+        if (preflight.reachable && !loaded) {
+          const error = new Error(
+            `Port ${environment.port} is already owned by a different Runtime. Stop the conflicting process before OWL LAB can start its packaged Runtime.`,
+          );
+          error.code = "RUNTIME_PORT_CONFLICT";
+          throw error;
+        }
+        launchd = await this.restartLaunchd();
+        health = await this.waitForHealth(
+          environment.token,
+          environment.port,
+          release,
+        );
+      }
+    }
 
     return {
       ok: true,

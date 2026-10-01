@@ -6,7 +6,9 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const source = path.join(root, "assets", "owl-desktop-icon.svg");
+const preferredSource = path.join(root, "assets", "owl1254.png");
+const fallbackSource = path.join(root, "assets", "owl-desktop-icon.svg");
+const source = fs.existsSync(preferredSource) ? preferredSource : fallbackSource;
 const buildDir = path.join(root, "build");
 const output = path.join(buildDir, "icon.icns");
 
@@ -23,20 +25,23 @@ function run(command, args) {
 }
 
 if (!fs.existsSync(source)) {
-  throw new Error(`OWL Desktop icon source is missing: ${source}`);
+  throw new Error(`OWL LAB icon source is missing: ${source}`);
 }
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "owl-desktop-icon-"));
 try {
-  const previewDir = path.join(temp, "preview");
   const iconset = path.join(temp, "OWLDesktop.iconset");
-  fs.mkdirSync(previewDir, { recursive: true });
   fs.mkdirSync(iconset, { recursive: true });
-  run("/usr/bin/qlmanage", ["-t", "-s", "1024", "-o", previewDir, source]);
 
-  const sourcePng = path.join(previewDir, "owl-desktop-icon.svg.png");
-  if (!fs.existsSync(sourcePng)) {
-    throw new Error("Quick Look did not render the OWL Desktop SVG.");
+  let sourcePng = source;
+  if (path.extname(source).toLowerCase() !== ".png") {
+    const previewDir = path.join(temp, "preview");
+    fs.mkdirSync(previewDir, { recursive: true });
+    run("/usr/bin/qlmanage", ["-t", "-s", "1024", "-o", previewDir, source]);
+    sourcePng = path.join(previewDir, `${path.basename(source)}.png`);
+    if (!fs.existsSync(sourcePng)) {
+      throw new Error("Quick Look did not render the OWL LAB icon source.");
+    }
   }
 
   const variants = [
@@ -51,6 +56,7 @@ try {
     [512, "icon_512x512.png"],
     [1024, "icon_512x512@2x.png"],
   ];
+
   for (const [size, name] of variants) {
     const target = path.join(iconset, name);
     fs.copyFileSync(sourcePng, target);
@@ -66,6 +72,14 @@ try {
     throw new Error(`Unexpected icon artifact: ${info}`);
   }
 
+  const dimensions = run("/usr/bin/sips", [
+    "-g",
+    "pixelWidth",
+    "-g",
+    "pixelHeight",
+    sourcePng,
+  ]);
+
   console.log(
     JSON.stringify(
       {
@@ -73,7 +87,8 @@ try {
         source: path.relative(root, source),
         output: path.relative(root, output),
         format: "icns",
-        sourcePixels: 1024,
+        generatedSizes: variants.map(([size]) => size),
+        sourceDimensions: dimensions,
       },
       null,
       2,

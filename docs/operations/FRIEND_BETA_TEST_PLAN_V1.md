@@ -186,3 +186,33 @@ This strongly identifies `/device/v1/approval-decisions` as the current `NOT_FOU
 #### Background-mode finding
 
 Current macOS code keeps the Electron process alive when all windows close, but has no Tray/Menu Bar implementation. `Cmd+Q` correctly stops Cloud Bridge, Runtime event bridge, Tunnel and MCP. Next beta should add a menu-bar status/control surface and make background-running behavior explicit to the user.
+### Recovery hardening implementation run — 2026-10-01
+
+Automated fixes implemented in Desktop source after the first installed-dogfood session:
+
+| Area | Fix | Automated result | Live next-build result |
+| --- | --- | --- | --- |
+| MCP upstream disconnect | Once Runtime has accepted a request, upstream HTTP/tunnel disconnect no longer cancels the Runtime request | PASS: explicit accepted-request disconnect test | pending |
+| MCP reconnect/session lifecycle | Session recovery window retained, idle sessions reclaimed, hard cap prevents unbounded session growth | PASS: 25 reconnect soak; cap <= 8 in test and TTL reclaim to 0 | pending |
+| Tunnel crash | Unexpected tunnel child exit schedules bounded exponential restart; intentional stop disables restart | PASS | pending |
+| launchd error 5 race | wait for teardown + bounded bootstrap retry | PASS unit regression reproducing error 5 on first bootstrap | pending |
+| Healthy packaged Runtime startup | exact healthy packaged Runtime is left running rather than bootout/bootstrap on every Desktop launch | PASS | pending |
+| Wrong Runtime on 8788 | validate `/health` production mode/stateRoot/codeRoot/release identity; reject foreign owner with `RUNTIME_PORT_CONFLICT` | PASS | pending |
+| Runtime production state | bootstrap explicitly writes `OWL_RUNTIME_MODE=production` and `OWL_STATE_ROOT=~/.owl-runtime` | PASS | pending |
+| Runtime reconnect authorization | Runtime snapshot now refreshes current Cloud access and re-projects lease when online but not READY | build PASS; requires real restart test | **pending B6/A9** |
+| Tunnel/App branding | formal `assets/owl1254.png` now generates full macOS icns set | PASS arm64/x64 smoke packaging | visual owner check pending |
+| Artifact naming | DMG artifact naming normalized to `OWL-LAB-Desktop-<version>-<arch>` | config/build PASS | next DMG pending |
+
+Final automated regression after these changes:
+
+```text
+Vitest:             20 test files / 99 tests PASS
+TypeScript + Vite:  PASS
+release components: PASS
+packaged smoke:     PASS arm64 + x64
+formal icon source: assets/owl1254.png
+```
+
+Important boundary: these fixes make OWL resilient to transport/process interruptions inside the OWL stack. They cannot guarantee that the ChatGPT client UI or the user network never disconnects; instead, accepted work must survive such disconnects and be rediscoverable/recoverable.
+
+Do not mark A9/B6/B8 PASS until the next packaged build is installed and the owner performs real Runtime/Desktop/reboot recovery tests.

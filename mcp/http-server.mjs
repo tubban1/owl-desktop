@@ -13,6 +13,8 @@ export async function startOwlMcpHttpServer({
   mcpToken,
   agentInbox,
   onEvent = () => {},
+  sessionIdleTtlMs = 30 * 60_000,
+  maxSessions = 128,
 } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error(`Invalid OWL MCP port: ${port}`);
@@ -20,7 +22,43 @@ export async function startOwlMcpHttpServer({
 
   const app = express();
   const sessions = new Map();
+  const boundedSessionIdleTtlMs = Math.max(Number(sessionIdleTtlMs) || 0, 1_000);
+  const boundedMaxSessions = Math.max(Number(maxSessions) || 0, 8);
   app.use(express.json({ limit: "4mb" }));
+
+  function pruneTransportSessions(now = Date.now()) {
+    const staleBefore = now - boundedSessionIdleTtlMs;
+    for (const [transportSessionId, session] of sessions) {
+      const lastSeenMs =
+        session.lastSeenAtMs ??
+        Date.parse(session.lastSeenAt ?? session.createdAt ?? "") ??
+        0;
+      if (lastSeenMs <= staleBefore) {
+        sessions.delete(transportSessionId);
+        void session.transport.close().catch(() => undefined);
+        onEvent("info", "MCP transport session reclaimed", {
+          transportSessionId,
+          reason: "idle_ttl",
+        });
+      }
+    }
+
+    if (sessions.size <= boundedMaxSessions) return;
+    const oldest = [...sessions.entries()]
+      .sort(([, left], [, right]) =>
+        (left.lastSeenAtMs ?? 0) - (right.lastSeenAtMs ?? 0),
+      )
+      .slice(0, sessions.size - boundedMaxSessions);
+
+    for (const [transportSessionId, session] of oldest) {
+      sessions.delete(transportSessionId);
+      void session.transport.close().catch(() => undefined);
+      onEvent("warn", "MCP transport session reclaimed", {
+        transportSessionId,
+        reason: "session_cap",
+      });
+    }
+  }
 
   function authorized(req) {
     if (!mcpToken) return true;
@@ -32,34 +70,43 @@ export async function startOwlMcpHttpServer({
     res.status(401).json({ error: "Unauthorized" });
   }
 
+  function removeTransportSession(transportSessionId, reason) {
+    if (!transportSessionId || !sessions.has(transportSessionId)) return false;
+    sessions.delete(transportSessionId);
+    onEvent("info", "MCP transport session closed", {
+      transportSessionId,
+      reason,
+    });
+    return true;
+  }
+
   function createTransportSession() {
     const server = createOwlMcpServer();
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => {
+        const now = Date.now();
         sessions.set(id, {
           server,
           transport,
-          createdAt: new Date().toISOString(),
-          lastSeenAt: new Date().toISOString(),
+          createdAt: new Date(now).toISOString(),
+          lastSeenAt: new Date(now).toISOString(),
+          lastSeenAtMs: now,
         });
+        pruneTransportSessions(now);
         onEvent("info", "MCP transport session opened", { transportSessionId: id });
       },
     });
 
     transport.onclose = () => {
-      if (transport.sessionId) {
-        sessions.delete(transport.sessionId);
-        onEvent("info", "MCP transport session closed", {
-          transportSessionId: transport.sessionId,
-        });
-      }
+      removeTransportSession(transport.sessionId, "transport_close");
     };
 
     return { server, transport };
   }
 
   app.all("/mcp", requireAuth, async (req, res) => {
+    pruneTransportSessions();
     const suppliedSessionId =
       typeof req.headers["mcp-session-id"] === "string"
         ? req.headers["mcp-session-id"]
@@ -91,20 +138,12 @@ export async function startOwlMcpHttpServer({
       active.runtimeSessionId = identity.runtimeSessionId;
       active.ownerStable = identity.stable;
       active.ownerSource = identity.source;
+      // Once a tool request has been accepted by OWL MCP, do not bind Runtime
+      // execution lifetime to the upstream HTTP connection. ChatGPT/tunnel
+      // reconnects must not cancel an already-dispatched Runtime operation.
+      // Runtime timeouts, policy, approval and durable-task semantics remain
+      // the execution authority.
       const requestAbort = new AbortController();
-
-      const abort = (reason) => {
-        if (!requestAbort.signal.aborted) {
-          requestAbort.abort(new Error(reason));
-        }
-      };
-      const onAborted = () => abort("MCP request aborted by client.");
-      const onClosed = () => {
-        if (!res.writableEnded) abort("MCP response closed before completion.");
-      };
-
-      req.once("aborted", onAborted);
-      res.once("close", onClosed);
 
       const body = req.body ?? {};
       const suppliedIdempotencyKey =
@@ -116,30 +155,31 @@ export async function startOwlMcpHttpServer({
           ? `owl-mcp:${transportSessionId}:${String(body.id)}`
           : `owl-mcp:${randomUUID()}`;
 
-      active.lastSeenAt = new Date().toISOString();
+      const seenAt = Date.now();
+      active.lastSeenAt = new Date(seenAt).toISOString();
+      active.lastSeenAtMs = seenAt;
 
-      try {
-        await withMcpRequestContext(
-          {
-            runtimeBaseUrl,
-            runtimeToken,
-            runtimeSessionId: identity.runtimeSessionId,
-            ownerStable: identity.stable,
-            ownerSource: identity.source,
-            transportSessionId,
-            runtimeRequestId,
-            logicalRequestId:
-              body?.id !== undefined ? String(body.id) : runtimeRequestId,
-            clientIdempotencyKey: suppliedIdempotencyKey || undefined,
-            signal: requestAbort.signal,
-            agentInbox,
-            onEvent,
-          },
-          () => active.transport.handleRequest(req, res, req.body),
-        );
-      } finally {
-        req.off("aborted", onAborted);
-        res.off("close", onClosed);
+      await withMcpRequestContext(
+        {
+          runtimeBaseUrl,
+          runtimeToken,
+          runtimeSessionId: identity.runtimeSessionId,
+          ownerStable: identity.stable,
+          ownerSource: identity.source,
+          transportSessionId,
+          runtimeRequestId,
+          logicalRequestId:
+            body?.id !== undefined ? String(body.id) : runtimeRequestId,
+          clientIdempotencyKey: suppliedIdempotencyKey || undefined,
+          signal: requestAbort.signal,
+          agentInbox,
+          onEvent,
+        },
+        () => active.transport.handleRequest(req, res, req.body),
+      );
+
+      if (req.method === "DELETE" && suppliedSessionId) {
+        removeTransportSession(suppliedSessionId, "client_delete");
       }
     } catch (error) {
       onEvent("error", "MCP request failed", {
@@ -205,6 +245,7 @@ export async function startOwlMcpHttpServer({
   });
 
   function snapshot() {
+    pruneTransportSessions();
     return {
       sessionCount: sessions.size,
       sessions: [...sessions.entries()].map(([transportSessionId, session]) => ({
@@ -233,7 +274,10 @@ export async function startOwlMcpHttpServer({
     port: actualPort,
     url,
     runtimeBaseUrl,
-    sessionCount: () => sessions.size,
+    sessionCount: () => {
+      pruneTransportSessions();
+      return sessions.size;
+    },
     snapshot,
     close,
   };

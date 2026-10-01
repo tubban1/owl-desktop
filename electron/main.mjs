@@ -439,6 +439,47 @@ async function resumeCloudAccountSession() {
   }
 }
 
+async function recoverRuntimeAccessAfterReconnect() {
+  if (cloudAccountState.status !== "ready") return null;
+  try {
+    const service = cloudEnrollmentService ?? ensureCloudEnrollmentService();
+    service.recoverDeviceIdFromCredential();
+    const resumed = await service.resumeFromRefreshToken();
+    if (!resumed) return null;
+
+    const runtimeAccess = await safeSyncRuntimeAccess(
+      resumed.account ?? cloudAccountState.account ?? null,
+      resumed.access ?? null,
+      resumed.deviceId ?? cloudAccountState.deviceId ?? null,
+    );
+    cloudAccountState = {
+      ...cloudAccountState,
+      status: "ready",
+      account: resumed.account ?? cloudAccountState.account ?? null,
+      access: resumed.access ?? null,
+      runtimeAccess,
+      deviceId: resumed.deviceId ?? cloudAccountState.deviceId ?? null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+    };
+    record("info", "runtime-access", "Runtime access recovered after reconnect", {
+      state: runtimeAccess?.state ?? null,
+      deviceId: cloudAccountState.deviceId,
+    });
+    mainWindow?.webContents?.send(
+      "cloud:account-updated",
+      cloudAccountSnapshot(),
+    );
+    return runtimeAccess;
+  } catch (error) {
+    record("warn", "runtime-access", "Runtime reconnect authorization failed", {
+      code: error?.code ?? null,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 async function logoutCloudAccount() {
   const service = cloudEnrollmentService ?? ensureCloudEnrollmentService();
   service.clearAccountSession();
@@ -739,13 +780,25 @@ async function runtimeSnapshot() {
     ]);
 
   const online = info.status === "fulfilled";
+  let effectiveRuntimeAccess =
+    runtimeAccess.status === "fulfilled" ? runtimeAccess.value : null;
+
+  if (
+    online &&
+    cloudAccountState.status === "ready" &&
+    cloudAccountState.access?.canRun === true &&
+    effectiveRuntimeAccess?.state !== "READY"
+  ) {
+    const recovered = await recoverRuntimeAccessAfterReconnect();
+    if (recovered) effectiveRuntimeAccess = recovered;
+  }
+
   const result = {
     mode: online ? "live" : "offline",
     checkedAt: new Date().toISOString(),
     latencyMs: Date.now() - started,
     info: info.status === "fulfilled" ? info.value : null,
-    runtimeAccess:
-      runtimeAccess.status === "fulfilled" ? runtimeAccess.value : null,
+    runtimeAccess: effectiveRuntimeAccess,
     health: health.status === "fulfilled" ? health.value : null,
     tasks: tasks.status === "fulfilled" ? tasks.value : null,
     approvals: approvals.status === "fulfilled" ? approvals.value : null,

@@ -53,6 +53,65 @@ describe("TunnelSupervisor", () => {
     expect(fs.existsSync(secretPath)).toBe(false);
   });
 
+
+  it("automatically restarts after an unexpected tunnel exit", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-tunnel-restart-test-"));
+    scratch.push(dir);
+    const binary = path.join(dir, "fake-tunnel");
+    const counter = path.join(dir, "count");
+    fs.writeFileSync(
+      binary,
+      [
+        "#!/bin/sh",
+        `COUNT_FILE=${JSON.stringify(counter)}`,
+        "COUNT=0",
+        "if [ -f \"$COUNT_FILE\" ]; then COUNT=$(cat \"$COUNT_FILE\"); fi",
+        "COUNT=$((COUNT + 1))",
+        "printf '%s' \"$COUNT\" > \"$COUNT_FILE\"",
+        "if [ \"$COUNT\" -eq 1 ]; then exit 17; fi",
+        "trap 'exit 0' TERM INT",
+        "while true; do sleep 1; done",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const events = [];
+    const supervisor = new TunnelSupervisor({
+      restartBaseDelayMs: 20,
+      restartMaxDelayMs: 40,
+      onEvent(level, message, meta) {
+        events.push({ level, message, meta });
+      },
+    });
+    supervisors.push(supervisor);
+
+    await supervisor.start({
+      binaryPath: binary,
+      tunnelId: "tunnel_restart_123456",
+      apiKey: "not-a-real-secret",
+      mcpUrl: "http://127.0.0.1:8790/mcp",
+    });
+
+    const deadline = Date.now() + 1_500;
+    while (Date.now() < deadline) {
+      const count = fs.existsSync(counter)
+        ? Number(fs.readFileSync(counter, "utf8"))
+        : 0;
+      if (count >= 2 && supervisor.status().state === "running") break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    expect(Number(fs.readFileSync(counter, "utf8"))).toBeGreaterThanOrEqual(2);
+    expect(supervisor.status()).toMatchObject({
+      state: "running",
+      desiredRunning: true,
+    });
+    expect(
+      events.some((event) => event.message === "Tunnel restart scheduled"),
+    ).toBe(true);
+  });
+
   it("refuses a non-loopback MCP target", async () => {
     const supervisor = new TunnelSupervisor();
     supervisors.push(supervisor);
