@@ -162,6 +162,12 @@ export type CloudRemoteCommandSummary = {
   kindVersion: number;
   status: string;
   label: string;
+  clientSubmissionId: string | null;
+  orchestration: {
+    orchestrationId: string | null;
+    label: string | null;
+    parentTaskId: string | null;
+  } | null;
   createdAt: string | null;
   expiresAt: string | null;
   dispatchedAt: string | null;
@@ -316,6 +322,48 @@ export type RuntimeEventBridgeStatus = {
   };
 };
 
+export type PlannerCheckpoint = {
+  schemaVersion: 1;
+  revision: number;
+  status:
+    | "active"
+    | "waiting_runtime"
+    | "waiting_user"
+    | "waiting_external"
+    | "completed";
+  goal: string;
+  phase: string | null;
+  summary: string | null;
+  completed: string[];
+  nextActions: string[];
+  workspace: {
+    repo?: string;
+    worktree?: string;
+    commit?: string;
+  } | null;
+  orchestrationId: string | null;
+  taskIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
+export type PlannerContinuationOwner = {
+  ownerId: string;
+  plannerConnected: boolean;
+  connectedTransportCount: number;
+  lastTransportSeenAt: string | null;
+  lastDisconnectedAt: string | null;
+  checkpoint: PlannerCheckpoint | null;
+  updatedAt: string | null;
+};
+
+export type PlannerContinuationSummary = {
+  activeCheckpointCount: number;
+  connectedOwnerCount: number;
+  latestActive: PlannerContinuationOwner | null;
+};
+
 export type RuntimeSnapshot = {
   mode: "live" | "offline";
   checkedAt: string;
@@ -343,6 +391,7 @@ export type RuntimeSnapshot = {
       createdAt: string;
       lastSeenAt: string;
     }>;
+    continuation?: PlannerContinuationSummary;
   };
   host: HostStatus | null;
   tunnel: TunnelStatus;

@@ -410,6 +410,7 @@ export default function App() {
     runtimeEventStatus,
     claimedAgentRequests,
     pendingAgentRequests,
+    plannerContinuation: snapshot?.mcp.continuation,
     wakeName: settings?.wakeName,
     checkedAt: snapshot?.checkedAt,
     now,
@@ -423,6 +424,7 @@ export default function App() {
     runtimeEventStatus,
     claimedAgentRequests,
     pendingAgentRequests,
+    snapshot?.mcp.continuation,
     settings?.wakeName,
     snapshot?.checkedAt,
   ]);

@@ -168,6 +168,53 @@ function sanitizeTaskStep(step) {
   };
 }
 
+function sanitizeBoundedText(value, code, maxLength, required = false) {
+  if (value === undefined) {
+    if (required) invalid(code);
+    return undefined;
+  }
+  if (typeof value !== "string") invalid(code);
+  const normalized = value.trim();
+  if (
+    !normalized ||
+    normalized.length > maxLength ||
+    /[\u0000-\u001f\u007f]/.test(normalized)
+  ) {
+    invalid(code);
+  }
+  return normalized;
+}
+
+function sanitizeTaskOrchestration(value) {
+  if (value === undefined) return undefined;
+  if (!isObject(value)) invalid("TASK_ORCHESTRATION_OBJECT_REQUIRED");
+  const orchestrationId = sanitizeBoundedText(
+    value.orchestrationId,
+    "TASK_ORCHESTRATION_ID_INVALID",
+    160,
+    true,
+  );
+  const label = sanitizeBoundedText(
+    value.label,
+    "TASK_ORCHESTRATION_LABEL_INVALID",
+    240,
+  );
+  const parentTaskId = sanitizeBoundedText(
+    value.parentTaskId,
+    "TASK_ORCHESTRATION_PARENT_INVALID",
+    200,
+  );
+  const allowed = new Set(["orchestrationId", "label", "parentTaskId"]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) invalid(`TASK_ORCHESTRATION_FIELD_UNSUPPORTED:${key}`);
+  }
+  return {
+    orchestrationId,
+    ...(label ? { label } : {}),
+    ...(parentTaskId ? { parentTaskId } : {}),
+  };
+}
+
 function validateTaskCreatePayload(payload) {
   if (!isObject(payload)) invalid("PAYLOAD_OBJECT_REQUIRED");
   if (typeof payload.label !== "string" || !payload.label.trim()) {
@@ -185,7 +232,13 @@ function validateTaskCreatePayload(payload) {
   if (payload.failFast !== undefined && typeof payload.failFast !== "boolean") {
     invalid("TASK_FAIL_FAST_INVALID");
   }
+  sanitizeBoundedText(
+    payload.clientSubmissionId,
+    "TASK_CLIENT_SUBMISSION_ID_INVALID",
+    160,
+  );
 
+  const orchestration = sanitizeTaskOrchestration(payload.orchestration);
   const executionTarget = sanitizeExecutionTarget(payload.executionTarget);
   return {
     label: payload.label,
@@ -196,6 +249,7 @@ function validateTaskCreatePayload(payload) {
     ...(typeof payload.failFast === "boolean"
       ? { failFast: payload.failFast }
       : {}),
+    ...(orchestration ? { orchestration } : {}),
     ...(executionTarget ? { executionTarget } : {}),
   };
 }

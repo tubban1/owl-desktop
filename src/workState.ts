@@ -1,4 +1,8 @@
-import type { AgentRequest, RuntimeEventBridgeStatus } from "./types";
+import type {
+  AgentRequest,
+  PlannerContinuationSummary,
+  RuntimeEventBridgeStatus,
+} from "./types";
 
 export type WorkStateKind =
   | "working"
@@ -48,6 +52,7 @@ export function deriveWorkState({
   runtimeEventStatus,
   claimedAgentRequests,
   pendingAgentRequests,
+  plannerContinuation,
   wakeName,
   checkedAt,
   now,
@@ -60,10 +65,18 @@ export function deriveWorkState({
   runtimeEventStatus?: RuntimeEventBridgeStatus | null;
   claimedAgentRequests: AgentRequest[];
   pendingAgentRequests: AgentRequest[];
+  plannerContinuation?: PlannerContinuationSummary | null;
   wakeName?: string | null;
   checkedAt?: string | null;
   now: number;
 }): WorkState {
+  const plannerOwner = plannerContinuation?.latestActive ?? null;
+  const plannerCheckpoint =
+    plannerOwner?.checkpoint?.status !== "completed"
+      ? plannerOwner?.checkpoint ?? null
+      : null;
+  const plannerTransportMissing =
+    Boolean(plannerCheckpoint) && plannerOwner?.plannerConnected !== true;
   const waitingTask = taskRows.find((task) =>
     task.status === "waiting_approval" ||
     task.status === "blocked" ||
@@ -185,9 +198,11 @@ export function deriveWorkState({
         "Executing the current task.",
       signal: stale
         ? `No meaningful progress for ${durationLabel(now - lastMeaningfulMs)}`
-        : lastMeaningfulAt
-          ? `Progress ${durationLabel(now - lastMeaningfulMs)} ago`
-          : "Work is active",
+        : plannerTransportMissing
+          ? "Runtime continues — ChatGPT transport is not connected"
+          : lastMeaningfulAt
+            ? `Progress ${durationLabel(now - lastMeaningfulMs)} ago`
+            : "Work is active",
       progress:
         total > 0 ? Math.min(100, Math.max(0, (succeeded / total) * 100)) : null,
       lastChangedAt: lastMeaningfulAt,
@@ -202,9 +217,11 @@ export function deriveWorkState({
       label: "Working",
       title: "Background process running",
       detail: shortCommand(process.command),
-      signal: Number.isFinite(startedAt)
-        ? `Running for ${durationLabel(now - startedAt)}`
-        : "Process is active",
+      signal: plannerTransportMissing
+        ? "Runtime continues — ChatGPT transport is not connected"
+        : Number.isFinite(startedAt)
+          ? `Running for ${durationLabel(now - startedAt)}`
+          : "Process is active",
       progress: null,
       lastChangedAt: process.startedAt ?? null,
     };
@@ -228,6 +245,27 @@ export function deriveWorkState({
         claimedAgentRequests[0]?.updatedAt ??
         pendingAgentRequests[0]?.updatedAt ??
         null,
+    };
+  }
+
+  if (plannerCheckpoint) {
+    const nextAction = plannerCheckpoint.nextActions?.[0] ?? null;
+    return {
+      state: "waiting",
+      label: "Waiting",
+      title: plannerCheckpoint.goal,
+      detail:
+        plannerCheckpoint.summary ??
+        (plannerCheckpoint.phase
+          ? `Saved planner checkpoint at “${plannerCheckpoint.phase}”.`
+          : "A planner recovery point is saved for this work."),
+      signal: plannerTransportMissing
+        ? "Waiting for ChatGPT to reconnect — recovery point saved"
+        : nextAction
+          ? `Ready to resume — next: ${nextAction}`
+          : "Planner checkpoint active — ready to resume",
+      progress: null,
+      lastChangedAt: plannerCheckpoint.updatedAt ?? null,
     };
   }
 

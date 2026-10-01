@@ -15,6 +15,9 @@ import { CloudHttpClient } from "./services/cloud-http-client.mjs";
 import { CloudAccountAuth } from "./services/cloud-account-auth.mjs";
 import { CloudEnrollmentService } from "./services/cloud-enrollment-service.mjs";
 import { CloudControlPlaneService } from "./services/cloud-control-plane-service.mjs";
+import { RemoteSubmissionStore } from "./services/remote-submission-store.mjs";
+import { RemoteDeviceControlService } from "./services/remote-device-control-service.mjs";
+import { PlannerContinuationStore } from "./services/planner-continuation-store.mjs";
 import { buildSafeDeviceCapabilityCard } from "./services/device-capability-card.mjs";
 import { CloudBridgeStore } from "./services/cloud-bridge-store.mjs";
 import { CloudBridgeService } from "./services/cloud-bridge-service.mjs";
@@ -33,6 +36,8 @@ let store;
 let identityVault;
 let tunnelSupervisor;
 let cloudBridgeStore;
+let remoteSubmissionStore;
+let plannerContinuationStore;
 let cloudAccountAuth;
 let cloudEnrollmentService;
 let pendingCloudAuthCallbackUrl = null;
@@ -291,6 +296,16 @@ function cloudControlPlane() {
     cloudClient: client,
     auth,
     store,
+  });
+}
+
+function remoteDeviceControl() {
+  if (!remoteSubmissionStore) {
+    throw new Error("Remote submission store is not initialized.");
+  }
+  return new RemoteDeviceControlService({
+    controlPlane: cloudControlPlane(),
+    store: remoteSubmissionStore,
   });
 }
 
@@ -872,6 +887,8 @@ async function startMcp() {
       mcpToken: mcpToken(),
       fallbackOwnerId: settings.sessionId,
       agentInbox,
+      remoteDeviceControl: remoteDeviceControl(),
+      plannerContinuation: plannerContinuationStore,
       onEvent(level, message, meta) {
         record(level, "mcp", message, meta);
       },
@@ -1093,9 +1110,6 @@ function registerIpc() {
   );
   ipcMain.handle("cloud:commands:list", (_event, deviceId, limit) =>
     cloudControlPlane().listCommands(deviceId, limit),
-  );
-  ipcMain.handle("cloud:commands:get", (_event, commandId) =>
-    cloudControlPlane().getCommand(commandId),
   );
   ipcMain.handle("cloud:commands:create", async (_event, deviceId, input) => {
     const command = await cloudControlPlane().createCommand(deviceId, input);
@@ -1454,6 +1468,13 @@ if (!hasLock) {
     cloudBridgeStore = new CloudBridgeStore({
       file: path.join(app.getPath("userData"), "cloud-bridge-state.json"),
     });
+    remoteSubmissionStore = new RemoteSubmissionStore({
+      file: path.join(app.getPath("userData"), "remote-submissions.json"),
+    });
+    plannerContinuationStore = new PlannerContinuationStore({
+      file: path.join(app.getPath("userData"), "planner-continuation.json"),
+    });
+    plannerContinuationStore.recoverConnectedTransports("desktop_restart");
     agentInbox = new AgentInboxStore({
       file: path.join(app.getPath("userData"), "agent-inbox.json"),
     });

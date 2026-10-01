@@ -23,8 +23,6 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   cloudListDevices: () => ipcRenderer.invoke("cloud:devices:list"),
   cloudListCommands: (deviceId, limit) =>
     ipcRenderer.invoke("cloud:commands:list", deviceId, limit),
-  cloudGetCommand: (commandId) =>
-    ipcRenderer.invoke("cloud:commands:get", commandId),
   cloudCreateCommand: (deviceId, input) =>
     ipcRenderer.invoke("cloud:commands:create", deviceId, input),
   cloudCancelCommand: (commandId) =>

@@ -44,6 +44,27 @@ function safeCommand(command) {
       typeof payload.label === "string" && payload.label.trim()
         ? payload.label.trim()
         : String(command?.kind ?? "Remote task"),
+    clientSubmissionId:
+      typeof payload.clientSubmissionId === "string"
+        ? payload.clientSubmissionId
+        : null,
+    orchestration:
+      payload.orchestration && typeof payload.orchestration === "object"
+        ? {
+            orchestrationId:
+              typeof payload.orchestration.orchestrationId === "string"
+                ? payload.orchestration.orchestrationId
+                : null,
+            label:
+              typeof payload.orchestration.label === "string"
+                ? payload.orchestration.label
+                : null,
+            parentTaskId:
+              typeof payload.orchestration.parentTaskId === "string"
+                ? payload.orchestration.parentTaskId
+                : null,
+          }
+        : null,
     createdAt:
       typeof command?.createdAt === "string" ? command.createdAt : null,
     expiresAt:
@@ -137,12 +158,43 @@ export class CloudControlPlaneService {
     return commands.map(safeCommand).filter((command) => command.commandId);
   }
 
-  async getCommand(commandId) {
+  async findTaskTerminalEvent(deviceId, commandId, limit = 100) {
+    if (!deviceId) {
+      throw codedError("DEVICE_ID_REQUIRED", "deviceId is required.");
+    }
     if (!commandId) {
       throw codedError("COMMAND_ID_REQUIRED", "commandId is required.");
     }
     const userJwt = await this.userJwt();
-    return safeCommand(await this.cloudClient.getCommand(userJwt, commandId));
+    const result = await this.cloudClient.listDeviceEvents(
+      userJwt,
+      deviceId,
+      limit,
+    );
+    const events = Array.isArray(result?.events) ? result.events : [];
+    const event = events.find(
+      (entry) =>
+        entry?.eventType === "desktop.cloud.task.terminal" &&
+        entry?.correlationId === commandId,
+    );
+    if (!event) return null;
+    const payload =
+      event.payload && typeof event.payload === "object" ? event.payload : {};
+    return {
+      eventId: typeof event.eventId === "string" ? event.eventId : null,
+      occurredAt:
+        typeof event.occurredAt === "string" ? event.occurredAt : null,
+      commandId,
+      runtimeTaskId:
+        typeof payload.runtimeTaskId === "string"
+          ? payload.runtimeTaskId
+          : null,
+      status: typeof payload.status === "string" ? payload.status : null,
+      progressRevision:
+        Number.isInteger(payload.progressRevision)
+          ? payload.progressRevision
+          : null,
+    };
   }
 
   async createCommand(deviceId, input) {

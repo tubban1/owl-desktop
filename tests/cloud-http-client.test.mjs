@@ -64,6 +64,9 @@ describe("CloudHttpClient", () => {
       if (String(url).includes("/commands?limit=25")) {
         return jsonResponse({ commands: [] });
       }
+      if (String(url).includes("/events?limit=50")) {
+        return jsonResponse({ events: [] });
+      }
       if (init.method === "POST") {
         return jsonResponse({
           commandId: "cmd_1",
@@ -92,7 +95,7 @@ describe("CloudHttpClient", () => {
 
     await client.listDevices("jwt");
     await client.listCommands("jwt", "dev_1", 25);
-    await client.getCommand("jwt", "cmd_1");
+    await client.listDeviceEvents("jwt", "dev_1", 50);
     await client.createCommand("jwt", "dev_1", {
       kind: "runtime.task.create",
       kindVersion: 1,
@@ -106,7 +109,7 @@ describe("CloudHttpClient", () => {
     expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
       "https://cloud.example.test/v1/devices",
       "https://cloud.example.test/v1/devices/dev_1/commands?limit=25",
-      "https://cloud.example.test/v1/commands/cmd_1",
+      "https://cloud.example.test/v1/devices/dev_1/events?limit=50",
       "https://cloud.example.test/v1/devices/dev_1/commands",
       "https://cloud.example.test/v1/commands/cmd_1/cancel",
     ]);

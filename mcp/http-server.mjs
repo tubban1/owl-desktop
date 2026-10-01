@@ -13,9 +13,11 @@ export async function startOwlMcpHttpServer({
   mcpToken,
   fallbackOwnerId,
   agentInbox,
+  remoteDeviceControl,
+  plannerContinuation,
   onEvent = () => {},
-  sessionIdleTtlMs = 30 * 60_000,
-  maxSessions = 128,
+  sessionIdleTtlMs = 5 * 60_000,
+  maxSessions = 32,
 } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error(`Invalid OWL MCP port: ${port}`);
@@ -23,6 +25,7 @@ export async function startOwlMcpHttpServer({
 
   const app = express();
   const sessions = new Map();
+  plannerContinuation?.recoverConnectedTransports?.("mcp_restart");
   const boundedSessionIdleTtlMs = Math.max(Number(sessionIdleTtlMs) || 0, 1_000);
   const boundedMaxSessions = Math.max(Number(maxSessions) || 0, 8);
   app.use(express.json({ limit: "4mb" }));
@@ -36,6 +39,13 @@ export async function startOwlMcpHttpServer({
         0;
       if (lastSeenMs <= staleBefore) {
         sessions.delete(transportSessionId);
+        if (session.ownerStable === true) {
+          plannerContinuation?.noteTransportDisconnected?.(
+            session.runtimeSessionId,
+            transportSessionId,
+            "idle_ttl",
+          );
+        }
         void session.transport.close().catch(() => undefined);
         onEvent("info", "MCP transport session reclaimed", {
           transportSessionId,
@@ -53,6 +63,13 @@ export async function startOwlMcpHttpServer({
 
     for (const [transportSessionId, session] of oldest) {
       sessions.delete(transportSessionId);
+      if (session.ownerStable === true) {
+        plannerContinuation?.noteTransportDisconnected?.(
+          session.runtimeSessionId,
+          transportSessionId,
+          "session_cap",
+        );
+      }
       void session.transport.close().catch(() => undefined);
       onEvent("warn", "MCP transport session reclaimed", {
         transportSessionId,
@@ -73,7 +90,15 @@ export async function startOwlMcpHttpServer({
 
   function removeTransportSession(transportSessionId, reason) {
     if (!transportSessionId || !sessions.has(transportSessionId)) return false;
+    const session = sessions.get(transportSessionId);
     sessions.delete(transportSessionId);
+    if (session?.ownerStable === true) {
+      plannerContinuation?.noteTransportDisconnected?.(
+        session.runtimeSessionId,
+        transportSessionId,
+        reason,
+      );
+    }
     onEvent("info", "MCP transport session closed", {
       transportSessionId,
       reason,
@@ -156,6 +181,16 @@ export async function startOwlMcpHttpServer({
       active.runtimeSessionId = identity.runtimeSessionId;
       active.ownerStable = identity.stable;
       active.ownerSource = identity.source;
+      if (
+        identity.stable &&
+        typeof transportSessionId === "string" &&
+        !transportSessionId.startsWith("bootstrap:")
+      ) {
+        plannerContinuation?.noteTransportActivity?.(
+          identity.runtimeSessionId,
+          transportSessionId,
+        );
+      }
       // Once a tool request has been accepted by OWL MCP, do not bind Runtime
       // execution lifetime to the upstream HTTP connection. ChatGPT/tunnel
       // reconnects must not cancel an already-dispatched Runtime operation.
@@ -191,6 +226,8 @@ export async function startOwlMcpHttpServer({
           clientIdempotencyKey: suppliedIdempotencyKey || undefined,
           signal: requestAbort.signal,
           agentInbox,
+          remoteDeviceControl,
+          plannerContinuation,
           onEvent,
         },
         () => active.transport.handleRequest(req, res, req.body),
@@ -234,6 +271,15 @@ export async function startOwlMcpHttpServer({
           highestPriority: null,
           byType: {},
         },
+        sessionPolicy: {
+          idleTtlMs: boundedSessionIdleTtlMs,
+          maxSessions: boundedMaxSessions,
+        },
+        plannerContinuation: plannerContinuation?.summary?.() ?? {
+          activeCheckpointCount: 0,
+          connectedOwnerCount: 0,
+          latestActive: null,
+        },
       });
     } catch (error) {
       res.status(503).json({
@@ -266,6 +312,15 @@ export async function startOwlMcpHttpServer({
     pruneTransportSessions();
     return {
       sessionCount: sessions.size,
+      sessionPolicy: {
+        idleTtlMs: boundedSessionIdleTtlMs,
+        maxSessions: boundedMaxSessions,
+      },
+      continuation: plannerContinuation?.summary?.() ?? {
+        activeCheckpointCount: 0,
+        connectedOwnerCount: 0,
+        latestActive: null,
+      },
       sessions: [...sessions.entries()].map(([transportSessionId, session]) => ({
         transportSessionId,
         runtimeSessionId: session.runtimeSessionId ?? null,
@@ -274,11 +329,24 @@ export async function startOwlMcpHttpServer({
         createdAt: session.createdAt,
         lastSeenAt: session.lastSeenAt,
       })),
+      continuation:
+        plannerContinuation?.summary?.() ?? {
+          activeCheckpointCount: 0,
+          connectedOwnerCount: 0,
+          latestActive: null,
+        },
     };
   }
 
   async function close() {
-    for (const session of sessions.values()) {
+    for (const [transportSessionId, session] of sessions.entries()) {
+      if (session.ownerStable === true) {
+        plannerContinuation?.noteTransportDisconnected?.(
+          session.runtimeSessionId,
+          transportSessionId,
+          "mcp_stop",
+        );
+      }
       await session.transport.close().catch(() => undefined);
     }
     sessions.clear();

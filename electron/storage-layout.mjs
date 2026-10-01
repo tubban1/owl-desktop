@@ -8,6 +8,8 @@ const DESKTOP_STATE_FILES = [
   "secrets.json",
   "identity-accounts.json",
   "cloud-bridge-state.json",
+  "remote-submissions.json",
+  "planner-continuation.json",
   "agent-inbox.json",
   "runtime-agent-request-consumer.json",
   "runtime-agent-request-event-bridge.json",

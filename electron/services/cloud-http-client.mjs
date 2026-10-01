@@ -152,9 +152,10 @@ export class CloudHttpClient {
     );
   }
 
-  getCommand(userJwt, commandId) {
+  listDeviceEvents(userJwt, deviceId, limit = 50) {
+    const bounded = Math.min(Math.max(Number(limit) || 50, 1), 100);
     return this.request(
-      `/v1/commands/${encodeURIComponent(commandId)}`,
+      `/v1/devices/${encodeURIComponent(deviceId)}/events?limit=${bounded}`,
       {
         auth: "user",
         userJwt,

@@ -57,7 +57,6 @@ declare global {
         deviceId: string,
         limit?: number,
       ): Promise<CloudRemoteCommandSummary[]>;
-      cloudGetCommand(commandId: string): Promise<CloudRemoteCommandSummary>;
       cloudCreateCommand(
         deviceId: string,
         input: CloudRemoteCommandInput,

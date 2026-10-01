@@ -57,12 +57,45 @@ function fixture() {
             kindVersion: 1,
             payload: {
               label: "Remote health check",
+              clientSubmissionId: "owl-remote-submit:test123",
+              orchestration: {
+                orchestrationId: "orch_test",
+                label: "Test goal",
+                parentTaskId: "task_parent",
+              },
               steps: [{ id: "info", action: "runtime.info" }],
               secretInput: "must-never-leak",
             },
             status: "accepted",
             createdAt: "2026-10-01T18:01:00.000Z",
             runtimeTaskId: "task_1",
+          },
+        ],
+      };
+    }),
+    listDeviceEvents: vi.fn(async (jwt, deviceId) => {
+      expect(jwt).toBe("id-token-secret");
+      expect(deviceId).toBe("dev_1");
+      return {
+        events: [
+          {
+            eventId: "evt_other",
+            eventType: "runtime.health",
+            occurredAt: "2026-10-01T18:02:30.000Z",
+            correlationId: "other",
+            payload: { secret: "must-not-leak" },
+          },
+          {
+            eventId: "evt_terminal",
+            eventType: "desktop.cloud.task.terminal",
+            occurredAt: "2026-10-01T18:03:00.000Z",
+            correlationId: "cmd_1",
+            payload: {
+              runtimeTaskId: "task_1",
+              status: "completed",
+              progressRevision: 9,
+              secret: "must-not-leak",
+            },
           },
         ],
       };
@@ -79,16 +112,6 @@ function fixture() {
         createdAt: "2026-10-01T18:02:00.000Z",
       };
     }),
-    getCommand: vi.fn(async () => ({
-      commandId: "cmd_1",
-      deviceId: "dev_1",
-      kind: "runtime.task.create-and-start",
-      kindVersion: 1,
-      payload: { label: "Remote health check", secretInput: "nope" },
-      status: "accepted",
-      createdAt: "2026-10-01T18:01:00.000Z",
-      runtimeTaskId: "task_1",
-    })),
     cancelCommand: vi.fn(async () => ({
       commandId: "cmd_2",
       deviceId: "dev_1",
@@ -130,6 +153,12 @@ describe("CloudControlPlaneService", () => {
       label: "Remote health check",
       status: "accepted",
       runtimeTaskId: "task_1",
+      clientSubmissionId: "owl-remote-submit:test123",
+      orchestration: {
+        orchestrationId: "orch_test",
+        label: "Test goal",
+        parentTaskId: "task_parent",
+      },
     });
     expect(JSON.stringify(commands)).not.toContain("secretInput");
     expect(JSON.stringify(commands)).not.toContain("id-token-secret");
@@ -137,6 +166,17 @@ describe("CloudControlPlaneService", () => {
     expect(f.secrets.get("owl-cloud:OWL_CLOUD_ACCOUNT_REFRESH_TOKEN")).toBe(
       "refresh-new",
     );
+
+    const terminal = await f.service.findTaskTerminalEvent("dev_1", "cmd_1");
+    expect(terminal).toEqual({
+      eventId: "evt_terminal",
+      occurredAt: "2026-10-01T18:03:00.000Z",
+      commandId: "cmd_1",
+      runtimeTaskId: "task_1",
+      status: "completed",
+      progressRevision: 9,
+    });
+    expect(JSON.stringify(terminal)).not.toContain("must-not-leak");
   });
 
   it("creates supported remote tasks without returning the task payload", async () => {

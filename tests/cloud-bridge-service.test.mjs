@@ -375,6 +375,57 @@ describe("CloudBridgeService", () => {
     );
   });
 
+  it("passes orchestration to Runtime without leaking client submission metadata", async () => {
+    const setup = createService();
+    await setup.service.processCommand(
+      command({
+        commandId: "cmd_orchestration",
+        kind: "runtime.task.create-and-start",
+        payload: {
+          label: "Remote orchestration task",
+          clientSubmissionId: "owl-remote-submit:abc123",
+          orchestration: {
+            orchestrationId: "orch_remote",
+            label: "Cross-device goal",
+            parentTaskId: "task_parent",
+          },
+          steps: [
+            {
+              id: "info",
+              action: "runtime.info",
+              args: {},
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(setup.runtimeClient.createTask).toHaveBeenCalledWith(
+      {
+        label: "Remote orchestration task",
+        orchestration: {
+          orchestrationId: "orch_remote",
+          label: "Cross-device goal",
+          parentTaskId: "task_parent",
+        },
+        steps: [
+          {
+            id: "info",
+            action: "runtime.info",
+            args: {},
+          },
+        ],
+      },
+      {
+        requestId: "cloud:cmd_orchestration:create",
+        idempotencyKey: "cloud-command:cmd_orchestration:create",
+      },
+    );
+    expect(
+      setup.runtimeClient.createTask.mock.calls[0][0].clientSubmissionId,
+    ).toBeUndefined();
+  });
+
   it("uses bounded validation codes instead of user-provided step text", async () => {
     const setup = createService();
     await setup.service.processCommand(
