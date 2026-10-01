@@ -40,7 +40,10 @@ function commandFromInput(deviceId, input, commandId = "cmd_1") {
   };
 }
 
-function fixture({ loseFirstResponse = false } = {}) {
+function fixture({
+  loseFirstResponse = false,
+  terminalEvent = true,
+} = {}) {
   const commands = [];
   let first = true;
   const controlPlane = {
@@ -72,14 +75,18 @@ function fixture({ loseFirstResponse = false } = {}) {
       first = false;
       return command;
     }),
-    findTaskTerminalEvent: vi.fn(async (_deviceId, commandId) => ({
-      eventId: "evt_terminal",
-      occurredAt: "2026-10-01T20:01:00.000Z",
-      commandId,
-      runtimeTaskId: "task_remote_1",
-      status: "completed",
-      progressRevision: 9,
-    })),
+    findTaskTerminalEvent: vi.fn(async (_deviceId, commandId) =>
+      terminalEvent
+        ? {
+            eventId: "evt_terminal",
+            occurredAt: "2026-10-01T20:01:00.000Z",
+            commandId,
+            runtimeTaskId: "task_remote_1",
+            status: "completed",
+            progressRevision: 9,
+          }
+        : null,
+    ),
     cancelCommand: vi.fn(async (commandId) => {
       const command = commands.find((item) => item.commandId === commandId);
       command.status = "cancelled_before_accept";
@@ -266,7 +273,7 @@ describe("RemoteDeviceControlService", () => {
   });
 
   it("cancels only after the canonical command identity is known", async () => {
-    const f = fixture();
+    const f = fixture({ terminalEvent: false });
     await f.service.submitTask(request);
     const result = await f.service.cancel({
       ownerId: request.ownerId,
