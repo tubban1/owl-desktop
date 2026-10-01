@@ -60,6 +60,7 @@ const command = {
   commandId: `cmd_local_e2e_${Date.now().toString(36)}`,
   deviceId: "dev_local_bridge_e2e",
   kind: "runtime.task.create",
+  kindVersion: 1,
   payload: {
     label: "Cloud Bridge local live E2E",
     steps: [
