@@ -149,3 +149,40 @@ Test artifacts intentionally left in the safe allowed roots because delete is cu
 ```
 
 Remove them later through the normal approved cleanup path or Finder.
+### Permission-baseline clarification — 2026-10-01
+
+The owner’s development Mac installed and used filesystem primitives without opening macOS Privacy & Security, but this is **not clean-Mac evidence**.
+
+Three permission layers must be tested separately:
+
+1. Gatekeeper/quarantine: a locally built DMG may not carry the same quarantine state as a file downloaded on a friend’s Mac.
+2. Files & Folders/TCC: Desktop/Documents/Downloads access must be tested on a machine with no prior OWL permission history.
+3. Accessibility/Screen Recording: these are only exercised when the OWL LAB Helper actually performs GUI/perception work. During the current file-only dogfood, `admin.permission(status)` reported that the Helper had not created its Unix socket, so no GUI-permission conclusion can be drawn.
+
+Add clean-Mac acceptance evidence for each permission class; do not infer permission UX from successful installation or filesystem-only tasks on the developer Mac.
+### Additional automated findings — 2026-10-01
+
+#### Cloud Bridge NOT_FOUND route diff
+
+Desktop Cloud client vs current Cloud source vs latest local synth bundle:
+
+```text
+/device/v1/presence             source=yes  synth=yes
+/device/v1/commands             source=yes  synth=yes
+/device/v1/approval-decisions   source=yes  synth=NO
+/device/v1/events               source=yes  synth=yes
+/device/v1/telemetry            source=yes  synth=yes
+```
+
+This strongly identifies `/device/v1/approval-decisions` as the current `NOT_FOUND` source. Desktop calls it every sync cycle; the current source implements it, but the synthesized Lambda bundle under `cdk.out` does not. Cloud dev deployment should be refreshed from the current router, and Desktop should still capability-gate optional routes so one missing endpoint does not degrade the entire bridge.
+
+#### Branding / packaging findings
+
+- `scripts/prepare-macos-icon.mjs` still uses `assets/owl-desktop-icon.svg`; it does not yet use the owner-provided formal `assets/owl1254.png`.
+- `latest-mac.yml` references hyphenated `OWL-LAB-Desktop-...dmg` filenames while the actual friend-beta files use `OWL LAB Desktop-...dmg`. Unify artifact naming before updater/public release.
+- Current packaged Desktop `Info.plist` includes Camera, Microphone and Bluetooth usage strings although these are not part of the current first-run capability flow. Remove unused declarations to reduce permission confusion.
+- Current Desktop ATS allows arbitrary loads. Production packaging should restrict transport security to loopback HTTP plus explicit Cloud HTTPS endpoints.
+
+#### Background-mode finding
+
+Current macOS code keeps the Electron process alive when all windows close, but has no Tray/Menu Bar implementation. `Cmd+Q` correctly stops Cloud Bridge, Runtime event bridge, Tunnel and MCP. Next beta should add a menu-bar status/control surface and make background-running behavior explicit to the user.
