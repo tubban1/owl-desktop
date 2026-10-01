@@ -82,6 +82,22 @@ function versionAtLeast(version, minimum) {
   return true;
 }
 
+function resolveTargetArch() {
+  if (process.platform === "darwin" && process.arch === "x64") {
+    const translated = spawnSync(
+      "/usr/sbin/sysctl",
+      ["-in", "sysctl.proc_translated"],
+      { encoding: "utf8" },
+    );
+    if (translated.status === 0 && translated.stdout.trim() === "1") {
+      return "arm64";
+    }
+  }
+  return process.arch;
+}
+
+const targetArch = resolveTargetArch();
+
 function resolveNativeNode22() {
   const candidates = [];
   const explicit = process.env.OWL_DEV_NODE?.trim();
@@ -107,10 +123,20 @@ function resolveNativeNode22() {
     try {
       const info = JSON.parse(probe.stdout.trim());
       const parsed = parseNodeVersion(info.version);
+      const npmCli = path.resolve(
+        path.dirname(candidate),
+        "..",
+        "lib",
+        "node_modules",
+        "npm",
+        "bin",
+        "npm-cli.js",
+      );
       if (
         parsed &&
         versionAtLeast(parsed, [22, 13, 0]) &&
-        info.arch === process.arch
+        info.arch === targetArch &&
+        fs.existsSync(npmCli)
       ) {
         accepted.push({ candidate, parsed, info });
       }
@@ -128,7 +154,7 @@ function resolveNativeNode22() {
 
   if (!accepted.length) {
     throw new Error(
-      `No native ${process.arch} Node >=22.13.0 was found. Set OWL_DEV_NODE to a compatible Node binary.`,
+      `No native ${targetArch} Node >=22.13.0 with a colocated npm CLI was found. Set OWL_DEV_NODE to a compatible Node binary.`,
     );
   }
   return accepted[0];
@@ -351,7 +377,7 @@ function shutdown(code = 0) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-const arch = process.arch === "x64" ? "x64" : "arm64";
+const arch = targetArch === "x64" ? "x64" : "arm64";
 const tunnelBinary = path.join(
   desktopRoot,
   "vendor",
@@ -396,14 +422,17 @@ try {
   console.log(
     `[dev:full] Allowed DEV workspaces: ${devAllowedDirectories}`,
   );
+  const runtimeWatch = process.env.OWL_RUNTIME_DEV_WATCH === "true";
   console.log(
-    `[dev:full] starting OWL Runtime DEV on isolated port ${runtimeDevPort}...`,
+    `[dev:full] starting OWL Runtime DEV on isolated port ${runtimeDevPort} (${runtimeWatch ? "watch" : "stable-source"})...`,
   );
   start(
     "runtime",
     runtimeRoot,
     runtimeNode,
-    [tsxCli, "watch", "src/server.ts"],
+    runtimeWatch
+      ? [tsxCli, "watch", "src/server.ts"]
+      : [tsxCli, "src/server.ts"],
     {
       PATH: devPath,
       PORT: String(runtimeDevPort),

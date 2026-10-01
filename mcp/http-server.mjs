@@ -16,8 +16,8 @@ export async function startOwlMcpHttpServer({
   remoteDeviceControl,
   plannerContinuation,
   onEvent = () => {},
-  sessionIdleTtlMs = 5 * 60_000,
-  maxSessions = 32,
+  sessionIdleTtlMs = 30 * 60_000,
+  maxSessions = 128,
 } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error(`Invalid OWL MCP port: ${port}`);
@@ -30,9 +30,23 @@ export async function startOwlMcpHttpServer({
   const boundedMaxSessions = Math.max(Number(maxSessions) || 0, 8);
   app.use(express.json({ limit: "4mb" }));
 
+  function touchTransportSession(session, now = Date.now()) {
+    if (!session) return;
+    session.lastSeenAt = new Date(now).toISOString();
+    session.lastSeenAtMs = now;
+  }
+
+  function transportSessionBusy(session) {
+    return Number(session?.activeRequestCount ?? 0) > 0;
+  }
+
   function pruneTransportSessions(now = Date.now()) {
     const staleBefore = now - boundedSessionIdleTtlMs;
     for (const [transportSessionId, session] of sessions) {
+      // Streamable HTTP may keep a GET event stream or a tools/call POST open
+      // for a long time. Never classify an in-flight transport as idle.
+      if (transportSessionBusy(session)) continue;
+
       const lastSeenMs =
         session.lastSeenAtMs ??
         Date.parse(session.lastSeenAt ?? session.createdAt ?? "") ??
@@ -55,13 +69,20 @@ export async function startOwlMcpHttpServer({
     }
 
     if (sessions.size <= boundedMaxSessions) return;
-    const oldest = [...sessions.entries()]
+
+    // The cap is a memory-safety backstop, not permission to sever a live
+    // ChatGPT stream. Evict only inactive sessions and temporarily exceed the
+    // soft cap if every over-cap session is still carrying an active request.
+    let excess = sessions.size - boundedMaxSessions;
+    const oldestInactive = [...sessions.entries()]
+      .filter(([, session]) => !transportSessionBusy(session))
       .sort(([, left], [, right]) =>
         (left.lastSeenAtMs ?? 0) - (right.lastSeenAtMs ?? 0),
-      )
-      .slice(0, sessions.size - boundedMaxSessions);
+      );
 
-    for (const [transportSessionId, session] of oldest) {
+    for (const [transportSessionId, session] of oldestInactive) {
+      if (excess <= 0) break;
+      excess -= 1;
       sessions.delete(transportSessionId);
       if (session.ownerStable === true) {
         plannerContinuation?.noteTransportDisconnected?.(
@@ -118,6 +139,7 @@ export async function startOwlMcpHttpServer({
           createdAt: new Date(now).toISOString(),
           lastSeenAt: new Date(now).toISOString(),
           lastSeenAtMs: now,
+          activeRequestCount: 0,
         });
         pruneTransportSessions(now);
         onEvent("info", "MCP transport session opened", { transportSessionId: id });
@@ -208,30 +230,40 @@ export async function startOwlMcpHttpServer({
           ? `owl-mcp:${transportSessionId}:${String(body.id)}`
           : `owl-mcp:${randomUUID()}`;
 
-      const seenAt = Date.now();
-      active.lastSeenAt = new Date(seenAt).toISOString();
-      active.lastSeenAtMs = seenAt;
+      touchTransportSession(active);
+      active.activeRequestCount =
+        Number(active.activeRequestCount ?? 0) + 1;
 
-      await withMcpRequestContext(
-        {
-          runtimeBaseUrl,
-          runtimeToken,
-          runtimeSessionId: identity.runtimeSessionId,
-          ownerStable: identity.stable,
-          ownerSource: identity.source,
-          transportSessionId,
-          runtimeRequestId,
-          logicalRequestId:
-            body?.id !== undefined ? String(body.id) : runtimeRequestId,
-          clientIdempotencyKey: suppliedIdempotencyKey || undefined,
-          signal: requestAbort.signal,
-          agentInbox,
-          remoteDeviceControl,
-          plannerContinuation,
-          onEvent,
-        },
-        () => active.transport.handleRequest(req, res, req.body),
-      );
+      try {
+        await withMcpRequestContext(
+          {
+            runtimeBaseUrl,
+            runtimeToken,
+            runtimeSessionId: identity.runtimeSessionId,
+            ownerStable: identity.stable,
+            ownerSource: identity.source,
+            transportSessionId,
+            runtimeRequestId,
+            logicalRequestId:
+              body?.id !== undefined ? String(body.id) : runtimeRequestId,
+            clientIdempotencyKey: suppliedIdempotencyKey || undefined,
+            signal: requestAbort.signal,
+            agentInbox,
+            remoteDeviceControl,
+            plannerContinuation,
+            onEvent,
+          },
+          () => active.transport.handleRequest(req, res, req.body),
+        );
+      } finally {
+        active.activeRequestCount = Math.max(
+          0,
+          Number(active.activeRequestCount ?? 1) - 1,
+        );
+        // A long request is activity for its entire lifetime. Refresh the idle
+        // clock on completion so it cannot be reclaimed immediately afterward.
+        touchTransportSession(active);
+      }
 
       if (req.method === "DELETE" && suppliedSessionId) {
         removeTransportSession(suppliedSessionId, "client_delete");
@@ -328,6 +360,7 @@ export async function startOwlMcpHttpServer({
         ownerSource: session.ownerSource ?? "transport-session",
         createdAt: session.createdAt,
         lastSeenAt: session.lastSeenAt,
+        activeRequestCount: Number(session.activeRequestCount ?? 0),
       })),
       continuation:
         plannerContinuation?.summary?.() ?? {

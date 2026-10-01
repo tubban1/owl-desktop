@@ -47,6 +47,23 @@ try {
               timeout_ms: 10_000,
               workspace_mode: "read",
             },
+            verify: {
+              id: "stream-recovery-shell-completed",
+              description:
+                "The recovery probe must finish and emit its expected completion marker.",
+              expectations: [
+                {
+                  path: "state",
+                  operator: "equals",
+                  expected: "finished",
+                },
+                {
+                  path: "data.stdout",
+                  operator: "contains",
+                  expected: "done",
+                },
+              ],
+            },
           },
         ],
         max_concurrency: 1,
