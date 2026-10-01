@@ -75,12 +75,23 @@ describe("CloudEnrollmentService", () => {
         displayName: "This Mac",
         platform: "darwin-arm64",
       })),
-      getDeviceAccess: vi.fn(async () => ({
-        deviceId: "dev_1",
-        canView: true,
+      getRuntimeLease: vi.fn(async () => ({
         canRun: true,
-        canSchedule: true,
-        canApprove: true,
+        access: {
+          deviceId: "dev_1",
+          canView: true,
+          canRun: true,
+          canSchedule: true,
+          canApprove: true,
+        },
+        entitlement: {
+          plan: "trial",
+          status: "trial_active",
+          canRun: true,
+          features: { runtime: true },
+        },
+        leaseToken: "owllease1.payload.signature",
+        lease: { leaseId: "lease_1" },
       })),
     };
     const auth = {
@@ -126,6 +137,75 @@ describe("CloudEnrollmentService", () => {
     ).toBe("refresh-token");
     expect(result.device.deviceCredential).toBeUndefined();
     expect(result.access.canRun).toBe(true);
+    expect(result.entitlement.status).toBe("trial_active");
+    expect(result.runtimeLease.leaseToken).toBe("owllease1.payload.signature");
+  });
+
+
+  it("reuses an already-enrolled active device instead of consuming another plan slot", async () => {
+    const store = fakeStore();
+    store.settings.cloudDeviceId = "dev_existing";
+    store.upsertSecret({
+      name: cloudEnrollmentSecretNames.deviceCredential,
+      project: "owl-cloud",
+      value: "owldev1.dev_existing.secret",
+    });
+    const cloudClient = {
+      bootstrap: vi.fn(async () => ({
+        userId: "user_1",
+        entitlement: {
+          plan: "trial",
+          status: "trial_active",
+          canRun: true,
+          features: { runtime: true },
+        },
+      })),
+      listDevices: vi.fn(async () => ({
+        devices: [
+          {
+            deviceId: "dev_existing",
+            registrationState: "active",
+            displayName: "This Mac",
+            platform: "darwin-arm64",
+          },
+        ],
+      })),
+      registerDevice: vi.fn(),
+      getRuntimeLease: vi.fn(async () => ({
+        canRun: true,
+        access: { deviceId: "dev_existing", canRun: true },
+        entitlement: {
+          plan: "trial",
+          status: "trial_active",
+          canRun: true,
+          features: { runtime: true },
+        },
+        leaseToken: "owllease1.payload.signature",
+        lease: { leaseId: "lease_existing" },
+      })),
+    };
+    const auth = {
+      complete: vi.fn(async () => ({
+        idToken: "id-token",
+        refreshToken: "refresh-token-2",
+        expiresIn: 3600,
+        tokenType: "Bearer",
+      })),
+    };
+    const service = new CloudEnrollmentService({
+      cloudClient,
+      auth,
+      store,
+    });
+
+    const result = await service.complete(
+      "owl-desktop://auth/callback?code=x&state=y",
+    );
+
+    expect(cloudClient.listDevices).toHaveBeenCalledWith("id-token");
+    expect(cloudClient.registerDevice).not.toHaveBeenCalled();
+    expect(result.device.deviceId).toBe("dev_existing");
+    expect(result.runtimeLease.lease.leaseId).toBe("lease_existing");
   });
 
   it("recovers deviceId from the encrypted credential metadata boundary", () => {
@@ -163,10 +243,21 @@ describe("CloudEnrollmentService", () => {
       })),
     };
     const cloudClient = {
-      bootstrap: vi.fn(async () => ({ user: { userId: "user_1" } })),
-      getDeviceAccess: vi.fn(async () => ({
-        deviceId: "dev_1",
+      bootstrap: vi.fn(async () => ({ userId: "user_1" })),
+      getRuntimeLease: vi.fn(async () => ({
         canRun: true,
+        access: {
+          deviceId: "dev_1",
+          canRun: true,
+        },
+        entitlement: {
+          plan: "trial",
+          status: "trial_active",
+          canRun: true,
+          features: { runtime: true },
+        },
+        leaseToken: "owllease1.payload.signature",
+        lease: { leaseId: "lease_resume" },
       })),
     };
     const service = new CloudEnrollmentService({

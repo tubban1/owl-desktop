@@ -193,6 +193,23 @@ export class CloudHttpClient {
     });
   }
 
+  getEntitlement(userJwt) {
+    return this.request("/v1/entitlement", {
+      auth: "user",
+      userJwt,
+    });
+  }
+
+  getRuntimeLease(userJwt, deviceId) {
+    return this.request(
+      `/v1/devices/${encodeURIComponent(deviceId)}/runtime-lease`,
+      {
+        auth: "user",
+        userJwt,
+      },
+    );
+  }
+
   heartbeat(input = {}) {
     return this.request("/device/v1/presence", {
       method: "POST",

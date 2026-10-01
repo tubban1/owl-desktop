@@ -770,8 +770,12 @@ export default function App() {
             </div>
             <div className="about-grid">
               <span>Account</span><strong>{cloudAccount?.status === "ready" ? "Authenticated" : cloudAccount?.status?.replaceAll("_", " ") ?? "Signed out"}</strong>
-              <span>Cloud run access</span><strong>{cloudAccount?.access?.canRun === true ? "Granted" : "Not granted"}</strong>
+              <span>Cloud run access</span><strong>{cloudAccount?.entitlement?.canRun === true && cloudAccount?.access?.canRun === true ? "Granted" : "Not granted"}</strong>
+              <span>Plan</span><strong>{cloudAccount?.entitlement?.plan ?? "—"}{cloudAccount?.entitlement?.status ? ` · ${cloudAccount.entitlement.status.replaceAll("_", " ")}` : ""}</strong>
+              <span>Trial</span><strong>{cloudAccount?.entitlement?.trialEndsAt ? `${Math.max(0, Math.ceil((Date.parse(cloudAccount.entitlement.trialEndsAt) - Date.now()) / 86_400_000))} days left · until ${new Date(cloudAccount.entitlement.trialEndsAt).toLocaleDateString()}` : "—"}</strong>
+              <span>Balance</span><strong>{cloudAccount?.entitlement ? `${cloudAccount.entitlement.currency} ${(cloudAccount.entitlement.walletBalanceMinor / 100).toFixed(2)}` : "—"}</strong>
               <span>Runtime access</span><strong>{runtimeAccess?.state ?? "Unknown"}{runtimeAccess?.mode ? ` · ${runtimeAccess.mode}` : ""}</strong>
+              <span>Lease</span><strong>{runtimeAccess?.grant?.signatureVerified === true ? "Cloud signed" : runtimeAccess?.grant ? "Legacy / unsigned" : "—"}</strong>
               <span>Lease expires</span><strong>{runtimeAccess?.grant?.expiresAt ? new Date(runtimeAccess.grant.expiresAt).toLocaleString() : "—"}</strong>
               <span>Device</span><code>{cloudAccount?.deviceId ?? snapshot?.cloud.deviceId ?? "Not enrolled"}</code>
               <span>Bridge</span><strong>{cloudOnline ? "Connected" : cloudStatusLabel}</strong>

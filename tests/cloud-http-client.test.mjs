@@ -56,6 +56,37 @@ describe("CloudHttpClient", () => {
     expect(init.headers.authorization).toBe("Bearer jwt-value");
   });
 
+
+  it("fetches the Cloud-signed Runtime lease with user auth", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        canRun: true,
+        access: { deviceId: "dev_1", canRun: true },
+        entitlement: {
+          plan: "trial",
+          status: "trial_active",
+          canRun: true,
+          features: { runtime: true },
+        },
+        leaseToken: "owllease1.payload.signature",
+        lease: { leaseId: "lease_1", deviceId: "dev_1" },
+      }),
+    );
+    const client = new CloudHttpClient({
+      baseUrl: "https://cloud.example.test",
+      fetchImpl,
+    });
+
+    const lease = await client.getRuntimeLease("jwt-value", "dev_1");
+
+    expect(lease.leaseToken).toBe("owllease1.payload.signature");
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(
+      "https://cloud.example.test/v1/devices/dev_1/runtime-lease",
+    );
+    expect(init.headers.authorization).toBe("Bearer jwt-value");
+  });
+
   it("uses user auth for device inventory and remote command control", async () => {
     const fetchImpl = vi.fn(async (url, init) => {
       if (String(url).endsWith("/v1/devices")) {

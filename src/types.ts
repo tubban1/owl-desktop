@@ -116,6 +116,44 @@ export type RuntimeAccessState = {
     issuedAt: string;
     expiresAt: string;
     evidenceDigest: string;
+    source?: "cloud-signed-lease" | "legacy-desktop-projection";
+    cloudLeaseId?: string;
+    entitlementPlan?: string;
+    entitlementStatus?: string;
+    entitlementVersion?: number;
+    features?: Record<string, boolean>;
+    limits?: Record<string, number>;
+    signatureVerified?: boolean;
+  };
+};
+
+export type CloudEntitlement = {
+  entitlementId: string;
+  userId: string;
+  organizationId: string;
+  plan: "trial" | "credit" | "pro" | "business";
+  status:
+    | "trial_active"
+    | "active"
+    | "trial_expired"
+    | "payment_required"
+    | "suspended";
+  canRun: boolean;
+  trialStartedAt: string;
+  trialEndsAt: string;
+  trialExtensionDays: number;
+  subscriptionEndsAt: string | null;
+  suspendedAt: string | null;
+  walletBalanceMinor: number;
+  currency: "CHF";
+  version: number;
+  updatedAt: string;
+  features: Record<string, boolean>;
+  limits: {
+    devices: number;
+    concurrentTasks: number;
+    cloudWorkerMinutes: number;
+    storageMb: number;
   };
 };
 
@@ -137,6 +175,7 @@ export type CloudAccountStatus = {
     canSchedule?: boolean;
     canApprove?: boolean;
   };
+  entitlement: CloudEntitlement | null;
   runtimeAccess: RuntimeAccessState | null;
   deviceId: string | null;
   lastErrorCode: string | null;

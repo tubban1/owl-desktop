@@ -31,6 +31,17 @@ const runtimeStateRoot = path.resolve(
   process.env.OWL_RUNTIME_DEV_STATE_ROOT?.trim() ||
     path.join(os.homedir(), ".owl-runtime-dev"),
 );
+const enforceCloudAccess =
+  process.env.OWL_DEV_ENFORCE_CLOUD_ACCESS?.trim().toLowerCase() !== "false";
+const runtimeLeasePublicKeyFile = path.resolve(
+  process.env.OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE?.trim() ||
+    path.join(
+      os.homedir(),
+      ".owl-lab",
+      "trust",
+      "owl-cloud-dev-runtime-lease-public.pem",
+    ),
+);
 const desktopSettingsFile =
   process.env.OWL_DESKTOP_SETTINGS_FILE?.trim() ||
   path.join(
@@ -196,6 +207,11 @@ if (runtimeDevPort === 8788 && process.env.OWL_ALLOW_SHARED_DEV_PORT !== "true")
 if (!fs.existsSync(tsxCli)) {
   throw new Error(`OWL Runtime DEV tsx CLI not found: ${tsxCli}. Run npm install in owl-runtime.`);
 }
+if (enforceCloudAccess && !fs.existsSync(runtimeLeasePublicKeyFile)) {
+  throw new Error(
+    `OWL LAB Cloud authorization is enforced, but the Runtime lease trust key is missing: ${runtimeLeasePublicKeyFile}. Provision the dev Cloud signing key first with "npm run provision:runtime-lease-key" in owl-cloud, or set OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE.`,
+  );
+}
 
 const children = new Set();
 let shuttingDown = false;
@@ -344,7 +360,7 @@ async function waitForDevRuntime(timeoutMs = 30_000) {
       }
 
       console.log(
-        `[dev:full] Runtime DEV verified: ${health.version} · ${health.runtime.stateRoot} · access.get READY`,
+        `[dev:full] Runtime DEV verified: ${health.version} · ${health.runtime.stateRoot} · access.get ${accessProbe?.result?.state ?? "available"}`,
       );
       return health;
     } catch (error) {
@@ -437,6 +453,9 @@ try {
       PATH: devPath,
       PORT: String(runtimeDevPort),
       OWL_RUNTIME_MODE: "development",
+      OWL_RUNTIME_ACCESS_MODE: enforceCloudAccess ? "enforced" : "compat",
+      OWL_RUNTIME_REQUIRE_SIGNED_LEASE: enforceCloudAccess ? "true" : "false",
+      OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE: runtimeLeasePublicKeyFile,
       OWL_STATE_ROOT: runtimeStateRoot,
       OWL_WAKE_NAME: userWakeName,
       OWL_ALIASES: userWakeAliases.join(","),

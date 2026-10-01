@@ -54,9 +54,12 @@ export class CloudEnrollmentService {
     const settings = this.store.getSettings();
     const deviceId =
       settings.cloudDeviceId || this.recoverDeviceIdFromCredential() || null;
-    const access = deviceId
-      ? await this.cloudClient.getDeviceAccess(tokens.idToken, deviceId)
+    const runtimeLease = deviceId
+      ? await this.cloudClient.getRuntimeLease(tokens.idToken, deviceId)
       : null;
+    const access = runtimeLease?.access ?? null;
+    const entitlement =
+      runtimeLease?.entitlement ?? account?.entitlement ?? null;
 
     if (persistRefreshToken && tokens.refreshToken) {
       this.persistRefreshToken(tokens.refreshToken);
@@ -66,6 +69,8 @@ export class CloudEnrollmentService {
       account,
       deviceId,
       access,
+      entitlement,
+      runtimeLease,
       session: {
         authenticated: true,
         expiresIn: tokens.expiresIn,
@@ -76,6 +81,47 @@ export class CloudEnrollmentService {
 
   async enrollWithTokens(tokens) {
     const account = await this.cloudClient.bootstrap(tokens.idToken);
+    const settings = this.store.getSettings();
+    const existingDeviceId =
+      settings.cloudDeviceId || this.recoverDeviceIdFromCredential() || null;
+
+    if (existingDeviceId) {
+      const inventory = await this.cloudClient.listDevices(tokens.idToken);
+      const existing = Array.isArray(inventory?.devices)
+        ? inventory.devices.find(
+            (device) =>
+              device?.deviceId === existingDeviceId &&
+              device?.registrationState === "active",
+          )
+        : null;
+      if (existing) {
+        this.store.updateSettings({
+          cloudDeviceId: existingDeviceId,
+          cloudEnabled: true,
+        });
+        if (tokens.refreshToken) {
+          this.persistRefreshToken(tokens.refreshToken);
+        }
+        const runtimeLease = await this.cloudClient.getRuntimeLease(
+          tokens.idToken,
+          existingDeviceId,
+        );
+        return {
+          account,
+          device: existing,
+          access: runtimeLease?.access ?? null,
+          entitlement:
+            runtimeLease?.entitlement ?? account?.entitlement ?? null,
+          runtimeLease,
+          session: {
+            authenticated: true,
+            expiresIn: tokens.expiresIn,
+            tokenType: tokens.tokenType,
+          },
+        };
+      }
+    }
+
     const registered = await this.cloudClient.registerDevice(tokens.idToken, {
       displayName: this.displayName,
       platform: this.platform,
@@ -103,15 +149,20 @@ export class CloudEnrollmentService {
       this.persistRefreshToken(tokens.refreshToken);
     }
 
-    const access = await this.cloudClient.getDeviceAccess(
+    const runtimeLease = await this.cloudClient.getRuntimeLease(
       tokens.idToken,
       registered.deviceId,
     );
+    const access = runtimeLease?.access ?? null;
+    const entitlement =
+      runtimeLease?.entitlement ?? account?.entitlement ?? null;
 
     return {
       account,
       device: withoutCredential(registered),
       access,
+      entitlement,
+      runtimeLease,
       session: {
         authenticated: true,
         expiresIn: tokens.expiresIn,

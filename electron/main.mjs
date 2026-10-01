@@ -34,7 +34,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let storageLayout;
 const devForceConnectivity =
   !app.isPackaged && process.env.OWL_DEV_FORCE_CONNECTIVITY === "true";
-const RUNTIME_ACCESS_LEASE_MS = 12 * 60 * 60 * 1000;
 let mainWindow;
 let store;
 let identityVault;
@@ -61,6 +60,7 @@ let cloudAccountState = {
   status: "signed_out",
   account: null,
   access: null,
+  entitlement: null,
   runtimeAccess: null,
   deviceId: null,
   lastErrorCode: null,
@@ -349,43 +349,65 @@ function cloudAccountSnapshot() {
   };
 }
 
-async function syncRuntimeAccessFromCloud(account, access, deviceId) {
+async function syncRuntimeAccessFromCloud(
+  account,
+  access,
+  deviceId,
+  runtimeLease,
+) {
   const client = runtimeClient();
-  if (!deviceId || access?.canRun !== true) {
-    return await client.lockRuntimeAccess("CLOUD_RUN_NOT_GRANTED", {
-      idempotencyKey: `runtime-access-lock:${deviceId ?? "none"}:cloud-run-not-granted`,
+  const entitlement =
+    runtimeLease?.entitlement ?? account?.entitlement ?? null;
+  const entitled =
+    entitlement?.canRun === true && entitlement?.features?.runtime === true;
+  const leaseReady =
+    runtimeLease?.canRun === true &&
+    typeof runtimeLease?.leaseToken === "string" &&
+    runtimeLease.leaseToken.length > 0;
+
+  if (!deviceId || access?.canRun !== true || !entitled || !leaseReady) {
+    const reasonCode =
+      !deviceId
+        ? "CLOUD_DEVICE_ENROLLMENT_REQUIRED"
+        : access?.canRun !== true
+          ? "CLOUD_DEVICE_RUN_NOT_GRANTED"
+          : entitlement?.status === "trial_expired"
+            ? "CLOUD_TRIAL_EXPIRED"
+            : entitlement?.status === "payment_required"
+              ? "CLOUD_PAYMENT_REQUIRED"
+              : entitlement?.status === "suspended"
+                ? "CLOUD_ACCOUNT_SUSPENDED"
+                : "CLOUD_ENTITLEMENT_NOT_ACTIVE";
+    return await client.lockRuntimeAccess(reasonCode, {
+      idempotencyKey: `runtime-access-lock:${deviceId ?? "none"}:${reasonCode.toLowerCase()}`,
     });
   }
 
-  const leaseExpiresAt = new Date(
-    Date.now() + RUNTIME_ACCESS_LEASE_MS,
-  ).toISOString();
   return await client.authorizeRuntimeAccess(
     {
       deviceId,
-      organizationId:
-        access?.organizationId ?? account?.organizationId ?? undefined,
-      principalId: account?.userId ?? undefined,
-      canRun: true,
-      leaseExpiresAt,
-      evidence: {
-        source: "owl-cloud-effective-access-v1",
-        role: access?.role ?? account?.role ?? null,
-        canView: access?.canView === true,
-        canRun: true,
-        canSchedule: access?.canSchedule === true,
-        canApprove: access?.canApprove === true,
-      },
+      leaseToken: runtimeLease.leaseToken,
     },
     {
-      idempotencyKey: `runtime-access-authorize:${deviceId}:${leaseExpiresAt}`,
+      idempotencyKey:
+        `runtime-access-authorize:${deviceId}:${runtimeLease?.lease?.leaseId ?? "cloud-lease"}`,
     },
   );
 }
 
-async function safeSyncRuntimeAccess(account, access, deviceId) {
+async function safeSyncRuntimeAccess(
+  account,
+  access,
+  deviceId,
+  runtimeLease,
+) {
   try {
-    const state = await syncRuntimeAccessFromCloud(account, access, deviceId);
+    const state = await syncRuntimeAccessFromCloud(
+      account,
+      access,
+      deviceId,
+      runtimeLease,
+    );
     record("info", "runtime-access", "Runtime access projection updated", {
       state: state?.state ?? null,
       reasonCode: state?.reasonCode ?? null,
@@ -460,11 +482,14 @@ async function completeCloudAccountLogin(url) {
       enrolled.account ?? null,
       enrolled.access ?? null,
       enrolled.device?.deviceId ?? null,
+      enrolled.runtimeLease ?? null,
     );
     cloudAccountState = {
       status: "ready",
       account: enrolled.account ?? null,
       access: enrolled.access ?? null,
+      entitlement:
+        enrolled.entitlement ?? enrolled.account?.entitlement ?? null,
       runtimeAccess,
       deviceId: enrolled.device?.deviceId ?? null,
       lastErrorCode: null,
@@ -510,6 +535,7 @@ async function resumeCloudAccountSession() {
         ...cloudAccountState,
         status: deviceId ? "device_enrolled" : "signed_out",
         access: null,
+        entitlement: null,
         runtimeAccess,
         deviceId,
       };
@@ -519,11 +545,14 @@ async function resumeCloudAccountSession() {
       resumed.account ?? null,
       resumed.access ?? null,
       resumed.deviceId ?? null,
+      resumed.runtimeLease ?? null,
     );
     cloudAccountState = {
       status: "ready",
       account: resumed.account ?? null,
       access: resumed.access ?? null,
+      entitlement:
+        resumed.entitlement ?? resumed.account?.entitlement ?? null,
       runtimeAccess,
       deviceId: resumed.deviceId ?? null,
       lastErrorCode: null,
@@ -600,12 +629,18 @@ async function recoverRuntimeAccessAfterReconnect() {
       resumed.account ?? cloudAccountState.account ?? null,
       resumed.access ?? null,
       resumed.deviceId ?? cloudAccountState.deviceId ?? null,
+      resumed.runtimeLease ?? null,
     );
     cloudAccountState = {
       ...cloudAccountState,
       status: "ready",
       account: resumed.account ?? cloudAccountState.account ?? null,
       access: resumed.access ?? null,
+      entitlement:
+        resumed.entitlement ??
+        resumed.account?.entitlement ??
+        cloudAccountState.entitlement ??
+        null,
       runtimeAccess,
       deviceId: resumed.deviceId ?? cloudAccountState.deviceId ?? null,
       lastErrorCode: null,
@@ -642,6 +677,7 @@ async function logoutCloudAccount() {
     status: deviceId ? "device_enrolled" : "signed_out",
     account: null,
     access: null,
+    entitlement: null,
     runtimeAccess,
     deviceId,
     lastErrorCode: null,
@@ -959,6 +995,7 @@ async function runtimeSnapshot(options = {}) {
     online &&
     cloudAccountState.status === "ready" &&
     cloudAccountState.access?.canRun === true &&
+    cloudAccountState.entitlement?.canRun === true &&
     effectiveRuntimeAccess?.state !== "READY"
   ) {
     const recovered = await recoverRuntimeAccessAfterReconnect();
