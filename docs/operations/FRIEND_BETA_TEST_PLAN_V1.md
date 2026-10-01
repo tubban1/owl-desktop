@@ -267,3 +267,30 @@ Gate: `npm run verify:durable-submit`.
 The current installed friend-beta-final does not yet contain `task_submit`; live ChatGPT verification of this new surface is deferred to the next packaged build.
 
 Development-runner note: this Mac currently has x64/Rosetta Node modules for owl-desktop while native arm64 Node lacks the matching Rollup optional binary. Vitest also intermittently stalls before test collection under the current local runner. This is a development-test environment issue and must not be confused with Runtime task execution. Direct Node verification is used for the new durable recovery gate until the local dependency architecture is normalized.
+
+### Automated continuation — 2026-10-01 later run
+
+Additional gates completed after transport hardening:
+
+```text
+formal icon source: assets/owl1254.png              PASS
+prepare:icon → build/icon.icns                     PASS
+TypeScript noEmit (native arm64 Node 22.23.3)       PASS
+Vite production build (x64/Rosetta Node)            PASS
+verify:release-components                           PASS
+Runtime pinned SHA/version/API                      PASS
+Tunnel arm64+x64 vendor contract                    PASS
+Runtime Host universal identity                     PASS
+OWL LAB Helper universal identity                   PASS
+```
+
+Observed local test-runner performance is abnormally slow on this developer Mac: TypeScript took ~17s and Vite ~18s. The same commands still completed successfully. Watchdogs should therefore distinguish “no output” from “process still making bounded progress” before killing a build.
+
+Current installed friend-beta-final live evidence:
+- `runtime.compile_task` successfully created a real durable `fs.write` task.
+- The task reported canonical action `fs.write`, encrypted durable storage, staging, episodic events and Runtime-owned progress.
+- Its owner was still `owl-mcp:<transport-session>`, proving the currently installed build is transport-scoped and validating the new source fix that uses persisted Desktop `settings.sessionId` as fallback owner.
+- ChatGPT connector schema currently advertises some stale legacy task tool names (for example `task_run`) that the live OWL MCP no longer exposes; calls return `Tool ... not found`. Tool-catalog/schema refresh must be part of reconnect/version negotiation.
+- A later `task_status` call on the current installed build timed out after 10s. This is live P0 evidence for the next packaged recovery test; it does not invalidate the new source-level `task_submit` gate, which passed independently through two fresh MCP transports.
+
+Do not use the current installed friend-beta-final as evidence that the new durable owner/task_submit fixes are live. They require a new package and owner-assisted install/reconnect test.
