@@ -63,7 +63,17 @@ function fixture() {
   fs.chmodSync(path.join(helper, "Contents", "MacOS", "ComputerMCPHelper"), 0o755);
 
   const secrets = new Map();
+  const settings = {
+    wakeName: "OWL",
+    wakeAliases: ["OWL Runtime", "AgentOS"],
+    allowedDirectories: [
+      path.join(home, "Desktop"),
+      path.join(home, "Documents"),
+      path.join(home, "Downloads"),
+    ],
+  };
   const store = {
+    getSettings: vi.fn(() => settings),
     readSecret: vi.fn((name, project) => secrets.get(`${project}:${name}`)),
     upsertSecret: vi.fn(({ name, project, value }) => {
       secrets.set(`${project}:${name}`, value);
@@ -71,7 +81,7 @@ function fixture() {
     }),
   };
 
-  return { root, resources, home, store, secrets };
+  return { root, resources, home, store, secrets, settings };
 }
 
 describe("LocalRuntimeBootstrap", () => {
@@ -123,6 +133,8 @@ describe("LocalRuntimeBootstrap", () => {
 
     const env = fs.readFileSync(path.join(f.home, ".owl", "runtime.env"), "utf8");
     expect(env).toContain("PORT=8788");
+    expect(env).toContain("OWL_WAKE_NAME=OWL");
+    expect(env).toContain("OWL_ALIASES=OWL Runtime,AgentOS");
     expect(env).toContain("ELECTRON_RUN_AS_NODE=1");
     expect(env).toContain("OWL_RUNTIME_ACCESS_MODE=enforced");
     expect(env).toContain("OWL_APPROVAL_MODE=enforce");
@@ -153,6 +165,34 @@ describe("LocalRuntimeBootstrap", () => {
     expect(launchAgent).toContain(".owl/current/dist/server.js");
   });
 
+
+  it("projects user wake name, aliases, and allowed folders into Runtime env", () => {
+    const f = fixture();
+    const custom = path.join(f.home, "Projects");
+    fs.mkdirSync(custom, { recursive: true });
+    f.settings.wakeName = "Jarvis";
+    f.settings.wakeAliases = ["OWL", "Assistant"];
+    f.settings.allowedDirectories = [custom];
+
+    const bootstrap = new LocalRuntimeBootstrap({
+      resourcesPath: f.resources,
+      desktopExecPath: "/Applications/OWL LAB Desktop.app/Contents/MacOS/OWL LAB Desktop",
+      store: f.store,
+      homeDir: f.home,
+      skipLaunchd: true,
+    });
+
+    const environment = bootstrap.ensureEnvironment();
+    const env = fs.readFileSync(path.join(f.home, ".owl", "runtime.env"), "utf8");
+
+    expect(environment.wakeName).toBe("Jarvis");
+    expect(environment.wakeAliases).toEqual(["OWL", "Assistant"]);
+    expect(environment.allowedDirectories).toBe(custom);
+    expect(env).toContain("OWL_WAKE_NAME=Jarvis");
+    expect(env).toContain("OWL_ALIASES=OWL,Assistant");
+    expect(env).toContain(`ALLOWED_DIRECTORIES=${custom}`);
+    expect(env).not.toContain(path.join(f.home, "Desktop"));
+  });
 
   it("keeps an already healthy packaged Runtime running without launchd churn", async () => {
     const f = fixture();

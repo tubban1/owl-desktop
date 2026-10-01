@@ -39,6 +39,7 @@ function writeEnv(file, values) {
   const keys = [
     "PORT",
     "OWL_WAKE_NAME",
+    "OWL_ALIASES",
     "ELECTRON_RUN_AS_NODE",
     "OWL_RUNTIME_MODE",
     "OWL_STATE_ROOT",
@@ -321,6 +322,7 @@ export class LocalRuntimeBootstrap {
 
   ensureEnvironment() {
     const env = readEnv(this.envFile);
+    const settings = this.store.getSettings();
     const standardRoots = [
       path.join(this.homeDir, "Desktop"),
       path.join(this.homeDir, "Documents"),
@@ -328,15 +330,33 @@ export class LocalRuntimeBootstrap {
     ].filter((candidate) => fs.existsSync(candidate));
 
     if (!env.has("PORT")) env.set("PORT", String(this.runtimePort));
-    if (!env.has("OWL_WAKE_NAME")) env.set("OWL_WAKE_NAME", "OWL");
+    const wakeName =
+      typeof settings.wakeName === "string" && settings.wakeName.trim()
+        ? settings.wakeName.trim()
+        : "OWL";
+    const wakeAliases = Array.isArray(settings.wakeAliases)
+      ? settings.wakeAliases
+          .filter((value) => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : [];
+    const allowedDirectories =
+      Array.isArray(settings.allowedDirectories) &&
+      settings.allowedDirectories.length > 0
+        ? settings.allowedDirectories
+            .filter((value) => typeof value === "string")
+            .map((value) => path.resolve(value))
+            .filter((value) => fs.existsSync(value))
+        : standardRoots;
+    env.set("OWL_WAKE_NAME", wakeName);
+    if (wakeAliases.length > 0) env.set("OWL_ALIASES", wakeAliases.join(","));
+    else env.delete("OWL_ALIASES");
     env.set("ELECTRON_RUN_AS_NODE", "1");
     env.set("OWL_RUNTIME_MODE", "production");
     env.set("OWL_STATE_ROOT", this.stateRoot);
     env.set("OWL_RUNTIME_ACCESS_MODE", "enforced");
     env.set("OWL_APPROVAL_MODE", "enforce");
-    if (!env.has("ALLOWED_DIRECTORIES")) {
-      env.set("ALLOWED_DIRECTORIES", standardRoots.join(","));
-    }
+    env.set("ALLOWED_DIRECTORIES", allowedDirectories.join(","));
     if (!env.has("ALLOW_WRITE")) env.set("ALLOW_WRITE", "true");
     if (!env.has("ALLOW_DELETE")) env.set("ALLOW_DELETE", "false");
     if (!env.has("ALLOW_SHELL")) env.set("ALLOW_SHELL", "false");
@@ -360,6 +380,8 @@ export class LocalRuntimeBootstrap {
     return {
       token,
       port: Number(env.get("PORT") || this.runtimePort),
+      wakeName,
+      wakeAliases,
       allowedDirectories: env.get("ALLOWED_DIRECTORIES") ?? "",
       allowWrite: env.get("ALLOW_WRITE") === "true",
       allowDelete: env.get("ALLOW_DELETE") === "true",

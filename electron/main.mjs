@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { configureOwlDesktopStorage } from "./storage-layout.mjs";
 import { DesktopStore } from "./store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
@@ -123,6 +123,47 @@ function localRuntimeBootstrapPort(settings) {
   }
 }
 
+function createLocalRuntimeBootstrap(settings) {
+  const port = localRuntimeBootstrapPort(settings);
+  if (!port) return null;
+  return new LocalRuntimeBootstrap({
+    resourcesPath: process.resourcesPath,
+    desktopExecPath: process.execPath,
+    store,
+    runtimePort: port,
+    onEvent(level, message, meta) {
+      record(level, "bootstrap", message, meta);
+    },
+  });
+}
+
+async function applyRuntimeUserPreferences(settings) {
+  if (!app.isPackaged) {
+    record(
+      "info",
+      "runtime",
+      "Runtime preferences saved; DEV restart required to apply",
+      {
+        wakeName: settings.wakeName,
+        allowedDirectoryCount: settings.allowedDirectories?.length ?? 0,
+      },
+    );
+    return { applied: false, requiresDevRestart: true };
+  }
+  const bootstrap = createLocalRuntimeBootstrap(settings);
+  if (!bootstrap) {
+    return { applied: false, requiresDevRestart: false };
+  }
+  const environment = bootstrap.ensureEnvironment();
+  await runtimeHostSupervisor().restartService();
+  record("info", "runtime", "Runtime preferences applied", {
+    wakeName: environment.wakeName,
+    allowedDirectoryCount:
+      environment.allowedDirectories?.split(",").filter(Boolean).length ?? 0,
+  });
+  return { applied: true, requiresDevRestart: false, environment };
+}
+
 async function ensurePackagedLocalRuntime(settings) {
   if (!app.isPackaged) return null;
   const port = localRuntimeBootstrapPort(settings);
@@ -140,15 +181,7 @@ async function ensurePackagedLocalRuntime(settings) {
     runtimeBaseUrl: settings.runtimeBaseUrl,
     port,
   });
-  const bootstrap = new LocalRuntimeBootstrap({
-    resourcesPath: process.resourcesPath,
-    desktopExecPath: process.execPath,
-    store,
-    runtimePort: port,
-    onEvent(level, message, meta) {
-      record(level, "bootstrap", message, meta);
-    },
-  });
+  const bootstrap = createLocalRuntimeBootstrap(settings);
   try {
     const result = await bootstrap.ensure();
     record("info", "bootstrap", "Bundled OWL Runtime is ready", {
@@ -830,7 +863,7 @@ async function startMcp() {
   return mcpState;
 }
 
-async function runtimeSnapshot() {
+async function runtimeSnapshot(options = {}) {
   const settings = store.getSettings();
   const client = runtimeClient();
 
@@ -897,17 +930,19 @@ async function runtimeSnapshot() {
     activity: activity.slice(0, 50),
   };
 
-  record(
-    online ? "info" : "warn",
-    "runtime",
-    online ? "Runtime snapshot refreshed" : "Runtime connection unavailable",
-    {
-      baseUrl: effectiveRuntimeBaseUrl(settings),
-      configuredBaseUrl: settings.runtimeBaseUrl,
-      devOverride: !app.isPackaged && Boolean(process.env.OWL_RUNTIME_DEV_URL),
-      latencyMs: result.latencyMs,
-    },
-  );
+  if (options.quiet !== true) {
+    record(
+      online ? "info" : "warn",
+      "runtime",
+      online ? "Runtime snapshot refreshed" : "Runtime connection unavailable",
+      {
+        baseUrl: effectiveRuntimeBaseUrl(settings),
+        configuredBaseUrl: settings.runtimeBaseUrl,
+        devOverride: !app.isPackaged && Boolean(process.env.OWL_RUNTIME_DEV_URL),
+        latencyMs: result.latencyMs,
+      },
+    );
+  }
   result.activity = activity.slice(0, 50);
   return result;
 }
@@ -986,6 +1021,7 @@ function registerIpc() {
   ipcMain.handle("desktop:activity:list", () => activity.slice(0, 200));
   ipcMain.handle("desktop:environment", () => ({
     appVersion: app.getVersion(),
+    isPackaged: app.isPackaged,
     platform: process.platform,
     arch: process.arch,
     electronVersion: process.versions.electron,
@@ -1010,7 +1046,7 @@ function registerIpc() {
     },
   }));
 
-  ipcMain.handle("runtime:refresh", () => runtimeSnapshot());
+  ipcMain.handle("runtime:refresh", (_event, options) => runtimeSnapshot(options ?? {}));
   ipcMain.handle("cloud:status", () => cloudBridgeSnapshot());
   ipcMain.handle("cloud:account-status", () => cloudAccountSnapshot());
   ipcMain.handle("cloud:login", () => beginCloudAccountLogin());
@@ -1213,6 +1249,14 @@ function registerIpc() {
   ipcMain.handle("accounts:capabilities", (_event, id) =>
     identityVault.capabilities(id));
   ipcMain.handle("settings:get", () => store.getSettings());
+  ipcMain.handle("settings:pick-folders", async () => {
+    const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
+      title: "Choose folders OWL can access",
+      buttonLabel: "Allow folders",
+      properties: ["openDirectory", "multiSelections", "createDirectory"],
+    });
+    return result.canceled ? [] : result.filePaths;
+  });
   ipcMain.handle("settings:update", async (_event, patch) => {
     const next = store.updateSettings(patch ?? {});
     if (typeof patch?.launchAtLogin === "boolean" && app.isPackaged) {
@@ -1224,6 +1268,13 @@ function registerIpc() {
       "mcpPort" in (patch ?? {})
     ) {
       await startMcp();
+    }
+    if (
+      "wakeName" in (patch ?? {}) ||
+      "wakeAliases" in (patch ?? {}) ||
+      "allowedDirectories" in (patch ?? {})
+    ) {
+      await applyRuntimeUserPreferences(next);
     }
     if (
       "runtimeBaseUrl" in (patch ?? {}) ||

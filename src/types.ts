@@ -1,4 +1,7 @@
 export type Settings = {
+  wakeName: string;
+  wakeAliases: string[];
+  allowedDirectories: string[];
   runtimeBaseUrl: string;
   autoConnectRuntime: boolean;
   mcpEnabled: boolean;
@@ -316,6 +319,7 @@ export type RuntimeSnapshot = {
 
 export type DesktopEnvironment = {
   appVersion: string;
+  isPackaged: boolean;
   platform: string;
   arch: string;
   electronVersion: string;

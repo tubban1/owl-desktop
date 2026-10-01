@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { app, safeStorage } from "electron";
@@ -19,7 +20,15 @@ export class DesktopStore {
 
   getSettings() {
     const stored = readJson(this.settingsFile, {});
+    const standardFolders = [
+      path.join(os.homedir(), "Desktop"),
+      path.join(os.homedir(), "Documents"),
+      path.join(os.homedir(), "Downloads"),
+    ].filter((candidate) => fs.existsSync(candidate));
     const settings = {
+      wakeName: "OWL",
+      wakeAliases: ["OWL Runtime", "AgentOS"],
+      allowedDirectories: standardFolders,
       runtimeBaseUrl: "http://127.0.0.1:8788",
       autoConnectRuntime: true,
       mcpEnabled: true,
@@ -42,6 +51,26 @@ export class DesktopStore {
       sessionId: stored.sessionId || `owl-desktop:${randomUUID()}`,
       ...stored,
     };
+    settings.wakeName =
+      typeof settings.wakeName === "string" && settings.wakeName.trim()
+        ? settings.wakeName.trim().slice(0, 64)
+        : "OWL";
+    settings.wakeAliases = Array.isArray(settings.wakeAliases)
+      ? [...new Set(
+          settings.wakeAliases
+            .filter((value) => typeof value === "string")
+            .map((value) => value.trim())
+            .filter(Boolean),
+        )].slice(0, 12)
+      : [];
+    settings.allowedDirectories = Array.isArray(settings.allowedDirectories)
+      ? [...new Set(
+          settings.allowedDirectories
+            .filter((value) => typeof value === "string")
+            .map((value) => path.resolve(value))
+            .filter((value) => fs.existsSync(value)),
+        )]
+      : standardFolders;
     if (!stored.sessionId) writeJson(this.settingsFile, settings);
     return settings;
   }

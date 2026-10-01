@@ -397,3 +397,64 @@ desktop screenshot PASS
 The OCR result from the real Electron window also confirmed the product-level top status is **Ready**.
 
 In development the macOS process name is still `Electron`, so background-window operations should target `Electron`. Packaged builds use the branded application identity.
+
+
+## Human-centered Desktop UX — current implementation
+
+The next Desktop RC now follows `docs/product/HUMAN_CENTERED_DESKTOP_UX_V1.md`.
+
+Implemented in the current source worktree:
+
+- primary navigation reduced to Home / Requests / Activity / Skills / Accounts / Settings;
+- Sessions / Runtime / Secrets moved under Advanced;
+- Home separates product readiness from current AI work activity;
+- activity states derive from canonical Runtime Tasks/Processes/Event reconciliation/Agent Inbox rather than a Desktop execution state machine;
+- Working / Waiting / Possibly stuck / Needs attention / Idle user states;
+- 3-second quiet Home polling without log spam;
+- Wake name and aliases exposed as everyday settings;
+- Allowed folders exposed with a native folder picker and explicit remove controls;
+- packaged Runtime environment is driven by saved Wake/Allowed-folder settings;
+- DEV `dev:full` consumes the same saved user preferences while adding source repos only for development;
+- Runtime/MCP/Tunnel/Cloud implementation details remain in collapsed Advanced settings.
+
+Source gate after this implementation: 23/23 test files, 115/115 tests, TypeScript build PASS, Vite production build PASS, git diff check PASS.
+
+### Final canonical DEV UX evidence
+
+Final DEV ran against canonical Runtime main `4e24c19fef12704eb5fe97c1283a3d8c32a4df4c` on isolated port `18788`.
+
+Real OWL self-chain OCR of `OWL LAB — Desktop` verified:
+
+- primary navigation is Home / Requests / Activity / Skills / Accounts / Settings;
+- Sessions / Runtime / Secrets are under Advanced;
+- Settings visibly exposes Wake name, aliases, Allowed folders, Add folder and Behaviour;
+- Home visibly separates PRODUCT READINESS from WHAT OWL IS DOING;
+- Ready + no work projects Idle / “OWL is ready for work”;
+- a real Runtime-managed `sleep 10` process automatically projected Working / “Background process running” / elapsed runtime / one running process;
+- after the process exited with code 0, Home automatically returned to Idle on the 3-second quiet refresh;
+- an intentionally generated historical MCP error was initially found to incorrectly override current-work state; this was fixed so historical log errors remain in Activity rather than falsely presenting current work as failed;
+- Waiting / Possibly stuck / Needs attention are covered by deterministic `deriveWorkState` tests against Runtime-shaped projections.
+
+### Local E2E timeout diagnosis
+
+An apparent `Runtime request timed out after 10000ms` at MCP `git_status` was reproduced and isolated.
+
+Direct Git completed in roughly 50 ms and normal OWL MCP Git status completed in the low-second range. Raising the timeout to 30 seconds still timed out when the E2E was launched inside `execute_command(workspace_mode=write)`.
+
+Root cause: the outer verification command held the Desktop repository's exclusive Runtime workspace lease while the nested E2E asked the same Runtime to access that repository. The nested request correctly waited for the outer lease, while the outer command waited for the nested request: a verification-orchestration self-deadlock.
+
+The temporary 30-second timeout experiment was fully reverted. Product timeouts remain unchanged.
+
+Re-running the unchanged local E2E without an outer write lease passed:
+
+```text
+PASS tool discovery
+PASS RuntimeClient info
+PASS MCP Agent Inbox discovery
+PASS MCP → Runtime git.query → local repository
+PASS deterministic read-only retry
+PASS MCP detached task start/status (12ms acceptance, revision 9)
+PASS same logical owner reconnect
+```
+
+This is also evidence that future self-dogfood verifiers must not wrap nested Runtime calls inside a conflicting outer write workspace lease.

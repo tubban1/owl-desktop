@@ -3,23 +3,27 @@ import {
   Activity, Boxes, CheckCircle2, Cloud, Cpu, Gauge, HardDrive,
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
   Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
-  AlertTriangle, ArrowRight,
+  AlertTriangle, ArrowRight, BrainCircuit, Clock3, FolderOpen, X,
 } from "lucide-react";
 import type { AccountMeta, ActivityEntry, AgentRequest, CloudAccountStatus, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
+import { deriveWorkState } from "./workState";
 
 type Page = "overview" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
 
 const nav = [
-  { id: "overview" as Page, label: "Overview", icon: Gauge },
-  { id: "sessions" as Page, label: "Sessions", icon: ListTree },
-  { id: "agent-inbox" as Page, label: "Agent Inbox", icon: Inbox },
-  { id: "logs" as Page, label: "Live Logs", icon: Terminal },
-  { id: "runtime" as Page, label: "Runtime", icon: Boxes },
+  { id: "overview" as Page, label: "Home", icon: Gauge },
+  { id: "agent-inbox" as Page, label: "Requests", icon: Inbox },
+  { id: "logs" as Page, label: "Activity", icon: Activity },
   { id: "skills" as Page, label: "Skills", icon: Puzzle },
   { id: "accounts" as Page, label: "Accounts", icon: UserRound },
-  { id: "secrets" as Page, label: "Secrets", icon: KeyRound },
   { id: "settings" as Page, label: "Settings", icon: Settings2 },
+];
+
+const advancedNav = [
+  { id: "sessions" as Page, label: "Sessions", icon: ListTree },
+  { id: "runtime" as Page, label: "Runtime", icon: Boxes },
+  { id: "secrets" as Page, label: "Secrets", icon: KeyRound },
 ];
 
 const pretty = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
@@ -32,6 +36,28 @@ const formatLogSource = (value: string) => ({
   cloud: "Cloud Bridge",
   tunnel: "OWL Tunnel",
 }[value] ?? value.replaceAll("-", " ").replace(/\b\w/g, (char) => char.toUpperCase()));
+
+const collectionRows = (
+  value: unknown,
+  keys: string[],
+): Array<Record<string, any>> => {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is Record<string, any> =>
+      Boolean(item && typeof item === "object"),
+    );
+  }
+  if (!value || typeof value !== "object") return [];
+  const object = value as Record<string, unknown>;
+  for (const key of keys) {
+    if (Array.isArray(object[key])) {
+      return (object[key] as unknown[]).filter(
+        (item): item is Record<string, any> =>
+          Boolean(item && typeof item === "object"),
+      );
+    }
+  }
+  return collectionRows(object.result, keys);
+};
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange(v: boolean): void }) {
   return <button className={"toggle " + (checked ? "on" : "")} onClick={() => onChange(!checked)} aria-pressed={checked}><span /></button>;
@@ -72,6 +98,7 @@ export default function App() {
   const [logLevel, setLogLevel] = useState<"all" | "warn" | "error">("all");
   const [logSource, setLogSource] = useState("all");
   const [logQuery, setLogQuery] = useState("");
+  const [now, setNow] = useState(() => Date.now());
 
   const online = snapshot?.mode === "live";
   const runtimeAccess = snapshot?.runtimeAccess ?? cloudAccount?.runtimeAccess ?? null;
@@ -133,19 +160,20 @@ export default function App() {
 
   const readinessReady = productReadiness.state === "READY";
 
-  const refresh = async () => {
-    setBusy(true);
+  const refresh = async (interactive = true) => {
+    if (interactive) setBusy(true);
     try {
       await window.owlDesktop.runtimeEventSync().catch(() => undefined);
       const [nextSnapshot, nextAgentRequests] = await Promise.all([
-        window.owlDesktop.refreshRuntime(),
+        window.owlDesktop.refreshRuntime({ quiet: !interactive }),
         window.owlDesktop.listAgentRequests({ limit: 100 }),
       ]);
       setSnapshot(nextSnapshot);
       setLiveActivity(nextSnapshot.activity ?? []);
       setAgentRequests(nextAgentRequests);
+      setNow(Date.now());
     } finally {
-      setBusy(false);
+      if (interactive) setBusy(false);
     }
   };
 
@@ -164,14 +192,23 @@ export default function App() {
       setAccounts(nextAccounts);
       setAgentRequests(nextAgentRequests);
       setCloudAccount(nextCloudAccount);
-      if (nextSettings.autoConnectRuntime) void refresh();
+      if (nextSettings.autoConnectRuntime) void refresh(false);
     });
     const unsubscribe = window.owlDesktop.onCloudAccountUpdated((value) => {
       setCloudAccount(value);
-      void refresh();
+      void refresh(false);
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (page !== "overview") return;
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      void refresh(false);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [page]);
 
   const runtimeVersion = snapshot?.info?.runtimeVersion ?? "Not connected";
   const apiVersion = snapshot?.info?.apiVersion ?? "—";
@@ -182,6 +219,9 @@ export default function App() {
     const next = await window.owlDesktop.updateSettings(patch);
     setSettings(next);
     if (
+      "wakeName" in patch ||
+      "wakeAliases" in patch ||
+      "allowedDirectories" in patch ||
       "runtimeBaseUrl" in patch ||
       "mcpEnabled" in patch ||
       "mcpPort" in patch ||
@@ -195,8 +235,36 @@ export default function App() {
     ) {
       await refresh();
     }
-    setNotice("Settings saved");
-    window.setTimeout(() => setNotice(""), 1600);
+    const runtimePreferenceChanged =
+      "wakeName" in patch ||
+      "wakeAliases" in patch ||
+      "allowedDirectories" in patch;
+    setNotice(
+      runtimePreferenceChanged && env?.isPackaged === false
+        ? "Saved · restart dev:full to apply Runtime preferences"
+        : "Settings saved",
+    );
+    window.setTimeout(() => setNotice(""), 2400);
+  };
+
+  const addAllowedFolders = async () => {
+    if (!settings) return;
+    const picked = await window.owlDesktop.pickAllowedFolders();
+    if (picked.length === 0) return;
+    await saveSettings({
+      allowedDirectories: [
+        ...new Set([...settings.allowedDirectories, ...picked]),
+      ],
+    });
+  };
+
+  const removeAllowedFolder = async (folder: string) => {
+    if (!settings) return;
+    await saveSettings({
+      allowedDirectories: settings.allowedDirectories.filter(
+        (value) => value !== folder,
+      ),
+    });
   };
 
   const readinessActionLabel =
@@ -315,6 +383,45 @@ export default function App() {
   const runtimeEventNeedsAttention =
     runtimeEventStatus?.status === "needs_attention";
 
+  const taskRows = useMemo(
+    () => collectionRows(snapshot?.tasks, ["tasks", "items"]),
+    [snapshot?.tasks],
+  );
+  const processRows = useMemo(
+    () => collectionRows(snapshot?.processes, ["processes", "items"]),
+    [snapshot?.processes],
+  );
+  const runningProcesses = useMemo(
+    () => processRows.filter((process) => process.running === true),
+    [processRows],
+  );
+
+  const workState = useMemo(() => deriveWorkState({
+    taskRows,
+    runningProcesses,
+    readinessReady,
+    productReadiness,
+    runtimeEventNeedsAttention,
+    runtimeEventStatus,
+    claimedAgentRequests,
+    pendingAgentRequests,
+    wakeName: settings?.wakeName,
+    checkedAt: snapshot?.checkedAt,
+    now,
+  }), [
+    taskRows,
+    runningProcesses,
+    now,
+    readinessReady,
+    productReadiness,
+    runtimeEventNeedsAttention,
+    runtimeEventStatus,
+    claimedAgentRequests,
+    pendingAgentRequests,
+    settings?.wakeName,
+    snapshot?.checkedAt,
+  ]);
+
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="traffic-spacer" />
@@ -322,7 +429,15 @@ export default function App() {
       <nav>{nav.map((item) => {
         const Icon = item.icon;
         return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={17} /><span>{item.label}</span>{item.id === "agent-inbox" && runtimeEventNeedsAttention ? <span className="nav-badge attention">!</span> : item.id === "agent-inbox" && pendingAgentRequests.length > 0 ? <span className="nav-badge">{pendingAgentRequests.length}</span> : null}</button>;
-      })}</nav>
+      })}
+        <details className="nav-advanced" open={advancedNav.some((item) => item.id === page)}>
+          <summary><span>Advanced</span><span>•••</span></summary>
+          <div>{advancedNav.map((item) => {
+            const Icon = item.icon;
+            return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={16} /><span>{item.label}</span></button>;
+          })}</div>
+        </details>
+      </nav>
       <div className="sidebar-bottom">
         <div className="device-card"><div className="device-dot" /><div><strong>This Mac</strong><span>{env ? env.platform + " · " + env.arch : "Loading…"}</span></div></div>
         <div className="build-meta">OWL LAB Desktop {env?.appVersion ?? "0.1.0"}</div>
@@ -331,31 +446,59 @@ export default function App() {
 
     <main className="main">
       <header className="topbar">
-        <div className="crumb">LOCAL CONTROL PLANE</div>
-        <div className="top-actions">{notice && <span className="notice">{notice}</span>}<span className={"readiness-pill " + (readinessReady ? "ready" : "attention")}>{readinessReady ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{productReadiness.label}</span><button className="icon-button" onClick={refresh} disabled={busy} title="Refresh OWL LAB status"><RefreshCw size={16} className={busy ? "spin" : ""} /></button></div>
+        <div className="crumb">OWL LAB · THIS MAC</div>
+        <div className="top-actions">{notice && <span className="notice">{notice}</span>}<span className={"readiness-pill " + (readinessReady ? "ready" : "attention")}>{readinessReady ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{productReadiness.label}</span><button className="icon-button" onClick={() => void refresh()} disabled={busy} title="Refresh OWL LAB status"><RefreshCw size={16} className={busy ? "spin" : ""} /></button></div>
       </header>
 
       <div className="content">
         {page === "overview" && <>
-          <SectionHeader title="Good evening." description="One readiness state for account, local execution and ChatGPT connectivity." action={<button className="primary" onClick={runReadinessAction} disabled={busy}>{productReadiness.state === "READY" ? <RefreshCw size={15} /> : <ArrowRight size={15} />}{readinessActionLabel}</button>} />
+          <SectionHeader title="Your OWL" description="See what OWL is doing, whether it is waiting, and what needs your attention." action={<button className="primary" onClick={runReadinessAction} disabled={busy}>{productReadiness.state === "READY" ? <RefreshCw size={15} /> : <ArrowRight size={15} />}{readinessActionLabel}</button>} />
           <section className={"hero-status " + (readinessReady ? "healthy" : "warning")}>
             <div className="hero-icon">{readinessReady ? <CheckCircle2 size={24} /> : <AlertTriangle size={24} />}</div>
             <div className="hero-copy"><span>PRODUCT READINESS</span><h2>{productReadiness.title}</h2><p>{productReadiness.description}</p></div>
             <div className="hero-side"><strong>{online ? snapshot?.latencyMs + " ms" : "—"}</strong><span>Runtime probe</span></div>
           </section>
+
+          <section className={"work-status-card " + workState.state}>
+            <div className="work-status-icon">
+              {workState.state === "working" ? <BrainCircuit size={24} /> :
+               workState.state === "idle" ? <CheckCircle2 size={24} /> :
+               workState.state === "waiting" ? <Clock3 size={24} /> :
+               <AlertTriangle size={24} />}
+            </div>
+            <div className="work-status-main">
+              <div className="work-status-heading">
+                <span className="eyebrow">WHAT OWL IS DOING</span>
+                <span className={"work-state-pill " + workState.state}>{workState.label}</span>
+              </div>
+              <h2>{workState.title}</h2>
+              <p>{workState.detail}</p>
+              {workState.progress !== null && <div className="work-progress"><span style={{ width: `${workState.progress}%` }} /></div>}
+              <div className="work-status-meta">
+                <span>{workState.signal}</span>
+                <span>{runningProcesses.length} running process{runningProcesses.length === 1 ? "" : "es"}</span>
+                <span>{workState.lastChangedAt ? "Updated " + formatTime(workState.lastChangedAt) : "Waiting for first update"}</span>
+              </div>
+            </div>
+            <div className="work-status-actions">
+              <button className="secondary" onClick={() => setPage("runtime")}>View work</button>
+              <button className="text-button" onClick={() => setPage("logs")}>View logs</button>
+            </div>
+          </section>
+
           <div className="metrics-grid">
-            <MetricCard label="Persistent tasks" value={snapshot?.metrics.tasks ?? "—"} caption="Runtime-owned" icon={HardDrive} />
-            <MetricCard label="Processes" value={snapshot?.metrics.processes ?? "—"} caption="Active + retained" icon={Cpu} />
-            <MetricCard label="Approvals" value={snapshot?.metrics.approvals ?? "—"} caption="Runtime policy" icon={ShieldCheck} />
-            <MetricCard label="Secrets" value={secrets.length} caption="OS-encrypted" icon={KeyRound} />
+            <MetricCard label="Tasks" value={snapshot?.metrics.tasks ?? "—"} caption="Recent & persistent" icon={HardDrive} />
+            <MetricCard label="Background work" value={runningProcesses.length} caption="Running now" icon={Cpu} />
+            <MetricCard label="Approvals" value={snapshot?.metrics.approvals ?? "—"} caption="May need you" icon={ShieldCheck} />
+            <MetricCard label="Connected secrets" value={secrets.length} caption="Encrypted locally" icon={KeyRound} />
           </div>
           <div className="two-col">
-            <section className="panel"><div className="panel-heading"><div><span className="eyebrow">COMPONENTS</span><h3>Platform status</h3></div></div>
+            <section className="panel"><div className="panel-heading"><div><span className="eyebrow">SYSTEM HEALTH</span><h3>Connections</h3></div></div>
               <div className="component-list">
-                <div><span className="component-icon"><Boxes size={17} /></span><p><strong>OWL LAB Runtime</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
-                <div><span className="component-icon"><Terminal size={17} /></span><p><strong>OWL MCP</strong><small>{snapshot?.mcp.url ?? snapshot?.mcp.error ?? "Desktop adapter boundary"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
-                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL LAB Cloud Bridge</strong><small>{snapshot?.cloud.deviceId ?? "Account/device connection"}</small></p>{cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}</div>
-                <div><span className="component-icon"><Inbox size={17} /></span><p><strong>Agent Inbox</strong><small>{runtimeEventNeedsAttention ? "Runtime event reconciliation required" : "Structured work waiting for an LLM/agent"}</small></p><span className={runtimeEventNeedsAttention ? "neutral-pill warning-pill" : "neutral-pill"}>{runtimeEventNeedsAttention ? "needs attention" : pendingAgentRequests.length + " pending"}</span></div>
+                <div><span className="component-icon"><Boxes size={17} /></span><p><strong>Local engine</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
+                <div><span className="component-icon"><Terminal size={17} /></span><p><strong>ChatGPT connection</strong><small>{snapshot?.mcp.status === "running" ? "ChatGPT can reach this Mac" : snapshot?.mcp.error ?? "Not connected"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
+                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL LAB account</strong><small>{cloudOnline ? "Cloud account & device connected" : "Cloud connection unavailable"}</small></p>{cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}</div>
+                <div><span className="component-icon"><Inbox size={17} /></span><p><strong>Requests</strong><small>{runtimeEventNeedsAttention ? "History needs attention before replay" : "Work waiting for an AI agent"}</small></p><span className={runtimeEventNeedsAttention ? "neutral-pill warning-pill" : "neutral-pill"}>{runtimeEventNeedsAttention ? "needs attention" : pendingAgentRequests.length + " pending"}</span></div>
               </div>
             </section>
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RECENT ACTIVITY</span><h3>Local events</h3></div><button className="text-button" onClick={() => setPage("logs")}>View logs</button></div>
@@ -380,7 +523,7 @@ export default function App() {
           <SectionHeader
             title="Agent Inbox"
             description="Structured reasoning work waiting for ChatGPT or another AI agent. Requests never override user intent or Runtime policy."
-            action={<button className="secondary" onClick={refresh}><RefreshCw size={15} />Refresh</button>}
+            action={<button className="secondary" onClick={() => void refresh()}><RefreshCw size={15} />Refresh</button>}
           />
 
           <section className={"panel runtime-event-feed " + (runtimeEventStatus?.status ?? "stopped")}>
@@ -562,7 +705,7 @@ export default function App() {
         </>}
 
         {page === "logs" && <>
-          <SectionHeader title="Live Logs" description="Readable operational events across Desktop, Runtime, MCP and Cloud. Filter the signal first; raw diagnostics stay available below." action={<button className="secondary" onClick={refresh}><RefreshCw size={15} />Refresh</button>} />
+          <SectionHeader title="Live Logs" description="Readable operational events across Desktop, Runtime, MCP and Cloud. Filter the signal first; raw diagnostics stay available below." action={<button className="secondary" onClick={() => void refresh()}><RefreshCw size={15} />Refresh</button>} />
           <section className="log-toolbar">
             <div className="log-filter-group" role="group" aria-label="Log severity">
               {(["all", "warn", "error"] as const).map((level) => <button key={level} className={logLevel === level ? "active" : ""} onClick={() => setLogLevel(level)}>{level === "all" ? "All" : level === "warn" ? "Warnings +" : "Errors"}</button>)}
@@ -657,11 +800,70 @@ export default function App() {
         </>}
 
         {page === "settings" && settings && <>
-          <SectionHeader title="Settings" description="Local product preferences and Runtime connectivity." />
+          <SectionHeader title="Settings" description="Everyday preferences first. Technical connection details stay out of the way." />
+
+          <section className="panel settings-panel everyday-settings">
+            <div className="panel-heading">
+              <div><span className="eyebrow">PERSONALISE OWL</span><h3>Name & invocation</h3></div>
+              <span className="neutral-pill">Everyday</span>
+            </div>
+            <div className="setting-row">
+              <div>
+                <strong>Wake name</strong>
+                <span>The name ChatGPT and other agents use to invoke your local OWL Runtime. Example: OWL or Jarvis.</span>
+              </div>
+              <input
+                className="setting-input compact-input"
+                value={settings.wakeName}
+                onChange={(e) => setSettings({ ...settings, wakeName: e.target.value })}
+                onBlur={() => saveSettings({ wakeName: settings.wakeName })}
+                maxLength={64}
+                placeholder="OWL"
+              />
+            </div>
+            <div className="setting-row">
+              <div>
+                <strong>Aliases</strong>
+                <span>Optional alternative names, separated by commas.</span>
+              </div>
+              <input
+                className="setting-input"
+                value={settings.wakeAliases.join(", ")}
+                onChange={(e) => setSettings({
+                  ...settings,
+                  wakeAliases: e.target.value.split(",").map((value) => value.trim()),
+                })}
+                onBlur={() => saveSettings({
+                  wakeAliases: settings.wakeAliases
+                    .map((value) => value.trim())
+                    .filter(Boolean),
+                })}
+                placeholder="OWL Runtime, AgentOS"
+              />
+            </div>
+          </section>
+
+          <section className="panel settings-panel folder-settings">
+            <div className="panel-heading">
+              <div><span className="eyebrow">FILES & FOLDERS</span><h3>Folders OWL can access</h3></div>
+              <button className="secondary" onClick={addAllowedFolders}><FolderOpen size={15} />Add folder</button>
+            </div>
+            <p className="panel-help">OWL can only read or write normal files inside these folders. OWL LAB's own internal product data is managed separately and does not need to be added here.</p>
+            <div className="allowed-folder-list">
+              {settings.allowedDirectories.map((folder) => <div className="allowed-folder-row" key={folder}>
+                <span className="folder-icon"><FolderOpen size={16} /></span>
+                <code>{folder}</code>
+                <button className="danger-icon" title="Remove folder" onClick={() => void removeAllowedFolder(folder)}><X size={15} /></button>
+              </div>)}
+              {settings.allowedDirectories.length === 0 && <div className="empty folder-empty">No folders are allowed. OWL cannot access your normal files until you add one.</div>}
+            </div>
+          </section>
+
           <section className="panel settings-panel">
+            <div className="panel-heading"><div><span className="eyebrow">BEHAVIOUR</span><h3>Desktop preferences</h3></div></div>
             <div className="setting-row"><div><strong>Launch at login</strong><span>Start OWL LAB Desktop automatically after macOS login.</span></div><Toggle checked={settings.launchAtLogin} onChange={(v) => saveSettings({ launchAtLogin: v })} /></div>
-            <div className="setting-row"><div><strong>Provider telemetry</strong><span>Send privacy-bounded operational metadata only. No command payload, credentials or user content.</span></div><Toggle checked={settings.cloudTelemetryEnabled} onChange={(v) => saveSettings({ cloudTelemetryEnabled: v })} /></div>
-            <div className="setting-row"><div><strong>Runtime diagnostics</strong><span>Keep redacted Runtime support projections available for troubleshooting and export.</span></div><Toggle checked={settings.diagnosticsEnabled} onChange={(v) => saveSettings({ diagnosticsEnabled: v })} /></div>
+            <div className="setting-row"><div><strong>Operational telemetry</strong><span>Share privacy-bounded health metadata. Never command payloads, credentials, or user content.</span></div><Toggle checked={settings.cloudTelemetryEnabled} onChange={(v) => saveSettings({ cloudTelemetryEnabled: v })} /></div>
+            <div className="setting-row"><div><strong>Diagnostics</strong><span>Keep redacted Runtime diagnostics available when something goes wrong.</span></div><Toggle checked={settings.diagnosticsEnabled} onChange={(v) => saveSettings({ diagnosticsEnabled: v })} /></div>
           </section>
 
           <details className="panel settings-panel advanced-settings">

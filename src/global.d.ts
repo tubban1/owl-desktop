@@ -27,7 +27,7 @@ declare global {
     owlDesktop: {
       environment(): Promise<DesktopEnvironment>;
       listActivity(): Promise<ActivityEntry[]>;
-      refreshRuntime(): Promise<RuntimeSnapshot>;
+      refreshRuntime(options?: { quiet?: boolean }): Promise<RuntimeSnapshot>;
       cloudStatus(): Promise<CloudBridgeStatus>;
       cloudAccountStatus(): Promise<CloudAccountStatus>;
       cloudLogin(): Promise<{ status: string; provider: string; region: string | null; redirectUri: string }>;
@@ -164,6 +164,7 @@ declare global {
         nativeSessionPreferred: boolean;
       } | null>;
       getSettings(): Promise<Settings>;
+      pickAllowedFolders(): Promise<string[]>;
       updateSettings(patch: Partial<Settings>): Promise<Settings>;
       listSecrets(): Promise<SecretMeta[]>;
       upsertSecret(input: {

@@ -31,6 +31,42 @@ const runtimeStateRoot = path.resolve(
   process.env.OWL_RUNTIME_DEV_STATE_ROOT?.trim() ||
     path.join(os.homedir(), ".owl-runtime-dev"),
 );
+const desktopSettingsFile =
+  process.env.OWL_DESKTOP_SETTINGS_FILE?.trim() ||
+  path.join(
+    os.homedir(),
+    "Library",
+    "Application Support",
+    "OWL LAB",
+    "desktop",
+    "settings.json",
+  );
+let desktopUserSettings = {};
+try {
+  desktopUserSettings = JSON.parse(fs.readFileSync(desktopSettingsFile, "utf8"));
+} catch {}
+const standardUserFolders = [
+  path.join(os.homedir(), "Desktop"),
+  path.join(os.homedir(), "Documents"),
+  path.join(os.homedir(), "Downloads"),
+].filter((candidate) => fs.existsSync(candidate));
+const userAllowedDirectories = Array.isArray(desktopUserSettings.allowedDirectories)
+  ? desktopUserSettings.allowedDirectories
+      .filter((value) => typeof value === "string")
+      .map((value) => path.resolve(value))
+      .filter((value) => fs.existsSync(value))
+  : standardUserFolders;
+const userWakeName =
+  typeof desktopUserSettings.wakeName === "string" &&
+  desktopUserSettings.wakeName.trim()
+    ? desktopUserSettings.wakeName.trim()
+    : "OWL";
+const userWakeAliases = Array.isArray(desktopUserSettings.wakeAliases)
+  ? desktopUserSettings.wakeAliases
+      .filter((value) => typeof value === "string")
+      .map((value) => value.trim())
+      .filter(Boolean)
+  : [];
 const tsxCli = path.join(runtimeRoot, "node_modules", "tsx", "dist", "cli.mjs");
 
 function parseNodeVersion(value) {
@@ -115,7 +151,7 @@ if (!fs.existsSync(runtimeNpmCli)) {
 const devPath = `${path.dirname(runtimeNode)}:${process.env.PATH ?? ""}`;
 const devAllowedDirectories =
   process.env.ALLOWED_DIRECTORIES?.trim() ||
-  [desktopRoot, runtimeRoot].join(",");
+  [...new Set([...userAllowedDirectories, desktopRoot, runtimeRoot])].join(",");
 
 if (
   !Number.isInteger(runtimeDevPort) ||
@@ -356,6 +392,7 @@ try {
   console.log(
     `[dev:full] DEV Node: ${selectedNode.info.version} ${selectedNode.info.arch}`,
   );
+  console.log(`[dev:full] Wake name: ${userWakeName}`);
   console.log(
     `[dev:full] Allowed DEV workspaces: ${devAllowedDirectories}`,
   );
@@ -372,6 +409,8 @@ try {
       PORT: String(runtimeDevPort),
       OWL_RUNTIME_MODE: "development",
       OWL_STATE_ROOT: runtimeStateRoot,
+      OWL_WAKE_NAME: userWakeName,
+      OWL_ALIASES: userWakeAliases.join(","),
       ALLOWED_DIRECTORIES: devAllowedDirectories,
       ALLOW_WRITE: process.env.ALLOW_WRITE || "true",
       ALLOW_SHELL: process.env.ALLOW_SHELL || "true",

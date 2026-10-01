@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("owlDesktop", {
   environment: () => ipcRenderer.invoke("desktop:environment"),
   listActivity: () => ipcRenderer.invoke("desktop:activity:list"),
-  refreshRuntime: () => ipcRenderer.invoke("runtime:refresh"),
+  refreshRuntime: (options) => ipcRenderer.invoke("runtime:refresh", options),
   cloudStatus: () => ipcRenderer.invoke("cloud:status"),
   cloudAccountStatus: () => ipcRenderer.invoke("cloud:account-status"),
   cloudLogin: () => ipcRenderer.invoke("cloud:login"),
@@ -106,6 +106,7 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   accountCapabilities: (id) =>
     ipcRenderer.invoke("accounts:capabilities", id),
   getSettings: () => ipcRenderer.invoke("settings:get"),
+  pickAllowedFolders: () => ipcRenderer.invoke("settings:pick-folders"),
   updateSettings: (patch) => ipcRenderer.invoke("settings:update", patch),
   listSecrets: () => ipcRenderer.invoke("secrets:list"),
   upsertSecret: (input) => ipcRenderer.invoke("secrets:upsert", input),
