@@ -287,6 +287,37 @@ export default function App() {
             ? "Connect ChatGPT"
             : "Refresh";
 
+  const signOutCloudAccount = async () => {
+    setBusy(true);
+    try {
+      const next = await window.owlDesktop.cloudLogout();
+      setCloudAccount(next);
+      await refresh(false);
+      setNotice("Signed out · device presence remains active · Runtime locked");
+      window.setTimeout(() => setNotice(""), 2400);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Sign out failed");
+      window.setTimeout(() => setNotice(""), 2400);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const signInCloudAccount = async () => {
+    setBusy(true);
+    try {
+      await window.owlDesktop.cloudLogin();
+      setCloudAccount(await window.owlDesktop.cloudAccountStatus());
+      setNotice("Continue sign-in in your browser");
+      window.setTimeout(() => setNotice(""), 2400);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Cloud login failed");
+      window.setTimeout(() => setNotice(""), 2400);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const runReadinessAction = async () => {
     setBusy(true);
     try {
@@ -790,7 +821,7 @@ export default function App() {
               <span>Uncertain</span><strong>{snapshot?.cloud.commandCounts.uncertain ?? 0}</strong>
             </div>
             <div className="runtime-version cloud-actions">
-              {cloudAccount?.status === "ready" ? <button className="secondary" onClick={async () => { const next = await window.owlDesktop.cloudLogout(); setCloudAccount(next); }}>Sign out</button> : <button className="primary" disabled={!settings?.cloudBaseUrl?.trim() || cloudAccount?.status === "authorizing"} onClick={async () => { try { await window.owlDesktop.cloudLogin(); setCloudAccount(await window.owlDesktop.cloudAccountStatus()); setNotice("Continue sign-in in your browser"); } catch (error) { setNotice(error instanceof Error ? error.message : "Cloud login failed"); } window.setTimeout(() => setNotice(""), 2400); }}>{cloudAccount?.status === "authorizing" ? "Waiting for browser…" : "Sign in to OWL LAB"}</button>}
+              {cloudAccount?.status === "ready" ? <button className="secondary" disabled={busy} onClick={() => void signOutCloudAccount()}>Sign out</button> : <button className="primary" disabled={busy || !settings?.cloudBaseUrl?.trim() || cloudAccount?.status === "authorizing"} onClick={() => void signInCloudAccount()}>{cloudAccount?.status === "authorizing" ? "Waiting for browser…" : "Sign in to OWL LAB"}</button>}
               <button className="secondary" onClick={async () => { try { const result = await window.owlDesktop.cloudProbe(); setNotice(`Cloud ${result.contractVersion ?? "v1"} reachable`); } catch { setNotice("Cloud probe failed"); } window.setTimeout(() => setNotice(""), 1800); }}>Probe Cloud</button>
               <button className="secondary" onClick={async () => { await window.owlDesktop.cloudStart(); await refresh(); }}>Reconnect presence</button>
               <button className="secondary" onClick={async () => { await window.owlDesktop.cloudSync(); await refresh(); }}>Sync now</button>
@@ -806,7 +837,29 @@ export default function App() {
         {page === "skills" && <SkillsPage />}
 
         {page === "accounts" && <>
-          <SectionHeader title="Accounts" description="Identity & Session Vault for SaaS, social, websites and native apps. Credentials are encrypted locally; interactive factors stay human-in-the-loop." />
+          <SectionHeader
+            title="Accounts"
+            description="OWL LAB account authorization plus the local Identity & Session Vault."
+            action={cloudAccount?.status === "ready"
+              ? <button className="secondary" disabled={busy} onClick={() => void signOutCloudAccount()}>Sign out</button>
+              : <button className="primary" disabled={busy || !settings?.cloudBaseUrl?.trim() || cloudAccount?.status === "authorizing"} onClick={() => void signInCloudAccount()}>{cloudAccount?.status === "authorizing" ? "Waiting for browser…" : "Sign in to OWL LAB"}</button>}
+          />
+          <section className="panel">
+            <div className="panel-heading">
+              <div><span className="eyebrow">OWL LAB ACCOUNT</span><h3>{cloudAccount?.status === "ready" ? "Signed in" : "Signed out"}</h3></div>
+              <span className="neutral-pill">{cloudAccount?.status?.replaceAll("_", " ") ?? "signed out"}</span>
+            </div>
+            <div className="about-grid">
+              <span>Device</span><code>{cloudAccount?.deviceId ?? snapshot?.cloud.deviceId ?? "Not enrolled"}</code>
+              <span>Device presence</span><strong>{cloudOnline ? "Connected" : cloudStatusLabel}</strong>
+              <span>Runtime access</span><strong>{runtimeAccess?.state ?? "Unknown"}</strong>
+              <span>Entitlement</span><strong>{cloudAccount?.entitlement?.status?.replaceAll("_", " ") ?? "Not active"}</strong>
+            </div>
+            <div className="contract-note compact-note">
+              <ShieldCheck size={17} />
+              <div><strong>Sign out locks local computer access, not the device identity.</strong><p>The device keeps reporting presence to OWL Cloud, while Runtime execution stays locked until the account signs in and receives a valid Cloud-signed lease.</p></div>
+            </div>
+          </section>
           <section className="panel secret-form account-form">
             <div><label>Service</label><input value={accountDraft.service} onChange={(e) => setAccountDraft({ ...accountDraft, service: e.target.value })} placeholder="WhatsApp / X / Shopify" /></div>
             <div><label>Account label</label><input value={accountDraft.label} onChange={(e) => setAccountDraft({ ...accountDraft, label: e.target.value })} placeholder="Main account" /></div>
