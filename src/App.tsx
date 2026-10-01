@@ -111,6 +111,8 @@ export default function App() {
     online &&
     (runtimeAccess?.mode === "compat" || runtimeAccess?.state === "READY");
   const cloudOnline = snapshot?.cloud.status === "connected";
+  const accountReady = cloudAccount?.status === "ready";
+  const accountConnected = cloudOnline && accountReady;
   const cloudStatusLabel = snapshot?.cloud.status
     ? snapshot.cloud.status.replaceAll("_", " ")
     : "stopped";
@@ -169,13 +171,15 @@ export default function App() {
     if (interactive) setBusy(true);
     try {
       await window.owlDesktop.runtimeEventSync().catch(() => undefined);
-      const [nextSnapshot, nextAgentRequests] = await Promise.all([
+      const [nextSnapshot, nextAgentRequests, nextCloudAccount] = await Promise.all([
         window.owlDesktop.refreshRuntime({ quiet: !interactive }),
         window.owlDesktop.listAgentRequests({ limit: 100 }),
+        window.owlDesktop.cloudAccountStatus(),
       ]);
       setSnapshot(nextSnapshot);
       setLiveActivity(nextSnapshot.activity ?? []);
       setAgentRequests(nextAgentRequests);
+      setCloudAccount(nextCloudAccount);
       setNow(Date.now());
     } finally {
       if (interactive) setBusy(false);
@@ -504,7 +508,7 @@ export default function App() {
               <div className="component-list">
                 <div><span className="component-icon"><Boxes size={17} /></span><p><strong>Local engine</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
                 <div><span className="component-icon"><Terminal size={17} /></span><p><strong>ChatGPT connection</strong><small>{snapshot?.mcp.status === "running" ? "ChatGPT can reach this Mac" : snapshot?.mcp.error ?? "Not connected"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
-                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL LAB account</strong><small>{cloudOnline ? "Cloud account & device connected" : "Cloud connection unavailable"}</small></p>{cloudOnline ? <StatusPill online /> : <span className="neutral-pill">{cloudStatusLabel}</span>}</div>
+                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL LAB account</strong><small>{accountConnected ? "Signed in · Cloud device connected" : cloudOnline ? "Cloud connected · account sign-in required" : "Cloud connection unavailable"}</small></p>{accountConnected ? <StatusPill online /> : <span className="neutral-pill">{cloudOnline ? (cloudAccount?.status?.replaceAll("_", " ") ?? "sign-in required") : cloudStatusLabel}</span>}</div>
                 <div><span className="component-icon"><Inbox size={17} /></span><p><strong>Requests</strong><small>{runtimeEventNeedsAttention ? "History needs attention before replay" : "Work waiting for an AI agent"}</small></p><span className={runtimeEventNeedsAttention ? "neutral-pill warning-pill" : "neutral-pill"}>{runtimeEventNeedsAttention ? "needs attention" : pendingAgentRequests.length + " pending"}</span></div>
               </div>
             </section>
