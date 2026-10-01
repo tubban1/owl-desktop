@@ -89,6 +89,13 @@ const RECOVERABLE_TASK_STATES = new Set([
   "paused",
 ]);
 
+function isRecoverableActiveTask(task) {
+  return (
+    RECOVERABLE_TASK_STATES.has(task?.status) &&
+    task?.progress?.terminal !== true
+  );
+}
+
 function runtimeTaskRows(value) {
   if (Array.isArray(value)) return value;
   if (!value || typeof value !== "object") return [];
@@ -1822,9 +1829,7 @@ export function createOwlMcpServer() {
       const newestFirst = [...listed].sort(
         (a, b) => recoveryTimestamp(b?.updatedAt) - recoveryTimestamp(a?.updatedAt),
       );
-      const active = newestFirst.filter((task) =>
-        RECOVERABLE_TASK_STATES.has(task?.status),
-      );
+      const active = newestFirst.filter(isRecoverableActiveTask);
       const ownedActive = active.filter(
         (task) => task?.ownerSessionId === context.runtimeSessionId,
       );
@@ -1917,8 +1922,7 @@ export function createOwlMcpServer() {
             })
           : [];
 
-      const activeFocus =
-        focus && RECOVERABLE_TASK_STATES.has(focus.status);
+      const activeFocus = focus && isRecoverableActiveTask(focus);
       const ambiguousActiveWork =
         active.length > 1 &&
         !task_id &&
@@ -1990,11 +1994,7 @@ export function createOwlMcpServer() {
     async ({ active_only }) => {
       const tasks = await invoke("tasks.list", undefined, 10_000);
       if (!Array.isArray(tasks) || active_only !== true) return tasks;
-      return tasks.filter((task) =>
-        ["pending", "running", "waiting_approval", "needs_review"].includes(
-          task?.status,
-        ),
-      );
+      return tasks.filter(isRecoverableActiveTask);
     },
   );
 

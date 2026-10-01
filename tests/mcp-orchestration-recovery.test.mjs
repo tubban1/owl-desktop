@@ -94,6 +94,42 @@ async function startRuntime() {
     },
     {
       schemaVersion: 1,
+      id: "task_terminal_review",
+      label: "Old terminal review",
+      status: "needs_review",
+      ownerSessionId: "owl-owner:historical-owner",
+      orchestration: null,
+      createdAt: "2026-10-01T19:40:00.000Z",
+      updatedAt: "2026-10-01T20:03:00.000Z",
+      progress: {
+        schemaVersion: 1,
+        revision: 12,
+        phase: "blocked",
+        terminal: true,
+        counts: {
+          total: 1,
+          pending: 0,
+          running: 0,
+          waitingApproval: 0,
+          succeeded: 0,
+          failed: 0,
+          needsReview: 1,
+        },
+        activeSteps: [],
+        lastMeaningfulAt: "2026-10-01T20:03:00.000Z",
+        message: "Terminal review required.",
+      },
+      verificationCounts: {
+        required: 1,
+        receipts: 1,
+        verified: 0,
+        failed: 0,
+        uncertain: 1,
+        missing: 0,
+      },
+    },
+    {
+      schemaVersion: 1,
       id: "task_release_docs",
       label: "Release docs",
       status: "completed",
@@ -286,5 +322,21 @@ describe("OWL orchestration recovery snapshot", () => {
       status: "pending",
       requiresUserConfirmation: true,
     });
+
+    expect(
+      snapshot.ungroupedActive.some(
+        (task) => task.taskId === "task_terminal_review",
+      ),
+    ).toBe(false);
+
+    const activeListResult = await client.callTool({
+      name: "task_list",
+      arguments: { active_only: true },
+    });
+    expect(activeListResult.isError).not.toBe(true);
+    const activeTasks = jsonText(activeListResult);
+    expect(activeTasks.map((task) => task.id)).toEqual([
+      "task_release_tests",
+    ]);
   });
 });
