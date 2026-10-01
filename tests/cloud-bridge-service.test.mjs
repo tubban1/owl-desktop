@@ -611,6 +611,35 @@ describe("CloudBridgeService", () => {
         retryAfterMs: 60_000,
       }),
     );
+
+    // A scheduled re-probe that still returns NOT_FOUND must not spam the same
+    // warning again. The warning represents a capability-state transition.
+    setup.service.approvalDecisionCapability.nextProbeAtMs = 0;
+    await setup.service.syncOnce();
+    expect(pullApprovalDecisions).toHaveBeenCalledTimes(2);
+    expect(
+      setup.onEvent.mock.calls.filter(
+        ([level, message]) =>
+          level === "warn" &&
+          message ===
+            "Cloud approval decision sync is unavailable on this deployment",
+      ),
+    ).toHaveLength(1);
+
+    pullApprovalDecisions.mockResolvedValueOnce({ decisions: [] });
+    setup.service.approvalDecisionCapability.nextProbeAtMs = 0;
+    await setup.service.syncOnce();
+    expect(setup.service.snapshot()).toMatchObject({
+      approvalDecisionSync: { status: "supported" },
+    });
+    expect(setup.onEvent).toHaveBeenCalledWith(
+      "info",
+      "Cloud approval decision sync recovered",
+      expect.objectContaining({
+        previousStatus: "unavailable",
+        status: "supported",
+      }),
+    );
   });
 
   it("heartbeats, polls and drains durable outbox in a sync cycle", async () => {

@@ -401,6 +401,8 @@ export class CloudBridgeService {
         Date.now() >= this.approvalDecisionCapability.nextProbeAtMs;
 
       if (approvalPullAvailable && approvalProbeDue) {
+        const previousApprovalStatus =
+          this.approvalDecisionCapability.status;
         try {
           approvalBatch = await this.client.pullApprovalDecisions(
             this.commandLimit,
@@ -409,20 +411,32 @@ export class CloudBridgeService {
             status: "supported",
             nextProbeAtMs: 0,
           };
+          if (previousApprovalStatus === "unavailable") {
+            this.onEvent(
+              "info",
+              "Cloud approval decision sync recovered",
+              {
+                previousStatus: previousApprovalStatus,
+                status: "supported",
+              },
+            );
+          }
         } catch (error) {
           if (error?.status === 404 || errorCode(error) === "NOT_FOUND") {
             this.approvalDecisionCapability = {
               status: "unavailable",
               nextProbeAtMs: Date.now() + 60_000,
             };
-            this.onEvent(
-              "warn",
-              "Cloud approval decision sync is unavailable on this deployment",
-              {
-                code: errorCode(error),
-                retryAfterMs: 60_000,
-              },
-            );
+            if (previousApprovalStatus !== "unavailable") {
+              this.onEvent(
+                "warn",
+                "Cloud approval decision sync is unavailable on this deployment",
+                {
+                  code: errorCode(error),
+                  retryAfterMs: 60_000,
+                },
+              );
+            }
           } else {
             throw error;
           }
