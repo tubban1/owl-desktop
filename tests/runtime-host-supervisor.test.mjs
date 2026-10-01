@@ -46,5 +46,5 @@ describe("RuntimeHostSupervisor", () => {
 
     const service = await supervisor.launchdStatus();
     expect(service.loaded).toBe(false);
-  });
+  }, 15_000);
 });

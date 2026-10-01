@@ -107,11 +107,23 @@ export async function startOwlMcpHttpServer({
   }
 
   app.all("/mcp", requireAuth, async (req, res) => {
-    pruneTransportSessions();
     const suppliedSessionId =
       typeof req.headers["mcp-session-id"] === "string"
         ? req.headers["mcp-session-id"]
         : undefined;
+
+    // An incoming request is activity. Touch a known supplied session before
+    // idle pruning so a slow client/host cannot lose a valid session between
+    // initialize and its next MCP notification.
+    if (suppliedSessionId) {
+      const supplied = sessions.get(suppliedSessionId);
+      if (supplied) {
+        const seenAt = Date.now();
+        supplied.lastSeenAt = new Date(seenAt).toISOString();
+        supplied.lastSeenAtMs = seenAt;
+      }
+    }
+    pruneTransportSessions();
 
     let active = suppliedSessionId
       ? sessions.get(suppliedSessionId)
@@ -119,6 +131,10 @@ export async function startOwlMcpHttpServer({
 
     try {
       if (!active) {
+        if (suppliedSessionId) {
+          res.status(404).json({ error: "MCP session not found." });
+          return;
+        }
         if (req.method !== "POST") {
           res.status(400).json({ error: "No valid MCP session." });
           return;

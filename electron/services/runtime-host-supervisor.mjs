@@ -42,7 +42,7 @@ export class RuntimeHostSupervisor {
 
     try {
       const { stdout } = await execFileAsync(this.hostBinary, ["--status"], {
-        timeout: 3_000,
+        timeout: 10_000,
         maxBuffer: 1024 * 1024,
       });
       const parsed = JSON.parse(stdout);

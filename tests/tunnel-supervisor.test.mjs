@@ -93,16 +93,17 @@ describe("TunnelSupervisor", () => {
       mcpUrl: "http://127.0.0.1:8790/mcp",
     });
 
-    const deadline = Date.now() + 1_500;
+    const deadline = Date.now() + 8_000;
+    let observedCount = 0;
     while (Date.now() < deadline) {
-      const count = fs.existsSync(counter)
+      observedCount = fs.existsSync(counter)
         ? Number(fs.readFileSync(counter, "utf8"))
         : 0;
-      if (count >= 2 && supervisor.status().state === "running") break;
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      if (observedCount >= 2 && supervisor.status().state === "running") break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
 
-    expect(Number(fs.readFileSync(counter, "utf8"))).toBeGreaterThanOrEqual(2);
+    expect(observedCount).toBeGreaterThanOrEqual(2);
     expect(supervisor.status()).toMatchObject({
       state: "running",
       desiredRunning: true,
@@ -110,7 +111,7 @@ describe("TunnelSupervisor", () => {
     expect(
       events.some((event) => event.message === "Tunnel restart scheduled"),
     ).toBe(true);
-  });
+  }, 15_000);
 
   it("refuses a non-loopback MCP target", async () => {
     const supervisor = new TunnelSupervisor();

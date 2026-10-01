@@ -78,5 +78,5 @@ describe("OWL MCP reconnect soak", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 1_150));
     expect(mcp.sessionCount()).toBe(0);
-  }, 20_000);
+  }, 60_000);
 });

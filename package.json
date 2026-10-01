@@ -9,7 +9,7 @@
     "dev": "concurrently -k -n renderer,electron \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "mcp:start": "node mcp/server.mjs",
     "build": "tsc --noEmit && vite build",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=4",
     "verify:local-e2e": "node scripts/verify-local-e2e.mjs",
     "verify:durable-submit": "node scripts/verify-durable-submit.mjs",
     "verify:consequential-replay-live": "node scripts/verify-consequential-replay-live-e2e.mjs",

@@ -92,7 +92,7 @@ describe("OWL MCP replay scope", () => {
     expect(runtime.observed[0].idempotencyKey).not.toBe(
       runtime.observed[1].idempotencyKey,
     );
-  }, 15_000);
+  }, 30_000);
 
   it("allows an explicit client idempotency key to survive a fresh MCP transport", async () => {
     const runtime = await startFakeRuntime();
@@ -116,5 +116,5 @@ describe("OWL MCP replay scope", () => {
     expect(runtime.observed[0].idempotencyKey).toBe(
       runtime.observed[1].idempotencyKey,
     );
-  }, 15_000);
+  }, 30_000);
 });

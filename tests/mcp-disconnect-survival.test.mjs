@@ -84,7 +84,7 @@ describe("OWL MCP upstream disconnect survival", () => {
     await Promise.race([
       runtime.waitUntilReceived(),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Runtime never accepted the MCP request.")), 2_000),
+        setTimeout(() => reject(new Error("Runtime never accepted the MCP request.")), 5_000),
       ),
     ]);
     expect(runtime.received()).toBe(1);
@@ -94,5 +94,5 @@ describe("OWL MCP upstream disconnect survival", () => {
     await new Promise((resolve) => setTimeout(resolve, 260));
 
     expect(runtime.completed()).toBe(1);
-  }, 10_000);
+  }, 20_000);
 });

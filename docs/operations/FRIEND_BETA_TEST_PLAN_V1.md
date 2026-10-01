@@ -294,3 +294,35 @@ Current installed friend-beta-final live evidence:
 - A later `task_status` call on the current installed build timed out after 10s. This is live P0 evidence for the next packaged recovery test; it does not invalidate the new source-level `task_submit` gate, which passed independently through two fresh MCP transports.
 
 Do not use the current installed friend-beta-final as evidence that the new durable owner/task_submit fixes are live. They require a new package and owner-assisted install/reconnect test.
+
+
+### Stability hardening verification — 2026-10-01
+
+The repeated ChatGPT/tool-stream stalls were separated into product transport issues and test-executor issues.
+
+Product fixes verified:
+- MCP no longer cancels an already-dispatched Runtime call merely because the upstream ChatGPT/tunnel HTTP connection closes.
+- TunnelSupervisor automatically restarts an unexpectedly exited tunnel with bounded exponential backoff.
+- MCP transport sessions are touched before idle pruning, preventing a valid slow session from being reclaimed between initialize and the next notification.
+- An unknown supplied MCP session id now fails closed instead of bootstrapping a new uninitialized transport.
+- Runtime bootstrap rejects a foreign Runtime already owning the configured port.
+- launchd transient bootstrap error 5 is retried after teardown observation.
+- An already-healthy packaged Runtime is left running instead of unconditional bootout/bootstrap churn.
+- Desktop can re-project Runtime access after reconnect without requiring sign-out/sign-in.
+
+Verification evidence:
+npm test --maxWorkers=4: 20/20 test files, 102/102 tests PASS.
+verify:durable-submit: 2 transports, 1 stable Runtime session, stable create/start replay keys, rediscovery PASS.
+tsc --noEmit: PASS.
+vite build: PASS.
+verify:release-components: PASS.
+verify:packaged-smoke: PASS.
+prepare:icon: PASS using assets/owl1254.png (1254x1254) -> build/icon.icns.
+
+Test-harness lessons:
+- Do not run unbounded recursive inspection such as grep -R . through a remote tool session; scope searches and exclude node_modules.
+- Desktop Commander remote process sessions can outlive or lose their controlling stream during very long chained commands. Run test, build, release verification and smoke verification as independent bounded phases.
+- Process/network integration tests should not run with unbounded default worker concurrency on a busy development Mac. The default suite is capped at 4 workers; dedicated soak tests preserve their own duration assertions.
+- Temporary lack of read_process_output text is not proof of a stuck process; inspect PID/CPU state before classifying a failure.
+
+This evidence validates source-level recovery behavior. A rebuilt installable friend-beta candidate still requires owner live tests for quit/reopen, Runtime restart, tunnel restart, macOS reboot and permission prompts.
