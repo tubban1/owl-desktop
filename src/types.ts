@@ -143,6 +143,42 @@ export type CloudAccountStatus = {
   lastErrorMessage: string | null;
 };
 
+export type CloudDeviceSummary = {
+  deviceId: string;
+  organizationId: string;
+  displayName: string;
+  platform: string;
+  registrationState: string;
+  lastSeenAt: string | null;
+  capabilities: Record<string, unknown>;
+  runtimeCompatibility: Record<string, unknown>;
+  createdAt: string | null;
+};
+
+export type CloudRemoteCommandSummary = {
+  commandId: string;
+  deviceId: string;
+  kind: string;
+  kindVersion: number;
+  status: string;
+  label: string;
+  createdAt: string | null;
+  expiresAt: string | null;
+  dispatchedAt: string | null;
+  acceptedAt: string | null;
+  rejectedAt: string | null;
+  cancelledAt: string | null;
+  rejectionReason: string | null;
+  runtimeTaskId: string | null;
+  runtimeRunId: string | null;
+};
+
+export type CloudRemoteCommandInput = {
+  kind: "runtime.task.create" | "runtime.task.create-and-start";
+  payload: Record<string, unknown>;
+  expiresAt?: string;
+};
+
 export type CloudBridgeCommandRecord = {
   commandId: string;
   deviceId: string;

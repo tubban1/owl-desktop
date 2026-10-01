@@ -134,6 +134,57 @@ export class CloudHttpClient {
     });
   }
 
+  listDevices(userJwt) {
+    return this.request("/v1/devices", {
+      auth: "user",
+      userJwt,
+    });
+  }
+
+  listCommands(userJwt, deviceId, limit = 50) {
+    const bounded = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    return this.request(
+      `/v1/devices/${encodeURIComponent(deviceId)}/commands?limit=${bounded}`,
+      {
+        auth: "user",
+        userJwt,
+      },
+    );
+  }
+
+  getCommand(userJwt, commandId) {
+    return this.request(
+      `/v1/commands/${encodeURIComponent(commandId)}`,
+      {
+        auth: "user",
+        userJwt,
+      },
+    );
+  }
+
+  createCommand(userJwt, deviceId, input) {
+    return this.request(
+      `/v1/devices/${encodeURIComponent(deviceId)}/commands`,
+      {
+        method: "POST",
+        auth: "user",
+        userJwt,
+        body: input,
+      },
+    );
+  }
+
+  cancelCommand(userJwt, commandId) {
+    return this.request(
+      `/v1/commands/${encodeURIComponent(commandId)}/cancel`,
+      {
+        method: "POST",
+        auth: "user",
+        userJwt,
+      },
+    );
+  }
+
   getDeviceAccess(userJwt, deviceId) {
     return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/access`, {
       auth: "user",

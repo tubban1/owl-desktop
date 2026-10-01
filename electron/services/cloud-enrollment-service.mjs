@@ -158,6 +158,7 @@ export class CloudEnrollmentService {
 }
 
 export const cloudEnrollmentSecretNames = {
+  project: SECRET_PROJECT,
   deviceCredential: DEVICE_CREDENTIAL_NAME,
   accountRefreshToken: ACCOUNT_REFRESH_TOKEN_NAME,
 };

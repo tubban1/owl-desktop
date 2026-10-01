@@ -6,6 +6,9 @@ import type {
   AgentRequestStatus,
   CloudAccountStatus,
   CloudBridgeStatus,
+  CloudDeviceSummary,
+  CloudRemoteCommandInput,
+  CloudRemoteCommandSummary,
   DesktopEnvironment,
   HostStatus,
   RuntimeEventBridgeStatus,
@@ -45,6 +48,17 @@ declare global {
       cloudStart(): Promise<CloudBridgeStatus>;
       cloudStop(): Promise<CloudBridgeStatus>;
       cloudSync(): Promise<CloudBridgeStatus>;
+      cloudListDevices(): Promise<CloudDeviceSummary[]>;
+      cloudListCommands(
+        deviceId: string,
+        limit?: number,
+      ): Promise<CloudRemoteCommandSummary[]>;
+      cloudGetCommand(commandId: string): Promise<CloudRemoteCommandSummary>;
+      cloudCreateCommand(
+        deviceId: string,
+        input: CloudRemoteCommandInput,
+      ): Promise<CloudRemoteCommandSummary>;
+      cloudCancelCommand(commandId: string): Promise<CloudRemoteCommandSummary>;
       agentInboxSummary(): Promise<AgentInboxSummary>;
       runtimeEventStatus(): Promise<RuntimeEventBridgeStatus>;
       runtimeEventSync(): Promise<RuntimeEventBridgeStatus>;

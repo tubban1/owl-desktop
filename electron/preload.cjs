@@ -18,6 +18,15 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   cloudStart: () => ipcRenderer.invoke("cloud:start"),
   cloudStop: () => ipcRenderer.invoke("cloud:stop"),
   cloudSync: () => ipcRenderer.invoke("cloud:sync"),
+  cloudListDevices: () => ipcRenderer.invoke("cloud:devices:list"),
+  cloudListCommands: (deviceId, limit) =>
+    ipcRenderer.invoke("cloud:commands:list", deviceId, limit),
+  cloudGetCommand: (commandId) =>
+    ipcRenderer.invoke("cloud:commands:get", commandId),
+  cloudCreateCommand: (deviceId, input) =>
+    ipcRenderer.invoke("cloud:commands:create", deviceId, input),
+  cloudCancelCommand: (commandId) =>
+    ipcRenderer.invoke("cloud:commands:cancel", commandId),
   agentInboxSummary: () => ipcRenderer.invoke("agent-inbox:summary"),
   runtimeEventStatus: () => ipcRenderer.invoke("runtime-events:status"),
   runtimeEventSync: () => ipcRenderer.invoke("runtime-events:sync"),

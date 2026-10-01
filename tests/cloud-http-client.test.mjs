@@ -56,6 +56,62 @@ describe("CloudHttpClient", () => {
     expect(init.headers.authorization).toBe("Bearer jwt-value");
   });
 
+  it("uses user auth for device inventory and remote command control", async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      if (String(url).endsWith("/v1/devices")) {
+        return jsonResponse({ devices: [] });
+      }
+      if (String(url).includes("/commands?limit=25")) {
+        return jsonResponse({ commands: [] });
+      }
+      if (init.method === "POST") {
+        return jsonResponse({
+          commandId: "cmd_1",
+          deviceId: "dev_1",
+          kind: "runtime.task.create",
+          kindVersion: 1,
+          payload: { label: "test", steps: [{ id: "i", action: "runtime.info" }] },
+          status: "queued",
+          createdAt: "2026-10-01T18:00:00.000Z",
+        }, 201);
+      }
+      return jsonResponse({
+        commandId: "cmd_1",
+        deviceId: "dev_1",
+        kind: "runtime.task.create",
+        kindVersion: 1,
+        payload: {},
+        status: "queued",
+        createdAt: "2026-10-01T18:00:00.000Z",
+      });
+    });
+    const client = new CloudHttpClient({
+      baseUrl: "https://cloud.example.test",
+      fetchImpl,
+    });
+
+    await client.listDevices("jwt");
+    await client.listCommands("jwt", "dev_1", 25);
+    await client.getCommand("jwt", "cmd_1");
+    await client.createCommand("jwt", "dev_1", {
+      kind: "runtime.task.create",
+      kindVersion: 1,
+      payload: { label: "test", steps: [{ id: "i", action: "runtime.info" }] },
+    });
+    await client.cancelCommand("jwt", "cmd_1");
+
+    for (const [, init] of fetchImpl.mock.calls) {
+      expect(init.headers.authorization).toBe("Bearer jwt");
+    }
+    expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+      "https://cloud.example.test/v1/devices",
+      "https://cloud.example.test/v1/devices/dev_1/commands?limit=25",
+      "https://cloud.example.test/v1/commands/cmd_1",
+      "https://cloud.example.test/v1/devices/dev_1/commands",
+      "https://cloud.example.test/v1/commands/cmd_1/cancel",
+    ]);
+  });
+
   it("preserves Cloud error codes without including auth material", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse(

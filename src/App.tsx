@@ -4,18 +4,20 @@ import {
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
   Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
   AlertTriangle, ArrowRight, BrainCircuit, Clock3, FolderOpen, X,
-  ChartNoAxesCombined,
+  ChartNoAxesCombined, Laptop,
 } from "lucide-react";
 import type { AccountMeta, ActivityEntry, AgentRequest, CloudAccountStatus, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
 import { deriveWorkState } from "./workState";
 import { MonitorPage } from "./monitor/MonitorPage";
+import { DevicesPage } from "./devices/DevicesPage";
 
-type Page = "overview" | "monitor" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
+type Page = "overview" | "monitor" | "devices" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
 
 const nav = [
   { id: "overview" as Page, label: "Home", icon: Gauge },
   { id: "monitor" as Page, label: "Monitor", icon: ChartNoAxesCombined },
+  { id: "devices" as Page, label: "Devices", icon: Laptop },
   { id: "agent-inbox" as Page, label: "Requests", icon: Inbox },
   { id: "logs" as Page, label: "Activity", icon: Activity },
   { id: "skills" as Page, label: "Skills", icon: Puzzle },
@@ -515,6 +517,11 @@ export default function App() {
           agentRequests={agentRequests}
           activity={activityRows}
           onRefresh={() => refresh(false)}
+        />}
+
+        {page === "devices" && <DevicesPage
+          accountReady={cloudAccount?.status === "ready"}
+          currentDeviceId={cloudAccount?.deviceId ?? snapshot?.cloud.deviceId ?? null}
         />}
 
         {page === "sessions" && <>
