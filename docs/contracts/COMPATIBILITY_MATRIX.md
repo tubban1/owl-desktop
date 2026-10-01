@@ -4,23 +4,23 @@ Status: **I7 CLOSED — exact tested development set**.
 
 This file is the canonical compatibility record published by OWL Desktop. Compatibility is defined by exact tested contracts and revisions, not by "latest".
 
-## Tested set — 2026-09-30
+## Tested set — 2026-10-01
 
 | Component | Product / contract identity | Minimum supported | Maximum tested | Preferred / exact tested baseline |
 | --- | --- | --- | --- | --- |
-| OWL Desktop | 0.1.0 release-candidate line | 0.1.0 | 0.1.0 | release assembly `75b72f3` |
-| OWL MCP | Desktop-owned Streamable HTTP adapter | MCP Streamable HTTP v1 | MCP Streamable HTTP v1 | Desktop `75b72f3` |
-| OWL Runtime | public Runtime HTTP/RPC API | API `0.1` | API `0.1` | main `d6320d2`; implementation reports `1.0.0-rc.4` |
-| Runtime access | local execution lease | access contract v1 | access contract v1 | `LOCKED / READY / REVOKED` on `d6320d2` |
-| Runtime detached Task | durable long-task execution | `tasks.start` + progress v1 | same | `d6320d2` |
-| Runtime consequential replay | side-effect dedupe | idempotency v1 | same | `d6320d2` |
+| OWL Desktop | 0.1.0 release-candidate line | 0.1.0 | 0.1.0 | release assembly `27f6c3e` |
+| OWL MCP | Desktop-owned Streamable HTTP adapter | MCP Streamable HTTP v1 | MCP Streamable HTTP v1 | Desktop `27f6c3e` |
+| OWL Runtime | public Runtime HTTP/RPC API | API `0.1` | API `0.1` | main `4e24c19`; implementation reports `1.0.0-rc.4` |
+| Runtime access | local execution lease | access contract v1 | access contract v1 | `LOCKED / READY / REVOKED` on `4e24c19` |
+| Runtime detached Task | durable long-task execution | `tasks.start` + progress v1 | same | `4e24c19` |
+| Runtime consequential replay | side-effect dedupe | idempotency v1 | same | `4e24c19` |
 | OWL Cloud | HTTP API v1 / Account Access v1 | API v1 | API v1 | source head `1d556aa`; Frankfurt dev live |
 | RemoteCommand | versioned command registry | `runtime.task.create@1` | `runtime.task.create-and-start@1` tested | both @1 |
-| ApprovalDecision | authenticated human decision delivery | v1 | v1 | Cloud `1d556aa` + Desktop `75b72f3` + Runtime `d6320d2` |
+| ApprovalDecision | authenticated human decision delivery | v1 | v1 | Cloud `1d556aa` + Desktop `27f6c3e` + Runtime `4e24c19` |
 | OWL Tunnel | `owl-tunnel-consumer-v1` / Streamable HTTP v1 | vendor 0.0.15 | vendor 0.0.15 | vendor git `a390c168ff1b2d14e73a95991c186c6aba3ff5a0` |
 | OWL Tunnel arm64 | runtime binary | 0.0.15 | 0.0.15 | SHA256 `fcc8e40de0606b8909c7ee44a0816d33d616949389ff37938e2657c7a2333025` |
 | OWL Tunnel x64 | runtime binary | 0.0.15 | 0.0.15 | SHA256 `e17ffc98dce25a31c22714875267eeb309abdb35bea450c5801272317559f033` |
-| OWL LAB Helper | macOS native capability | bundle `fan.fde.owl.helper` / 1.0.0 | 1.0.0 | Runtime main `d6320d2`; legacy Computer MCP Helper path is compatibility-only fallback |
+| OWL LAB Helper | macOS native capability | bundle `fan.fde.owl.helper` / 1.0.0 | 1.0.0 | Runtime main `4e24c19`; legacy Computer MCP Helper path is compatibility-only fallback |
 | Runtime Host | macOS host | bundle `fan.fde.owl.runtime` / 1.0.0 | 1.0.0 | 1.0.0 |
 | OWL Worker | hosted Worker UX | not required for I2–I7 | not claimed | migration surface; product ownership moves under OWL Cloud |
 
@@ -66,7 +66,7 @@ Unsupported combinations are rejected before consequential Runtime work begins:
 4. Runtime remains the idempotency/approval/execution authority after compatibility acceptance.
 5. Skill Manager independently rejects higher unsupported Primitive ABI requirements.
 6. Tunnel release preparation verifies protocol identity, architecture, version, vendor git SHA and executable SHA256 before packaging.
-7. Runtime, Runtime Host and OWL LAB Helper release assembly is pinned to Runtime main `d6320d2`; a fresh checkout may fetch only that exact Git object and must verify it before build.
+7. Runtime, Runtime Host and OWL LAB Helper release assembly is pinned to Runtime main `4e24c19`; a fresh checkout may fetch only that exact Git object and must verify it before build.
 8. Signed release configuration is verified for the canonical `OWL LAB Desktop` name, Helper inclusion and mandatory notarization.
 
 ## Evidence
@@ -79,7 +79,7 @@ Current closure evidence includes:
 - official pinned Tunnel arm64+x64 artifacts reconstructed and SHA-verified;
 - canonical Runtime, Runtime Host and Helper rebuilt successfully from pinned Git SHA without relying on a sibling Runtime checkout;
 - unsigned arm64+x64 Desktop smoke packages verified with universal Runtime Host and universal OWL LAB Helper embedded;
-- Desktop 87/87 full tests before I7, plus I7 compatibility/CloudBridge targeted 20/20;
+- Desktop current source gate 23/23 test files and 116/116 tests, plus TypeScript/Vite production build and durable-submit verification;
 - Desktop production build;
 - Cloud typecheck;
 - Cloud 52/52 tests under native arm64 Node 22;
@@ -87,7 +87,7 @@ Current closure evidence includes:
 - I4 Cloud → Desktop → Runtime terminal projection;
 - I5 approve/deny exact Runtime receipt semantics;
 - I6 actual Cloud transport outage and reconnect with Runtime completing offline;
-- exact Runtime component pin `d6320d29941fe0d4e94e28cf94c5eb9f1d1ab681` enforced before release staging;
+- exact Runtime component pin `4e24c19fef12704eb5fe97c1283a3d8c32a4df4c` enforced before release staging;
 - reproducible OWL macOS icon generation and packaged `icon.icns`;
 - universal Runtime Host `fan.fde.owl.runtime@1.0.0` built as arm64+x86_64;
 - unsigned arm64 and x64 `.app` smoke packages verified with `npm run verify:packaged-smoke`;

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "product": "OWL LAB Desktop",
+  "version": "0.1.0",
+  "releaseChannel": "release-candidate",
+  "desktop": {
+    "repository": "tubban1/owl-desktop",
+    "assemblyGitSha": "27f6c3e",
+    "bundleIdentifier": "ai.owl.desktop"
+  },
+  "cloud": {
+    "repository": "tubban1/owl-cloud",
+    "gitSha": "1d556aa",
+    "apiContract": "v1",
+    "region": "eu-central-1",
+    "stack": "OwlCloudDevStack",
+    "lambda": "owl-dev-api",
+    "deployedCodeSha256": "/Ejj+tqILWKna66q2PbYvYkxRXdWFAfvNVEFQH2mXq8="
+  },
+  "runtime": {
+    "repository": "tubban1/owl-runtime",
+    "gitSha": "4e24c19fef12704eb5fe97c1283a3d8c32a4df4c",
+    "version": "1.0.0-rc.4",
+    "apiVersion": "0.1"
+  },
+  "tunnel": {
+    "protocolVersion": "owl-tunnel-consumer-v1",
+    "version": "0.0.15",
+    "vendorGitSha": "a390c168ff1b2d14e73a95991c186c6aba3ff5a0",
+    "arm64Sha256": "fcc8e40de0606b8909c7ee44a0816d33d616949389ff37938e2657c7a2333025",
+    "x64Sha256": "e17ffc98dce25a31c22714875267eeb309abdb35bea450c5801272317559f033"
+  },
+  "helper": {
+    "bundleIdentifier": "fan.fde.owl.helper",
+    "version": "1.0.0"
+  },
+  "runtimeHost": {
+    "bundleIdentifier": "fan.fde.owl.runtime",
+    "version": "1.0.0",
+    "architectures": [
+      "arm64",
+      "x86_64"
+    ]
+  },
+  "artifactDirectory": "release/rc-20261001",
+  "expectedArtifacts": [
+    "OWL-LAB-Desktop-0.1.0-arm64.dmg",
+    "OWL-LAB-Desktop-0.1.0-arm64.zip",
+    "OWL-LAB-Desktop-0.1.0-x64.dmg",
+    "OWL-LAB-Desktop-0.1.0-x64.zip"
+  ],
+  "productionRequirements": {
+    "developerIdSigned": true,
+    "notarized": true,
+    "cleanInstallDogfood": true,
+    "soakCompleted": true,
+    "rollbackRehearsed": true
+  },
+  "candidateId": "desktop-0.1.0-rc-20261001-27f6c3e",
+  "assemblyStatus": "unsigned-internal-rc",
+  "publicReleaseEligible": false,
+  "artifactSha256": {
+    "OWL-LAB-Desktop-0.1.0-arm64.dmg": "ef427fcd7d7511fb849fc774eeba25ae321fc0175b2cde5b981f3d492c548644",
+    "OWL-LAB-Desktop-0.1.0-arm64.zip": "cdf638690a2f02fc88f80b77bfc2b814ec4fb14669884dc7f08edf39f4ecb96b",
+    "OWL-LAB-Desktop-0.1.0-x64.dmg": "76d04eac229bfdb3fbd8759585aa70737162a80e334f22114078946923a1848f",
+    "OWL-LAB-Desktop-0.1.0-x64.zip": "fbb24c5d7516b2d9cfe7be2cc5dfbc0538654ed04a0a0513153f47efc11829ef"
+  },
+  "currentEvidence": {
+    "runtimeMainIntegrated": true,
+    "runtimeMainGitSha": "4e24c19fef12704eb5fe97c1283a3d8c32a4df4c",
+    "devAcceptance": "passed",
+    "sourceGate": "passed",
+    "localE2E": "passed",
+    "localBootstrapLive": "passed",
+    "packagedSmokeArm64X64": "passed",
+    "dmgChecksumVerify": "passed",
+    "artifactSha256Verify": "passed",
+    "developerIdSigned": false,
+    "notarized": false,
+    "blockingReason": "No valid Developer ID Application identity, APPLE_TEAM_ID, or notarization credentials are available on the current release machine."
+  }
+}

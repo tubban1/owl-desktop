@@ -1,6 +1,6 @@
 node_modules
 dist
-release
+/release/
 vendor
 .DS_Store
 *.log

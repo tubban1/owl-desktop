@@ -417,7 +417,7 @@ Implemented in the current source worktree:
 - DEV `dev:full` consumes the same saved user preferences while adding source repos only for development;
 - Runtime/MCP/Tunnel/Cloud implementation details remain in collapsed Advanced settings.
 
-Source gate after this implementation: 23/23 test files, 115/115 tests, TypeScript build PASS, Vite production build PASS, git diff check PASS.
+Source gate after this implementation: 23/23 test files, 116/116 tests, TypeScript build PASS, Vite production build PASS, git diff check PASS.
 
 ### Final canonical DEV UX evidence
 
