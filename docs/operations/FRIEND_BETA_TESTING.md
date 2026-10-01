@@ -1,6 +1,13 @@
 # OWL LAB Desktop — Friend Beta Testing
 
-Status: **private unsigned beta**.
+Status: **internal dogfood / HOLD for friend distribution until current P0/P1 findings are closed**.
+
+See:
+- `FRIEND_BETA_FINDINGS_2026-10-01.md` — real-install findings and blockers.
+- `ONBOARDING_AND_RECOVERY_V1.md` — target install/start/recovery UX.
+- `FRIEND_BETA_TEST_PLAN_V1.md` — automated, owner and clean-Mac test matrix.
+
+This remains a **private unsigned beta** build line.
 
 This track is intentionally used **before** purchasing/configuring an Apple Developer ID. It is suitable for a small number of trusted testers who understand that macOS will show Gatekeeper warnings for an unsigned/unnotarized app.
 
