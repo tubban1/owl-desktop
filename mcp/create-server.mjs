@@ -340,6 +340,325 @@ export function createOwlMcpServer() {
 
   tool(
     server,
+    "read_multiple_files",
+    "Compatibility tool: read multiple allowed UTF-8 local files through OWL Runtime.",
+    { paths: z.array(z.string().min(1)).min(1).max(100) },
+    {
+      title: "Read Multiple Files",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async ({ paths }) => primitiveResult(await invoke("primitive.call", {
+      primitive: "fs.read",
+      op: "many",
+      args: { paths },
+    })),
+  );
+
+  tool(
+    server,
+    "list_directory_tree",
+    "Compatibility tool: list a bounded directory tree through OWL Runtime.",
+    {
+      path: z.string().min(1),
+      depth: z.number().int().min(1).max(20).optional(),
+    },
+    {
+      title: "List Directory Tree",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async ({ path, depth }) => primitiveResult(await invoke("primitive.call", {
+      primitive: "fs.list",
+      op: "tree",
+      args: { path, ...(depth !== undefined ? { depth } : {}) },
+    })),
+  );
+
+  tool(
+    server,
+    "create_directory",
+    "Compatibility tool: create an allowed local directory.",
+    {
+      path: z.string().min(1),
+      recursive: z.boolean().optional(),
+    },
+    {
+      title: "Create Directory",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "fs.manage",
+      op: "mkdir",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "write_file",
+    "Compatibility tool: create or replace an allowed UTF-8 local file.",
+    {
+      path: z.string().min(1),
+      content: z.string(),
+      overwrite: z.boolean().optional(),
+      create_parents: z.boolean().optional(),
+    },
+    {
+      title: "Write File",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "fs.write",
+      op: "write",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "append_file",
+    "Compatibility tool: append UTF-8 content to an allowed local file.",
+    {
+      path: z.string().min(1),
+      content: z.string(),
+      create_parents: z.boolean().optional(),
+    },
+    {
+      title: "Append File",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "fs.write",
+      op: "append",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "edit_file",
+    "Compatibility tool: perform exact UTF-8 text replacement in an allowed file.",
+    {
+      path: z.string().min(1),
+      old_text: z.string().min(1),
+      new_text: z.string(),
+      replace_all: z.boolean().optional(),
+    },
+    {
+      title: "Edit File",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "fs.write",
+      op: "edit",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "batch_edit_files",
+    "Compatibility tool: atomically validate and apply exact replacements across allowed files.",
+    {
+      edits: z.array(z.object({
+        path: z.string().min(1),
+        old_text: z.string().min(1),
+        new_text: z.string(),
+        replace_all: z.boolean().optional(),
+      })).min(1).max(100),
+    },
+    {
+      title: "Batch Edit Files",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "fs.write",
+      op: "batch_edit",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "move_path",
+    "Compatibility tool: move or rename an allowed filesystem path.",
+    { source_path: z.string().min(1), destination_path: z.string().min(1) },
+    {
+      title: "Move Path",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "fs.manage",
+      op: "move",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "copy_path",
+    "Compatibility tool: copy an allowed filesystem path.",
+    {
+      source_path: z.string().min(1),
+      destination_path: z.string().min(1),
+      recursive: z.boolean().optional(),
+    },
+    {
+      title: "Copy Path",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "fs.manage",
+      op: "copy",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "delete_path",
+    "Compatibility tool: delete an allowed filesystem path through Runtime policy.",
+    { path: z.string().min(1), recursive: z.boolean().optional() },
+    {
+      title: "Delete Path",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "fs.manage",
+      op: "delete",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "primitive_catalog",
+    "List the canonical OWL Runtime Primitive ABI catalog.",
+    {},
+    {
+      title: "Primitive Catalog",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    () => invoke("primitives.catalog"),
+  );
+
+  tool(
+    server,
+    "skill_catalog",
+    "List the canonical OWL Runtime Skill catalog.",
+    {},
+    {
+      title: "Skill Catalog",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    () => invoke("skills.catalog"),
+  );
+
+  tool(
+    server,
+    "get_capabilities",
+    "Query the connected OWL Runtime capability projection.",
+    { goal: z.string().optional() },
+    {
+      title: "Runtime Capabilities",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    ({ goal }) => invoke("capabilities.get", { goal: goal ?? "" }),
+  );
+
+  tool(
+    server,
+    "capability_manifest",
+    "Compatibility alias for the canonical OWL Runtime capability manifest.",
+    { goal: z.string().max(2000).optional() },
+    {
+      title: "Capability Manifest",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    ({ goal }) => invoke("capabilities.get", { goal: goal ?? "" }),
+  );
+
+  tool(
+    server,
+    "get_audit_log",
+    "Compatibility view of recent redacted Runtime audit evidence through diagnostics.",
+    {
+      limit: z.number().int().min(1).max(500).optional(),
+      tool: z.string().optional(),
+    },
+    {
+      title: "Runtime Audit Log",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async ({ limit, tool: toolName }) => {
+      const requested = Math.min(limit ?? 50, 100);
+      const diagnostics = await invoke(
+        "diagnostics.get",
+        { auditLimit: requested },
+        15_000,
+      );
+      const rows = Array.isArray(diagnostics?.audit?.recent)
+        ? diagnostics.audit.recent
+        : [];
+      return {
+        source: "runtime-diagnostics-v1",
+        redacted: true,
+        requestedLimit: limit ?? 50,
+        runtimeLimit: requested,
+        truncatedByRuntime: (limit ?? 50) > requested,
+        entries: toolName
+          ? rows.filter((entry) => entry?.tool === toolName)
+          : rows,
+      };
+    },
+  );
+
+  tool(
+    server,
     "git_status",
     "Compatibility tool: inspect Git status for an allowed repository.",
     { cwd: z.string().min(1) },
@@ -402,6 +721,814 @@ export function createOwlMcpServer() {
   );
 
 
+
+  tool(
+    server,
+    "router_catalog",
+    "Legacy compatibility facade. OWL 1.x uses the Primitive ABI and capability manifest instead of exposing the internal L0.5 Action Router as a public contract.",
+    {},
+    {
+      title: "Legacy Router Catalog",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async () => ({
+      deprecated: true,
+      available: false,
+      code: "LEGACY_ACTION_ROUTER_NOT_PUBLIC",
+      replacement: [
+        "capability_manifest",
+        "primitive_catalog",
+        "primitive_call",
+        "task_create",
+        "task_submit",
+      ],
+      message:
+        "The internal Runtime Action Router is not a public OWL 1.x contract. Use Primitive ABI or durable Task APIs.",
+    }),
+  );
+
+  for (const legacyName of [
+    "computer_action",
+    "computer_batch",
+    "computer_graph",
+  ]) {
+    const schemas = {
+      computer_action: {
+        action: z.string().min(1),
+        args: z.record(z.unknown()).optional(),
+        dry_run: z.boolean().optional(),
+      },
+      computer_batch: {
+        steps: z.array(z.object({
+          id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+          action: z.string().min(1),
+          args: z.record(z.unknown()).optional(),
+        })).min(1).max(30),
+        stop_on_error: z.boolean().optional(),
+        dry_run: z.boolean().optional(),
+      },
+      computer_graph: {
+        steps: z.array(z.object({
+          id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+          action: z.string().min(1),
+          args: z.record(z.unknown()).optional(),
+          depends_on: z.array(z.string()).optional(),
+        })).min(1).max(50),
+        max_concurrency: z.number().int().min(1).max(8).optional(),
+        fail_fast: z.boolean().optional(),
+        dry_run: z.boolean().optional(),
+      },
+    };
+    tool(
+      server,
+      legacyName,
+      "Deprecated legacy Action Router facade. Use Primitive ABI or durable Task APIs.",
+      schemas[legacyName],
+      {
+        title: `Deprecated ${legacyName}`,
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      async () => {
+        const error = new Error(
+          `LEGACY_ACTION_ROUTER_DEPRECATED: ${legacyName} is not part of the OWL 1.x public contract. Use primitive_call for one operation, or task_create/task_submit for multi-step work.`,
+        );
+        error.code = "LEGACY_ACTION_ROUTER_DEPRECATED";
+        throw error;
+      },
+    );
+  }
+
+  tool(
+    server,
+    "execute_command_transactional",
+    "Run a shell command inside a Runtime-owned Git transaction. Runtime owns checkpoint, rollback and completion state.",
+    {
+      command: z.string().min(1),
+      cwd: z.string().min(1),
+      timeout_ms: z.number().int().min(1000).max(600000).optional(),
+      keep_checkpoint_on_success: z.boolean().optional(),
+    },
+    {
+      title: "Execute Command Transactionally",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    async ({ command, cwd, timeout_ms, keep_checkpoint_on_success }) => {
+      const begun = primitiveResult(await invoke("primitive.call", {
+        primitive: "tx.manage",
+        op: "begin",
+        args: { cwd, label: "OWL MCP transactional command" },
+      }));
+      const transactionId = begun?.id;
+      if (!transactionId) {
+        const error = new Error("Runtime transaction begin returned no id.");
+        error.code = "TRANSACTION_ID_MISSING";
+        throw error;
+      }
+
+      try {
+        const execution = primitiveResult(await invoke(
+          "primitive.call",
+          {
+            primitive: "sys.exec",
+            op: "run",
+            args: {
+              command,
+              cwd,
+              timeout_ms: timeout_ms ?? 60_000,
+              workspace_mode: "write",
+            },
+          },
+          timeout_ms ?? 60_000,
+        ));
+
+        if (execution?.exitCode !== 0 || execution?.timedOut === true) {
+          const rollback = primitiveResult(await invoke("primitive.call", {
+            primitive: "tx.manage",
+            op: "rollback",
+            args: { transaction_id: transactionId },
+          }));
+          return {
+            transactionId,
+            execution,
+            rollback,
+            completed: false,
+            rolledBack: true,
+          };
+        }
+
+        const completed = primitiveResult(await invoke("primitive.call", {
+          primitive: "tx.manage",
+          op: "complete",
+          args: {
+            transaction_id: transactionId,
+            keep_checkpoint: keep_checkpoint_on_success ?? false,
+          },
+        }));
+        return {
+          transactionId,
+          execution,
+          completion: completed,
+          completed: true,
+          rolledBack: false,
+        };
+      } catch (error) {
+        try {
+          await invoke("primitive.call", {
+            primitive: "tx.manage",
+            op: "rollback",
+            args: { transaction_id: transactionId },
+          });
+        } catch (rollbackError) {
+          const combined = new Error(
+            `Transactional command failed and rollback also failed: ${error instanceof Error ? error.message : String(error)}; rollback: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          );
+          combined.code = "TRANSACTION_ROLLBACK_FAILED";
+          throw combined;
+        }
+        throw error;
+      }
+    },
+  );
+
+  tool(
+    server,
+    "browser_open",
+    "Compatibility tool: open a URL in the managed OWL browser.",
+    {
+      url: z.string().url(),
+      wait_until: z.enum(["load", "domcontentloaded", "networkidle"]).optional(),
+      headless: z.boolean().optional(),
+    },
+    {
+      title: "Browser Open",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "web.open",
+      op: "navigate",
+      args,
+    }, 60_000)),
+  );
+
+  tool(
+    server,
+    "browser_list_tabs",
+    "Compatibility tool: list managed browser tabs.",
+    {},
+    {
+      title: "Browser Tabs",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    async () => primitiveResult(await invoke("primitive.call", {
+      primitive: "web.session",
+      op: "tabs",
+      args: {},
+    })),
+  );
+
+  tool(
+    server,
+    "browser_use_tab",
+    "Compatibility tool: switch the managed browser tab.",
+    { index: z.number().int().min(0) },
+    {
+      title: "Use Browser Tab",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "web.session",
+      op: "use_tab",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "browser_close",
+    "Compatibility tool: close the managed browser session.",
+    {},
+    {
+      title: "Close Browser",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    async () => primitiveResult(await invoke("primitive.call", {
+      primitive: "web.session",
+      op: "close",
+      args: {},
+    })),
+  );
+
+  tool(
+    server,
+    "browser_snapshot",
+    "Compatibility tool: inspect the visible managed browser page.",
+    {
+      max_chars: z.number().int().min(1000).max(100000).optional(),
+    },
+    {
+      title: "Browser Snapshot",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "web.query",
+      op: "snapshot",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "browser_click",
+    "Compatibility tool: click a selector in the managed browser.",
+    { selector: z.string().min(1) },
+    {
+      title: "Browser Click",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "web.act",
+      op: "click",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "browser_type",
+    "Compatibility tool: fill a selector in the managed browser.",
+    {
+      selector: z.string().min(1),
+      text: z.string(),
+      submit: z.boolean().optional(),
+    },
+    {
+      title: "Browser Type",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "web.act",
+      op: "type",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "browser_screenshot",
+    "Compatibility tool: save a managed browser page screenshot.",
+    {
+      path: z.string().min(1),
+      full_page: z.boolean().optional(),
+    },
+    {
+      title: "Browser Screenshot",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "vision.capture",
+      op: "page",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "desktop_screenshot",
+    "Compatibility tool: capture the current macOS screen.",
+    { path: z.string().min(1) },
+    {
+      title: "Desktop Screenshot",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "vision.capture",
+      op: "screen",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "desktop_click",
+    "Compatibility tool: click an absolute macOS screen coordinate.",
+    {
+      x: z.number().min(0),
+      y: z.number().min(0),
+    },
+    {
+      title: "Desktop Click",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "pointer.click",
+      op: "coordinate",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "desktop_type",
+    "Compatibility tool: type text into the focused macOS control.",
+    { text: z.string() },
+    {
+      title: "Desktop Type",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "keyboard.type",
+      op: "text",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "desktop_key",
+    "Compatibility tool: send a key or shortcut to macOS.",
+    {
+      key: z.string().min(1),
+      modifiers: z.array(
+        z.enum(["command", "option", "control", "shift"]),
+      ).optional(),
+    },
+    {
+      title: "Desktop Key",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "keyboard.press",
+      op: "key",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "desktop_open_app",
+    "Compatibility tool: activate a macOS application.",
+    { app_name: z.string().min(1) },
+    {
+      title: "Open App",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "app.lifecycle",
+      op: "launch",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "desktop_frontmost_app",
+    "Compatibility tool: inspect the frontmost macOS application.",
+    {},
+    {
+      title: "Frontmost App",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async () => primitiveResult(await invoke("primitive.call", {
+      primitive: "app.lifecycle",
+      op: "frontmost",
+      args: {},
+    })),
+  );
+
+  tool(
+    server,
+    "execute_command",
+    "Compatibility tool: run a controlled shell command through OWL Runtime policy.",
+    {
+      command: z.string().min(1),
+      cwd: z.string().min(1),
+      timeout_ms: z.number().int().min(1000).max(600000).optional(),
+      workspace_mode: z.enum(["read", "write"]).optional(),
+    },
+    {
+      title: "Execute Command",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "sys.exec",
+      op: "run",
+      args,
+    }, 10 * 60_000)),
+  );
+
+  tool(
+    server,
+    "start_process",
+    "Compatibility tool: start a managed long-running process through OWL Runtime.",
+    {
+      command: z.string().min(1),
+      cwd: z.string().min(1),
+      workspace_mode: z.enum(["read", "write"]).optional(),
+    },
+    {
+      title: "Start Process",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "process.manage",
+      op: "start",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "list_processes",
+    "Compatibility tool: list managed OWL Runtime processes.",
+    {},
+    {
+      title: "List Processes",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async () => primitiveResult(await invoke("primitive.call", {
+      primitive: "process.manage",
+      op: "list",
+      args: {},
+    })),
+  );
+
+  tool(
+    server,
+    "send_process_input",
+    "Compatibility tool: send stdin to a managed OWL Runtime process.",
+    { process_id: z.string().min(1), input: z.string() },
+    {
+      title: "Send Process Input",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "process.manage",
+      op: "input",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "get_process_output",
+    "Compatibility tool: read captured output from a managed OWL Runtime process.",
+    {
+      process_id: z.string().min(1),
+      tail_chars: z.number().int().min(1000).max(200000).optional(),
+    },
+    {
+      title: "Get Process Output",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "process.manage",
+      op: "output",
+      args,
+    })),
+  );
+
+  tool(
+    server,
+    "kill_process",
+    "Compatibility tool: stop a managed OWL Runtime process.",
+    {
+      process_id: z.string().min(1),
+      signal: z.enum(["SIGTERM", "SIGKILL", "SIGINT"]).optional(),
+    },
+    {
+      title: "Kill Process",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "process.manage",
+      op: "kill",
+      args,
+    })),
+  );
+
+  for (const [name, op, title] of [
+    ["git_add", "add", "Git Add"],
+    ["git_commit", "commit", "Git Commit"],
+    ["git_pull", "pull", "Git Pull"],
+    ["git_push", "push", "Git Push"],
+    ["apply_patch", "patch", "Apply Patch"],
+  ]) {
+    const schemas = {
+      add: { cwd: z.string().min(1), paths: z.array(z.string()).min(1) },
+      commit: { cwd: z.string().min(1), message: z.string().min(1) },
+      pull: {
+        cwd: z.string().min(1),
+        remote: z.string().optional(),
+        branch: z.string().optional(),
+      },
+      push: {
+        cwd: z.string().min(1),
+        remote: z.string().optional(),
+        branch: z.string().optional(),
+      },
+      patch: { cwd: z.string().min(1), patch: z.string().min(1) },
+    };
+    tool(
+      server,
+      name,
+      `Compatibility tool: Git ${op} through OWL Runtime.`,
+      schemas[op],
+      {
+        title,
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: op === "pull" || op === "push",
+      },
+      async (args) => primitiveResult(await invoke("primitive.call", {
+        primitive: "git.mutate",
+        op,
+        args,
+      })),
+    );
+  }
+
+  for (const [name, op, title] of [
+    ["begin_transaction", "begin", "Begin Transaction"],
+    ["transaction_status", "status", "Transaction Status"],
+    ["list_transactions", "list", "List Transactions"],
+    ["rollback_transaction", "rollback", "Rollback Transaction"],
+    ["complete_transaction", "complete", "Complete Transaction"],
+  ]) {
+    const schemas = {
+      begin: {
+        cwd: z.string().min(1),
+        label: z.string().max(200).optional(),
+      },
+      status: { transaction_id: z.string().min(1) },
+      list: { cwd: z.string().optional() },
+      rollback: { transaction_id: z.string().min(1) },
+      complete: {
+        transaction_id: z.string().min(1),
+        keep_checkpoint: z.boolean().optional(),
+      },
+    };
+    tool(
+      server,
+      name,
+      `Compatibility tool: transaction ${op} through OWL Runtime.`,
+      schemas[op],
+      {
+        title,
+        readOnlyHint: op === "status" || op === "list",
+        destructiveHint: op === "rollback" || op === "complete",
+        idempotentHint: op === "status" || op === "list",
+        openWorldHint: false,
+      },
+      async (args) => primitiveResult(await invoke("primitive.call", {
+        primitive: "tx.manage",
+        op,
+        args,
+      })),
+    );
+  }
+
+  tool(
+    server,
+    "task_create",
+    "Compatibility tool: create a durable OWL Runtime Task.",
+    {
+      label: z.string().min(1).max(200),
+      steps: z.array(z.object({
+        id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+        action: z.string().min(1),
+        args: z.record(z.unknown()).optional(),
+        depends_on: z.array(z.string()).optional(),
+      })).min(1).max(50),
+      max_concurrency: z.number().int().min(1).max(8).optional(),
+      fail_fast: z.boolean().optional(),
+    },
+    {
+      title: "Create Task",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    ({ label, steps, max_concurrency, fail_fast }) => invoke("tasks.create", {
+      label,
+      steps: steps.map((step) => ({
+        id: step.id,
+        action: step.action,
+        ...(step.args ? { args: step.args } : {}),
+        ...(step.depends_on ? { dependsOn: step.depends_on } : {}),
+      })),
+      ...(max_concurrency !== undefined ? { maxConcurrency: max_concurrency } : {}),
+      ...(fail_fast !== undefined ? { failFast: fail_fast } : {}),
+    }),
+  );
+
+  tool(
+    server,
+    "task_run",
+    "Compatibility tool: run or resume a durable OWL Runtime Task.",
+    {
+      task_id: z.string().min(1),
+      max_concurrency: z.number().int().min(1).max(8).optional(),
+      fail_fast: z.boolean().optional(),
+      max_waves: z.number().int().min(1).max(1000).optional(),
+      time_budget_ms: z.number().int().min(1000).max(600000).optional(),
+    },
+    {
+      title: "Run Task",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    ({ task_id, max_concurrency, fail_fast, max_waves, time_budget_ms }) =>
+      invoke("tasks.run", {
+        taskId: task_id,
+        ...(max_concurrency !== undefined ? { maxConcurrency: max_concurrency } : {}),
+        ...(fail_fast !== undefined ? { failFast: fail_fast } : {}),
+        ...(max_waves !== undefined ? { maxWaves: max_waves } : {}),
+        ...(time_budget_ms !== undefined ? { timeBudgetMs: time_budget_ms } : {}),
+      }, 10 * 60_000),
+  );
+
+  tool(
+    server,
+    "task_pause",
+    "Compatibility tool: pause a durable OWL Runtime Task.",
+    { task_id: z.string().min(1) },
+    {
+      title: "Pause Task",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    ({ task_id }) => invoke("tasks.pause", { taskId: task_id }),
+  );
+
+  tool(
+    server,
+    "task_cancel",
+    "Compatibility tool: cancel a durable OWL Runtime Task.",
+    { task_id: z.string().min(1) },
+    {
+      title: "Cancel Task",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    ({ task_id }) => invoke("tasks.cancel", { taskId: task_id }),
+  );
+
+  tool(
+    server,
+    "task_resolve_step",
+    "Compatibility tool: resolve a failed or interrupted durable Task step.",
+    {
+      task_id: z.string().min(1),
+      step_id: z.string().min(1),
+      resolution: z.enum(["retry", "mark_succeeded"]),
+      result: z.unknown().optional(),
+    },
+    {
+      title: "Resolve Task Step",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    ({ task_id, step_id, resolution, result }) => invoke("tasks.resolve", {
+      taskId: task_id,
+      stepId: step_id,
+      resolution,
+      ...(result !== undefined ? { result } : {}),
+    }),
+  );
+
+  tool(
+    server,
+    "task_delete",
+    "Compatibility tool: delete a completed durable OWL Runtime Task.",
+    { task_id: z.string().min(1) },
+    {
+      title: "Delete Task",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    ({ task_id }) => invoke("tasks.delete", { taskId: task_id }),
+  );
 
   tool(
     server,

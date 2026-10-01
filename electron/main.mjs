@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { configureOwlDesktopStorage } from "./storage-layout.mjs";
 import { DesktopStore } from "./store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
@@ -21,6 +22,9 @@ import { RuntimeAgentRequestEventConsumer } from "./services/runtime-agent-reque
 import { RuntimeAgentRequestEventBridge } from "./services/runtime-agent-request-event-bridge.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+let storageLayout;
+const devForceConnectivity =
+  !app.isPackaged && process.env.OWL_DEV_FORCE_CONNECTIVITY === "true";
 const RUNTIME_ACCESS_LEASE_MS = 12 * 60 * 60 * 1000;
 let mainWindow;
 let store;
@@ -85,10 +89,16 @@ function runtimeToken() {
   );
 }
 
+function effectiveRuntimeBaseUrl(settings = store.getSettings()) {
+  const devOverride =
+    !app.isPackaged ? process.env.OWL_RUNTIME_DEV_URL?.trim() : "";
+  return devOverride || settings.runtimeBaseUrl;
+}
+
 function runtimeClient() {
   const settings = store.getSettings();
   return new RuntimeHttpClient({
-    baseUrl: settings.runtimeBaseUrl,
+    baseUrl: effectiveRuntimeBaseUrl(settings),
     sessionId: settings.sessionId,
     token: runtimeToken(),
   });
@@ -439,6 +449,53 @@ async function resumeCloudAccountSession() {
   }
 }
 
+async function reauthorizeCloudAccount() {
+  const resumed = await resumeCloudAccountSession();
+  if (resumed?.status === "ready") {
+    const currentAccess = resumed.runtimeAccess;
+    if (currentAccess?.state === "READY") {
+      mainWindow?.webContents?.send(
+        "cloud:account-updated",
+        cloudAccountSnapshot(),
+      );
+      record(
+        "info",
+        "runtime-access",
+        "Runtime access reauthorized from stored Cloud session",
+        {
+          state: currentAccess.state,
+          deviceId: resumed.deviceId ?? null,
+          interactionRequired: false,
+        },
+      );
+      return {
+        ...cloudAccountSnapshot(),
+        interactionRequired: false,
+      };
+    }
+
+    const recovered = await recoverRuntimeAccessAfterReconnect();
+    if (recovered?.state === "READY") {
+      return {
+        ...cloudAccountSnapshot(),
+        interactionRequired: false,
+      };
+    }
+
+    const error = new Error(
+      "Cloud account session is valid, but Runtime access projection did not reach READY.",
+    );
+    error.code = "RUNTIME_ACCESS_PROJECTION_FAILED";
+    throw error;
+  }
+
+  const started = await beginCloudAccountLogin();
+  return {
+    ...started,
+    interactionRequired: true,
+  };
+}
+
 async function recoverRuntimeAccessAfterReconnect() {
   if (cloudAccountState.status !== "ready") return null;
   try {
@@ -691,17 +748,27 @@ async function probeCloud() {
 function runtimeHostSupervisor() {
   const settings = store.getSettings();
   return new RuntimeHostSupervisor({
-    runtimeBaseUrl: settings.runtimeBaseUrl,
+    runtimeBaseUrl: effectiveRuntimeBaseUrl(settings),
     runtimeToken: runtimeToken(),
   });
 }
 
 function effectiveTunnelBinary(settings) {
-  if (settings.tunnelBinaryPath?.trim()) {
-    return settings.tunnelBinaryPath.trim();
-  }
-  if (!app.isPackaged) return "";
+  const configured = settings.tunnelBinaryPath?.trim();
+  if (configured) return configured;
+
   const arch = process.arch === "x64" ? "x64" : "arm64";
+  if (!app.isPackaged) {
+    return path.join(
+      __dirname,
+      "..",
+      "vendor",
+      "owl-tunnel",
+      arch,
+      "tunnel-client-runtime",
+    );
+  }
+
   return path.join(
     process.resourcesPath,
     "owl-tunnel",
@@ -712,7 +779,7 @@ function effectiveTunnelBinary(settings) {
 
 async function startTunnel() {
   const settings = store.getSettings();
-  if (!settings.tunnelEnabled) {
+  if (!settings.tunnelEnabled && !devForceConnectivity) {
     await tunnelSupervisor.stop();
     return tunnelSupervisor.status();
   }
@@ -734,7 +801,7 @@ async function stopMcp() {
 
 async function startMcp() {
   const settings = store.getSettings();
-  if (!settings.mcpEnabled) {
+  if (!settings.mcpEnabled && !devForceConnectivity) {
     await stopMcp();
     return mcpState;
   }
@@ -745,7 +812,7 @@ async function startMcp() {
   try {
     mcpServer = await startOwlMcpHttpServer({
       port: settings.mcpPort,
-      runtimeBaseUrl: settings.runtimeBaseUrl,
+      runtimeBaseUrl: effectiveRuntimeBaseUrl(settings),
       runtimeToken: runtimeToken(),
       mcpToken: mcpToken(),
       fallbackOwnerId: settings.sessionId,
@@ -797,6 +864,7 @@ async function runtimeSnapshot() {
   const result = {
     mode: online ? "live" : "offline",
     checkedAt: new Date().toISOString(),
+    runtimeEndpoint: effectiveRuntimeBaseUrl(settings),
     latencyMs: Date.now() - started,
     info: info.status === "fulfilled" ? info.value : null,
     runtimeAccess: effectiveRuntimeAccess,
@@ -833,7 +901,12 @@ async function runtimeSnapshot() {
     online ? "info" : "warn",
     "runtime",
     online ? "Runtime snapshot refreshed" : "Runtime connection unavailable",
-    { baseUrl: settings.runtimeBaseUrl, latencyMs: result.latencyMs },
+    {
+      baseUrl: effectiveRuntimeBaseUrl(settings),
+      configuredBaseUrl: settings.runtimeBaseUrl,
+      devOverride: !app.isPackaged && Boolean(process.env.OWL_RUNTIME_DEV_URL),
+      latencyMs: result.latencyMs,
+    },
   );
   result.activity = activity.slice(0, 50);
   return result;
@@ -916,12 +989,32 @@ function registerIpc() {
     platform: process.platform,
     arch: process.arch,
     electronVersion: process.versions.electron,
+    storage: {
+      version: storageLayout.version,
+      productRoot: storageLayout.productRoot,
+      desktopRoot: storageLayout.desktopRoot,
+      stagingRoot: storageLayout.stagingRoot,
+      logsRoot: storageLayout.logsRoot,
+      cacheRoot: storageLayout.cacheRoot,
+      diagnosticsRoot: storageLayout.diagnosticsRoot,
+      migrationReportFile: storageLayout.migrationReportFile,
+      migration: {
+        copied: storageLayout.migration.copied.length,
+        preservedExisting: storageLayout.migration.preservedExisting.length,
+        missing: storageLayout.migration.missing.length,
+        errors: storageLayout.migration.errors.length,
+        legacyDetected:
+          storageLayout.migration.copied.length > 0 ||
+          storageLayout.migration.preservedExisting.length > 0,
+      },
+    },
   }));
 
   ipcMain.handle("runtime:refresh", () => runtimeSnapshot());
   ipcMain.handle("cloud:status", () => cloudBridgeSnapshot());
   ipcMain.handle("cloud:account-status", () => cloudAccountSnapshot());
   ipcMain.handle("cloud:login", () => beginCloudAccountLogin());
+  ipcMain.handle("cloud:reauthorize", () => reauthorizeCloudAccount());
   ipcMain.handle("cloud:logout", () => logoutCloudAccount());
   ipcMain.handle("cloud:probe", () => probeCloud());
   ipcMain.handle("cloud:start", () => startCloudBridge());
@@ -1239,6 +1332,8 @@ const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) {
   app.quit();
 } else {
+  storageLayout = configureOwlDesktopStorage(app);
+
   app.on("second-instance", (_event, argv) => {
     const callbackUrl = argv.find((value) => isCloudAuthCallbackUrl(value));
     if (callbackUrl) acceptCloudAuthCallbackUrl(callbackUrl);
@@ -1298,7 +1393,10 @@ if (!hasLock) {
         });
       });
     }
-    if (settings.tunnelEnabled && settings.tunnelAutoStart) {
+    if (
+      devForceConnectivity ||
+      (settings.tunnelEnabled && settings.tunnelAutoStart)
+    ) {
       await startTunnel().catch((error) => {
         record("error", "tunnel", "Tunnel auto-start failed", {
           message: error instanceof Error ? error.message : String(error),

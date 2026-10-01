@@ -10,8 +10,9 @@ The default development/test path for OWL LAB must be OWL LAB itself:
 ChatGPT
 → OWL Tunnel
 → OWL MCP
-→ packaged OWL Runtime RC
+→ OWL Runtime DEV during implementation
 → repository mutation / tests / tasks
+→ packaged OWL Runtime RC only at release checkpoints
 ```
 
 Desktop Commander is a recovery-sidecar only. Use it when OWL LAB itself is unavailable
@@ -25,15 +26,21 @@ including tasks, staging, processes/logs, episodes, semantic state, schedules,
 skill candidates, transactions, workspace leases, loops, user skills, browser state,
 credentials, secrets, logs, onboarding and WeChat sessions.
 
-OWL LAB currently distributes state across:
+OWL LAB storage layout V1 now gives Desktop one canonical product namespace:
 
-- `~/.owl-runtime` — canonical Runtime state
+- `~/Library/Application Support/OWL LAB/desktop` — Desktop durable UI/control-plane state
 - `~/Library/Application Support/OWL LAB/staging` — Runtime task staging/artifacts
-- `~/.owl/logs` — packaged Runtime service logs
-- `~/.owl/releases` — immutable packaged Runtime releases
-- `~/Library/Application Support/@owl-platform/desktop` — Desktop/Electron state
+- `~/Library/Application Support/OWL LAB/logs` — product logs, with Desktop under `logs/desktop`
+- `~/Library/Application Support/OWL LAB/cache` — reclaimable Desktop/session cache
+- `~/Library/Application Support/OWL LAB/diagnostics` — diagnostic/crash export workspace
+- `~/.owl-runtime` — canonical production Runtime state; intentionally not migrated in the Desktop V1 change
+- `~/.owl-runtime-dev` — isolated Runtime DEV state
+- `~/.owl/releases` — immutable packaged Runtime releases and rollback material
 
-This is technically valid but not product-visible enough.
+The historical Desktop namespace `~/Library/Application Support/@owl-platform/desktop`
+is compatibility input only. Desktop copies known owned state into the new
+`OWL LAB/desktop` root without deleting the source, never overwrites an existing
+destination file, and writes `desktop/migrations/storage-layout-v1.json` as evidence.
 
 ## Product requirement: one logical OWL state model
 
@@ -71,6 +78,19 @@ Advanced
 
 Users should not need to know which physical directory stores each record.
 
+## Product-owned storage is not an Allowed Folder
+
+`~/Library/Application Support/OWL LAB` is application-owned internal storage, not a normal user workspace. Do not add the whole product root to the default `ALLOWED_DIRECTORIES` list just so generic agent filesystem tools can inspect it.
+
+Boundaries:
+
+- user work roots such as Desktop/Documents/Downloads and explicit selections → Runtime filesystem policy;
+- Runtime-owned task staging → the existing narrow Runtime-owned filesystem exception;
+- Desktop state/log/cache/diagnostics → Desktop-owned internal access and dedicated product projections;
+- canonical Runtime state → Runtime APIs, never direct Desktop mutation.
+
+This keeps product internals separate from normal agent workspace permissions while still allowing OWL LAB itself to manage and surface its own state.
+
 ## Migration rule
 
 Do not delete or overwrite `~/.computer-mcp` until migration is explicit and verified.
@@ -85,7 +105,7 @@ The next OWL migration step should:
 
 ## Storage lifecycle
 
-The new product must distinguish:
+The product storage contract distinguishes:
 
 - canonical durable state — retained until user deletes it;
 - task evidence/artifacts — retained by configurable TTL;

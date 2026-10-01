@@ -280,6 +280,7 @@ export type RuntimeEventBridgeStatus = {
 export type RuntimeSnapshot = {
   mode: "live" | "offline";
   checkedAt: string;
+  runtimeEndpoint?: string;
   latencyMs: number;
   info: null | { apiVersion?: string; runtimeVersion?: string; transport?: string };
   runtimeAccess: RuntimeAccessState | null;
@@ -318,6 +319,23 @@ export type DesktopEnvironment = {
   platform: string;
   arch: string;
   electronVersion: string;
+  storage?: {
+    version: number;
+    productRoot: string;
+    desktopRoot: string;
+    stagingRoot: string;
+    logsRoot: string;
+    cacheRoot: string;
+    diagnosticsRoot: string;
+    migrationReportFile: string;
+    migration: {
+      copied: number;
+      preservedExisting: number;
+      missing: number;
+      errors: number;
+      legacyDetected: boolean;
+    };
+  };
 };
 
 

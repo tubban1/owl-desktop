@@ -3,7 +3,7 @@ import {
   Activity, Boxes, CheckCircle2, Cloud, Cpu, Gauge, HardDrive,
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
   Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
-  AlertTriangle,
+  AlertTriangle, ArrowRight,
 } from "lucide-react";
 import type { AccountMeta, ActivityEntry, AgentRequest, CloudAccountStatus, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
@@ -83,6 +83,56 @@ export default function App() {
     ? snapshot.cloud.status.replaceAll("_", " ")
     : "stopped";
 
+  const productReadiness = useMemo(() => {
+    if (!online) {
+      return {
+        state: "LOCAL_RECOVERY",
+        label: "Runtime recovery",
+        title: "Local Runtime needs attention",
+        description: snapshot?.error ?? "OWL Runtime is not reachable.",
+      };
+    }
+    if (cloudAccount?.status !== "ready") {
+      return {
+        state: "SETUP_REQUIRED",
+        label: "Setup required",
+        title: "Sign in to finish setup",
+        description: "Your local Runtime is reachable, but OWL LAB account setup is not complete.",
+      };
+    }
+    if (!executionReady) {
+      return {
+        state: "AUTHORIZATION_REQUIRED",
+        label: "Authorization required",
+        title: "Execution access needs renewal",
+        description: "Read-only Runtime status is available, but new work needs a valid execution lease.",
+      };
+    }
+    if (snapshot?.mcp.status !== "running" || snapshot?.tunnel.state !== "running") {
+      return {
+        state: "CHATGPT_CONNECTION_REQUIRED",
+        label: "Connect ChatGPT",
+        title: "Local execution is ready",
+        description: "Start or recover the OWL MCP/Tunnel connection so ChatGPT can reach this Mac.",
+      };
+    }
+    return {
+      state: "READY",
+      label: "Ready",
+      title: "OWL LAB is ready",
+      description: "Account, local execution authority and ChatGPT transport are ready.",
+    };
+  }, [
+    online,
+    snapshot?.error,
+    snapshot?.mcp.status,
+    snapshot?.tunnel.state,
+    cloudAccount?.status,
+    executionReady,
+  ]);
+
+  const readinessReady = productReadiness.state === "READY";
+
   const refresh = async () => {
     setBusy(true);
     try {
@@ -147,6 +197,55 @@ export default function App() {
     }
     setNotice("Settings saved");
     window.setTimeout(() => setNotice(""), 1600);
+  };
+
+  const readinessActionLabel =
+    productReadiness.state === "LOCAL_RECOVERY"
+      ? "Repair Runtime"
+      : productReadiness.state === "SETUP_REQUIRED"
+        ? "Sign in"
+        : productReadiness.state === "AUTHORIZATION_REQUIRED"
+          ? "Reauthorize"
+          : productReadiness.state === "CHATGPT_CONNECTION_REQUIRED"
+            ? "Connect ChatGPT"
+            : "Refresh";
+
+  const runReadinessAction = async () => {
+    setBusy(true);
+    try {
+      if (productReadiness.state === "LOCAL_RECOVERY") {
+        await window.owlDesktop.hostRestart();
+      } else if (productReadiness.state === "SETUP_REQUIRED") {
+        await window.owlDesktop.cloudLogin();
+        setNotice("Continue sign-in in your browser");
+        window.setTimeout(() => setNotice(""), 2400);
+        return;
+      } else if (productReadiness.state === "AUTHORIZATION_REQUIRED") {
+        const result = await window.owlDesktop.cloudReauthorize();
+        setCloudAccount(await window.owlDesktop.cloudAccountStatus());
+        if (result.interactionRequired) {
+          setNotice("Continue sign-in in your browser");
+          window.setTimeout(() => setNotice(""), 2400);
+          return;
+        }
+      } else if (productReadiness.state === "CHATGPT_CONNECTION_REQUIRED") {
+        if (snapshot?.mcp.status !== "running") {
+          await saveSettings({ mcpEnabled: true });
+        }
+        if (settings?.tunnelEnabled !== true) {
+          await saveSettings({ tunnelEnabled: true });
+        }
+        await window.owlDesktop.tunnelStart();
+      }
+      await refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Recovery action failed",
+      );
+      window.setTimeout(() => setNotice(""), 2400);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const addSecret = async () => {
@@ -233,16 +332,16 @@ export default function App() {
     <main className="main">
       <header className="topbar">
         <div className="crumb">LOCAL CONTROL PLANE</div>
-        <div className="top-actions">{notice && <span className="notice">{notice}</span>}<StatusPill online={online} /><button className="icon-button" onClick={refresh} disabled={busy} title="Refresh Runtime"><RefreshCw size={16} className={busy ? "spin" : ""} /></button></div>
+        <div className="top-actions">{notice && <span className="notice">{notice}</span>}<span className={"readiness-pill " + (readinessReady ? "ready" : "attention")}>{readinessReady ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{productReadiness.label}</span><button className="icon-button" onClick={refresh} disabled={busy} title="Refresh OWL LAB status"><RefreshCw size={16} className={busy ? "spin" : ""} /></button></div>
       </header>
 
       <div className="content">
         {page === "overview" && <>
-          <SectionHeader title="Good evening." description="Your local OWL LAB execution stack, sessions and operational health in one place." action={<button className="primary" onClick={refresh}><RefreshCw size={15} />Refresh Runtime</button>} />
-          <section className={"hero-status " + (online ? "healthy" : "warning")}>
-            <div className="hero-icon">{online ? <CheckCircle2 size={24} /> : <WifiOff size={24} />}</div>
-            <div className="hero-copy"><span>LOCAL EXECUTION AUTHORITY</span><h2>{!online ? "OWL Runtime is not connected" : executionReady ? "OWL Runtime is ready" : `OWL Runtime is ${runtimeAccess?.state?.toLowerCase() ?? "locked"}`}</h2><p>{!online ? (snapshot?.error ?? "Start OWL Runtime or update the endpoint in Settings.") : executionReady ? "Desktop is reading canonical execution state through RuntimeClient v" + apiVersion + "." : "Read-only state remains available, but new Runtime mutations require a valid OWL LAB execution lease."}</p></div>
-            <div className="hero-side"><strong>{online ? snapshot?.latencyMs + " ms" : "—"}</strong><span>last probe</span></div>
+          <SectionHeader title="Good evening." description="One readiness state for account, local execution and ChatGPT connectivity." action={<button className="primary" onClick={runReadinessAction} disabled={busy}>{productReadiness.state === "READY" ? <RefreshCw size={15} /> : <ArrowRight size={15} />}{readinessActionLabel}</button>} />
+          <section className={"hero-status " + (readinessReady ? "healthy" : "warning")}>
+            <div className="hero-icon">{readinessReady ? <CheckCircle2 size={24} /> : <AlertTriangle size={24} />}</div>
+            <div className="hero-copy"><span>PRODUCT READINESS</span><h2>{productReadiness.title}</h2><p>{productReadiness.description}</p></div>
+            <div className="hero-side"><strong>{online ? snapshot?.latencyMs + " ms" : "—"}</strong><span>Runtime probe</span></div>
           </section>
           <div className="metrics-grid">
             <MetricCard label="Persistent tasks" value={snapshot?.metrics.tasks ?? "—"} caption="Runtime-owned" icon={HardDrive} />
@@ -491,7 +590,7 @@ export default function App() {
         {page === "runtime" && <>
           <SectionHeader title="Runtime" description="Connection, compatibility and canonical execution state from OWL Runtime." action={<StatusPill online={online} />} />
           <div className="runtime-grid">
-            <section className="panel runtime-summary"><span className="eyebrow">CONNECTION</span><h3>{settings?.runtimeBaseUrl ?? "—"}</h3><p>Stable session: <code>{sessionShort}</code></p><div className="runtime-version"><span>API {apiVersion}</span><span>Runtime {runtimeVersion}</span><span>{snapshot?.latencyMs ?? "—"} ms</span></div></section>
+            <section className="panel runtime-summary"><span className="eyebrow">CONNECTION</span><h3>{snapshot?.runtimeEndpoint ?? settings?.runtimeBaseUrl ?? "—"}</h3><p>Stable session: <code>{sessionShort}</code></p><div className="runtime-version"><span>API {apiVersion}</span><span>Runtime {runtimeVersion}</span><span>{snapshot?.latencyMs ?? "—"} ms</span>{snapshot?.runtimeEndpoint && snapshot.runtimeEndpoint !== settings?.runtimeBaseUrl ? <span>DEV override</span> : null}</div></section>
             <section className="panel"><span className="eyebrow">HEALTH</span><pre className="code-block compact">{pretty(snapshot?.health)}</pre></section>
           </div>
           <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RUNTIME HOST</span><h3>Stable macOS permission identity</h3></div><StatusPill online={snapshot?.host?.host.installed === true} /></div>
@@ -559,23 +658,54 @@ export default function App() {
 
         {page === "settings" && settings && <>
           <SectionHeader title="Settings" description="Local product preferences and Runtime connectivity." />
-          <section className="panel settings-panel"><div className="setting-row"><div><strong>Runtime endpoint</strong><span>Loopback HTTP endpoint exposed by OWL Runtime.</span></div><input className="setting-input" value={settings.runtimeBaseUrl} onChange={(e) => setSettings({ ...settings, runtimeBaseUrl: e.target.value })} onBlur={() => saveSettings({ runtimeBaseUrl: settings.runtimeBaseUrl })} /></div>
+          <section className="panel settings-panel">
+            <div className="setting-row"><div><strong>Launch at login</strong><span>Start OWL LAB Desktop automatically after macOS login.</span></div><Toggle checked={settings.launchAtLogin} onChange={(v) => saveSettings({ launchAtLogin: v })} /></div>
+            <div className="setting-row"><div><strong>Provider telemetry</strong><span>Send privacy-bounded operational metadata only. No command payload, credentials or user content.</span></div><Toggle checked={settings.cloudTelemetryEnabled} onChange={(v) => saveSettings({ cloudTelemetryEnabled: v })} /></div>
+            <div className="setting-row"><div><strong>Runtime diagnostics</strong><span>Keep redacted Runtime support projections available for troubleshooting and export.</span></div><Toggle checked={settings.diagnosticsEnabled} onChange={(v) => saveSettings({ diagnosticsEnabled: v })} /></div>
+          </section>
+
+          <details className="panel settings-panel advanced-settings">
+            <summary>
+              <div><span className="eyebrow">ADVANCED</span><strong>Connection & transport internals</strong><small>Runtime, MCP, Tunnel and Cloud implementation settings</small></div>
+              <span className="neutral-pill">Technical</span>
+            </summary>
+            <div className="setting-row"><div><strong>Runtime endpoint</strong><span>Loopback HTTP endpoint exposed by OWL Runtime.</span></div><input className="setting-input" value={settings.runtimeBaseUrl} onChange={(e) => setSettings({ ...settings, runtimeBaseUrl: e.target.value })} onBlur={() => saveSettings({ runtimeBaseUrl: settings.runtimeBaseUrl })} /></div>
             <div className="setting-row"><div><strong>Auto-connect Runtime</strong><span>Probe Runtime when OWL LAB Desktop starts.</span></div><Toggle checked={settings.autoConnectRuntime} onChange={(v) => saveSettings({ autoConnectRuntime: v })} /></div>
             <div className="setting-row"><div><strong>OWL MCP</strong><span>Run the ChatGPT/MCP compatibility adapter with the Desktop lifecycle.</span></div><Toggle checked={settings.mcpEnabled} onChange={(v) => saveSettings({ mcpEnabled: v })} /></div>
             <div className="setting-row"><div><strong>MCP port</strong><span>Loopback port used by OWL MCP and OWL Tunnel.</span></div><input className="setting-input" type="number" min="1024" max="65535" value={settings.mcpPort} onChange={(e) => setSettings({ ...settings, mcpPort: Number(e.target.value) })} onBlur={() => saveSettings({ mcpPort: settings.mcpPort })} /></div>
             <div className="setting-row"><div><strong>OWL Tunnel</strong><span>Run the remote transport to this Desktop's local MCP endpoint.</span></div><Toggle checked={settings.tunnelEnabled} onChange={(v) => saveSettings({ tunnelEnabled: v })} /></div>
             <div className="setting-row"><div><strong>Tunnel auto-start</strong><span>Start the tunnel after Desktop and MCP are ready.</span></div><Toggle checked={settings.tunnelAutoStart} onChange={(v) => saveSettings({ tunnelAutoStart: v })} /></div>
-            <div className="setting-row"><div><strong>Tunnel binary</strong><span>Versioned OWL Tunnel client executable. Desktop owns lifecycle, not transport semantics.</span></div><input className="setting-input" value={settings.tunnelBinaryPath} onChange={(e) => setSettings({ ...settings, tunnelBinaryPath: e.target.value })} onBlur={() => saveSettings({ tunnelBinaryPath: settings.tunnelBinaryPath })} placeholder="/path/to/tunnel-client-runtime" /></div>
-            <div className="setting-row"><div><strong>Tunnel ID</strong><span>Control-plane tunnel identity. API key belongs in Secrets as OWL_TUNNEL_API_KEY.</span></div><input className="setting-input" value={settings.tunnelId} onChange={(e) => setSettings({ ...settings, tunnelId: e.target.value })} onBlur={() => saveSettings({ tunnelId: settings.tunnelId })} placeholder="tunnel_…" /></div>
+            <div className="setting-row"><div><strong>Tunnel binary override</strong><span>Leave empty to use the vendored OWL Tunnel for this architecture.</span></div><input className="setting-input" value={settings.tunnelBinaryPath} onChange={(e) => setSettings({ ...settings, tunnelBinaryPath: e.target.value })} onBlur={() => saveSettings({ tunnelBinaryPath: settings.tunnelBinaryPath })} placeholder="Automatic (recommended)" /></div>
+            <div className="setting-row"><div><strong>Tunnel ID</strong><span>Control-plane tunnel identity. Normal users should receive this automatically from OWL LAB.</span></div><input className="setting-input" value={settings.tunnelId} onChange={(e) => setSettings({ ...settings, tunnelId: e.target.value })} onBlur={() => saveSettings({ tunnelId: settings.tunnelId })} placeholder="tunnel_…" /></div>
             <div className="setting-group-label"><Cloud size={14} /><span>Cloud Bridge</span></div>
-            <div className="setting-row"><div><strong>OWL Cloud Bridge</strong><span>Connect this registered Desktop to OWL Cloud M1 control plane.</span></div><Toggle checked={settings.cloudEnabled} onChange={(v) => saveSettings({ cloudEnabled: v })} /></div>
+            <div className="setting-row"><div><strong>OWL Cloud Bridge</strong><span>Connect this registered Desktop to OWL Cloud control plane.</span></div><Toggle checked={settings.cloudEnabled} onChange={(v) => saveSettings({ cloudEnabled: v })} /></div>
             <div className="setting-row"><div><strong>Cloud auto-start</strong><span>Start heartbeat, command pull and projection outbox after Desktop launches.</span></div><Toggle checked={settings.cloudAutoStart} onChange={(v) => saveSettings({ cloudAutoStart: v })} /></div>
-            <div className="setting-row"><div><strong>Cloud API endpoint</strong><span>OWL Cloud HTTP API v1. Device transport uses the separately stored device credential.</span></div><input className="setting-input" value={settings.cloudBaseUrl} onChange={(e) => setSettings({ ...settings, cloudBaseUrl: e.target.value })} onBlur={() => saveSettings({ cloudBaseUrl: settings.cloudBaseUrl })} placeholder="https://…execute-api…amazonaws.com" /></div>
-            <div className="setting-row"><div><strong>Cloud device ID</strong><span>Canonical deviceId returned by Cloud registration.</span></div><input className="setting-input" value={settings.cloudDeviceId} onChange={(e) => setSettings({ ...settings, cloudDeviceId: e.target.value })} onBlur={() => saveSettings({ cloudDeviceId: settings.cloudDeviceId })} placeholder="dev_…" /></div>
-            <div className="setting-row"><div><strong>Provider telemetry</strong><span>Send privacy-bounded operational metadata only. No command payload, credentials or user content.</span></div><Toggle checked={settings.cloudTelemetryEnabled} onChange={(v) => saveSettings({ cloudTelemetryEnabled: v })} /></div>
-            <div className="contract-note compact-note"><KeyRound size={17} /><div><strong>Device credential stays OS-encrypted.</strong><p>Store it in Secrets as <code>OWL_CLOUD_DEVICE_CREDENTIAL</code> with scope <code>owl-cloud</code>. Human Cognito login/device enrollment is a separate product flow.</p></div></div>
-            <div className="setting-row"><div><strong>Runtime diagnostics</strong><span>Include Runtime support projections in the Logs screen.</span></div><Toggle checked={settings.diagnosticsEnabled} onChange={(v) => saveSettings({ diagnosticsEnabled: v })} /></div>
-            <div className="setting-row"><div><strong>Launch at login</strong><span>Start OWL Desktop after macOS login in packaged builds.</span></div><Toggle checked={settings.launchAtLogin} onChange={(v) => saveSettings({ launchAtLogin: v })} /></div>
+            <div className="setting-row"><div><strong>Cloud API endpoint</strong><span>OWL Cloud HTTP API. Device transport uses its separately stored credential.</span></div><input className="setting-input" value={settings.cloudBaseUrl} onChange={(e) => setSettings({ ...settings, cloudBaseUrl: e.target.value })} onBlur={() => saveSettings({ cloudBaseUrl: settings.cloudBaseUrl })} placeholder="https://…" /></div>
+            <div className="setting-row"><div><strong>Cloud device ID</strong><span>Canonical device ID returned by Cloud registration.</span></div><input className="setting-input" value={settings.cloudDeviceId} onChange={(e) => setSettings({ ...settings, cloudDeviceId: e.target.value })} onBlur={() => saveSettings({ cloudDeviceId: settings.cloudDeviceId })} placeholder="dev_…" /></div>
+            <div className="contract-note compact-note"><KeyRound size={17} /><div><strong>Secrets remain OS-encrypted.</strong><p>Transport and device credentials stay in the local secure store. Raw credentials are never shown in this panel.</p></div></div>
+          </details>
+          <section className="panel">
+            <div className="panel-heading">
+              <div><span className="eyebrow">STORAGE & EVIDENCE</span><h3>OWL LAB product data</h3></div>
+              <span className={`neutral-pill ${(env?.storage?.migration.errors ?? 0) > 0 ? "warning-pill" : ""}`}>
+                {env?.storage ? `layout v${env.storage.version}` : "legacy layout"}
+              </span>
+            </div>
+            <p className="panel-help">Internal OWL LAB product data is managed by Desktop and Runtime. It is not a user Allowed Folder and does not require adding ~/Library to filesystem permissions.</p>
+            <div className="about-grid">
+              <span>Product root</span><code>{env?.storage?.productRoot ?? "Available after next Desktop restart"}</code>
+              <span>Desktop state</span><code>{env?.storage?.desktopRoot ?? "—"}</code>
+              <span>Task staging</span><code>{env?.storage?.stagingRoot ?? "—"}</code>
+              <span>Logs</span><code>{env?.storage?.logsRoot ?? "—"}</code>
+              <span>Cache</span><code>{env?.storage?.cacheRoot ?? "—"}</code>
+              <span>Diagnostics</span><code>{env?.storage?.diagnosticsRoot ?? "—"}</code>
+              <span>Migration</span><strong>{!env?.storage ? "Pending restart" : env.storage.migration.errors > 0 ? `${env.storage.migration.errors} error(s)` : env.storage.migration.legacyDetected ? `${env.storage.migration.copied} copied · ${env.storage.migration.preservedExisting} preserved` : "Canonical / no legacy state found"}</strong>
+              <span>Evidence</span><code>{env?.storage?.migrationReportFile ?? "—"}</code>
+            </div>
+            <div className="contract-note compact-note">
+              <HardDrive size={17} />
+              <div><strong>Product storage stays separate from workspaces.</strong><p>Desktop/Documents/Downloads and folders you explicitly add remain Runtime workspace policy. OWL LAB internal state is surfaced through product APIs and diagnostics instead of broad filesystem access.</p></div>
+            </div>
           </section>
           <section className="panel"><div className="panel-heading"><div><span className="eyebrow">ABOUT</span><h3>Local installation</h3></div></div><div className="about-grid"><span>Desktop</span><strong>{env?.appVersion}</strong><span>Electron</span><strong>{env?.electronVersion}</strong><span>Platform</span><strong>{env?.platform} / {env?.arch}</strong><span>Session</span><code>{sessionShort}</code></div></section>
         </>}

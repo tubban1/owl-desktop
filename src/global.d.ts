@@ -31,6 +31,14 @@ declare global {
       cloudStatus(): Promise<CloudBridgeStatus>;
       cloudAccountStatus(): Promise<CloudAccountStatus>;
       cloudLogin(): Promise<{ status: string; provider: string; region: string | null; redirectUri: string }>;
+      cloudReauthorize(): Promise<{
+        status: string;
+        interactionRequired: boolean;
+        runtimeAccess?: { state?: string } | null;
+        provider?: string;
+        region?: string | null;
+        redirectUri?: string;
+      }>;
       cloudLogout(): Promise<CloudAccountStatus>;
       onCloudAccountUpdated(callback: (value: CloudAccountStatus) => void): () => void;
       cloudProbe(): Promise<{ ok?: boolean; service?: string; contractVersion?: string }>;

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   cloudStatus: () => ipcRenderer.invoke("cloud:status"),
   cloudAccountStatus: () => ipcRenderer.invoke("cloud:account-status"),
   cloudLogin: () => ipcRenderer.invoke("cloud:login"),
+  cloudReauthorize: () => ipcRenderer.invoke("cloud:reauthorize"),
   cloudLogout: () => ipcRenderer.invoke("cloud:logout"),
   onCloudAccountUpdated: (callback) => {
     const listener = (_event, value) => callback(value);
