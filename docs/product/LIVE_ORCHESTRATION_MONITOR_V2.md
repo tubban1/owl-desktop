@@ -143,3 +143,37 @@ Desktop: 25/25 test files, 124/124 tests PASS
 TypeScript + Vite build PASS
 git diff-check PASS
 ```
+
+
+## Cross-repository product-live acceptance
+
+Monitor V2 has a permanent cross-repository live verifier:
+
+```text
+OWL_RUNTIME_SOURCE_DIR=/path/to/owl-runtime npm run verify:orchestration-product-live
+```
+
+The verifier starts the Runtime source under test on an isolated ephemeral HTTP
+port and state root, then uses the actual Desktop RuntimeHttpClient.
+
+It proves:
+
+- Runtime public Task orchestration metadata over HTTP;
+- multiple Tasks with one orchestrationId form one Monitor workset;
+- an unrelated Task with another orchestrationId is excluded;
+- Overall progress is aggregated from canonical Task step counts;
+- selected Task detail produces a real dependsOn graph;
+- selected Task inspector is projected from Runtime public detail;
+- the temporary Runtime and state are cleaned after the gate.
+
+Acceptance against Runtime commit 72e95c5:
+
+```text
+desktopRuntimeHttpClient: PASS
+publicTaskOrchestration: PASS
+worksetTaskCount: 2
+unrelatedTaskExcluded: PASS
+overallPercent: 33
+canonicalTaskGraph: PASS
+selectedTaskInspector: PASS
+```
