@@ -235,6 +235,10 @@ export class CloudBridgeService {
     this.running = false;
     this.timer = null;
     this.syncing = false;
+    this.approvalDecisionCapability = {
+      status: "unknown",
+      nextProbeAtMs: 0,
+    };
     this.state = {
       status: "stopped",
       lastHeartbeatAt: null,
@@ -254,6 +258,13 @@ export class CloudBridgeService {
       supportedCommandKinds: Object.entries(
         OWL_COMPATIBILITY_V1.remoteCommands,
       ).flatMap(([kind, versions]) => versions.map((version) => `${kind}@${version}`)),
+      approvalDecisionSync: {
+        status: this.approvalDecisionCapability.status,
+        nextProbeAt:
+          this.approvalDecisionCapability.nextProbeAtMs > 0
+            ? new Date(this.approvalDecisionCapability.nextProbeAtMs).toISOString()
+            : null,
+      },
       ...this.store.snapshot(),
     };
   }
@@ -382,10 +393,42 @@ export class CloudBridgeService {
         await this.processCommand(command);
       }
 
-      const approvalBatch =
-        typeof this.client.pullApprovalDecisions === "function"
-          ? await this.client.pullApprovalDecisions(this.commandLimit)
-          : { decisions: [] };
+      let approvalBatch = { decisions: [] };
+      const approvalPullAvailable =
+        typeof this.client.pullApprovalDecisions === "function";
+      const approvalProbeDue =
+        this.approvalDecisionCapability.status !== "unavailable" ||
+        Date.now() >= this.approvalDecisionCapability.nextProbeAtMs;
+
+      if (approvalPullAvailable && approvalProbeDue) {
+        try {
+          approvalBatch = await this.client.pullApprovalDecisions(
+            this.commandLimit,
+          );
+          this.approvalDecisionCapability = {
+            status: "supported",
+            nextProbeAtMs: 0,
+          };
+        } catch (error) {
+          if (error?.status === 404 || errorCode(error) === "NOT_FOUND") {
+            this.approvalDecisionCapability = {
+              status: "unavailable",
+              nextProbeAtMs: Date.now() + 60_000,
+            };
+            this.onEvent(
+              "warn",
+              "Cloud approval decision sync is unavailable on this deployment",
+              {
+                code: errorCode(error),
+                retryAfterMs: 60_000,
+              },
+            );
+          } else {
+            throw error;
+          }
+        }
+      }
+
       const decisions = Array.isArray(approvalBatch?.decisions)
         ? approvalBatch.decisions
         : [];

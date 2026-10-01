@@ -81,6 +81,7 @@ function createService({
   store = createStore(),
   onAgentRequest = vi.fn(),
   onAuthRejected = vi.fn(),
+  onEvent = vi.fn(),
 } = {}) {
   return {
     client,
@@ -88,6 +89,7 @@ function createService({
     store,
     onAgentRequest,
     onAuthRejected,
+    onEvent,
     service: new CloudBridgeService({
       client,
       runtimeClient,
@@ -100,6 +102,7 @@ function createService({
         capabilities: { cloudBridge: "m1-polling-v1" },
         runtimeCompatibility: { runtimeApiVersion: "0.1" },
       }),
+      onEvent,
       onAgentRequest,
       onAuthRejected,
     }),
@@ -574,6 +577,40 @@ describe("CloudBridgeService", () => {
         consumed: false,
       },
     });
+  });
+
+
+  it("keeps Cloud Bridge connected when an older deployment lacks approval decision sync", async () => {
+    const notFound = Object.assign(new Error("Route not found"), {
+      code: "NOT_FOUND",
+      status: 404,
+    });
+    const pullApprovalDecisions = vi.fn(async () => {
+      throw notFound;
+    });
+    const client = createClient({ pullApprovalDecisions });
+    const setup = createService({ client });
+
+    await setup.service.syncOnce({ forceHeartbeat: true });
+    await setup.service.syncOnce();
+
+    expect(client.pullCommands).toHaveBeenCalledTimes(2);
+    expect(pullApprovalDecisions).toHaveBeenCalledTimes(1);
+    expect(setup.service.snapshot()).toMatchObject({
+      status: "connected",
+      lastErrorCode: null,
+      approvalDecisionSync: {
+        status: "unavailable",
+      },
+    });
+    expect(setup.onEvent).toHaveBeenCalledWith(
+      "warn",
+      "Cloud approval decision sync is unavailable on this deployment",
+      expect.objectContaining({
+        code: "NOT_FOUND",
+        retryAfterMs: 60_000,
+      }),
+    );
   });
 
   it("heartbeats, polls and drains durable outbox in a sync cycle", async () => {

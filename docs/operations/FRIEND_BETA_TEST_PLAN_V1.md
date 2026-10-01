@@ -216,3 +216,29 @@ formal icon source: assets/owl1254.png
 Important boundary: these fixes make OWL resilient to transport/process interruptions inside the OWL stack. They cannot guarantee that the ChatGPT client UI or the user network never disconnects; instead, accepted work must survive such disconnects and be rediscoverable/recoverable.
 
 Do not mark A9/B6/B8 PASS until the next packaged build is installed and the owner performs real Runtime/Desktop/reboot recovery tests.
+### Cloud compatibility verification — 2026-10-01
+
+Cloud source was tested with native arm64 Node 22.23.3 because the default `/usr/local/bin/node` is x64/Rosetta while the installed esbuild package is arm64.
+
+```text
+owl-cloud typecheck: PASS
+owl-cloud tests:     52/52 PASS
+I5 Approval E2E:     PASS
+```
+
+I5 evidence:
+- approve resumes the same Runtime task;
+- approval receipt is consumed;
+- side effect executes exactly once;
+- deny fails the task without executing the side effect;
+- duplicate Cloud decision only replays acknowledgement;
+- no replacement task is created.
+
+Desktop now also tolerates an older Cloud deployment that returns 404/NOT_FOUND for `/device/v1/approval-decisions`: command/presence/event/telemetry sync remains connected, approval decision sync is projected as unavailable, and Desktop re-probes the endpoint after 60 seconds. This prevents one optional newer endpoint from degrading the entire bridge while Cloud deployment catches up.
+
+After the fallback change, Desktop regression is:
+
+```text
+20 test files / 100 tests PASS
+build PASS
+```
