@@ -151,6 +151,14 @@ describe("buildMonitorModel", () => {
               needsReview: 0,
             },
             progress: { message: "Rendering frame 2" },
+            verificationCounts: {
+              required: 2,
+              receipts: 1,
+              verified: 1,
+              failed: 0,
+              uncertain: 0,
+              missing: 1,
+            },
           },
           {
             id: "task_review",
@@ -166,6 +174,14 @@ describe("buildMonitorModel", () => {
               failed: 0,
               needsReview: 1,
             },
+            verificationCounts: {
+              required: 1,
+              receipts: 1,
+              verified: 0,
+              failed: 0,
+              uncertain: 1,
+              missing: 0,
+            },
           },
           {
             id: "task_done",
@@ -180,6 +196,14 @@ describe("buildMonitorModel", () => {
               succeeded: 2,
               failed: 0,
               needsReview: 0,
+            },
+            verificationCounts: {
+              required: 2,
+              receipts: 2,
+              verified: 2,
+              failed: 0,
+              uncertain: 0,
+              missing: 0,
             },
           },
         ],
@@ -250,6 +274,14 @@ describe("buildMonitorModel", () => {
       totalSteps: 7,
       succeededSteps: 3,
       runningSteps: 1,
+    });
+    expect(model.verification).toEqual({
+      required: 5,
+      receipts: 4,
+      verified: 3,
+      failed: 0,
+      uncertain: 1,
+      missing: 1,
     });
     expect(model.processes).toMatchObject({
       total: 2,

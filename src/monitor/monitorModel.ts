@@ -81,6 +81,14 @@ export type MonitorModel = {
     succeededSteps: number;
     runningSteps: number;
   };
+  verification: {
+    required: number;
+    receipts: number;
+    verified: number;
+    failed: number;
+    uncertain: number;
+    missing: number;
+  };
   processes: {
     total: number;
     running: number;
@@ -159,12 +167,25 @@ export function buildMonitorModel({
   let totalSteps = 0;
   let succeededSteps = 0;
   let runningSteps = 0;
+  let verificationRequired = 0;
+  let verificationReceipts = 0;
+  let verificationVerified = 0;
+  let verificationFailed = 0;
+  let verificationUncertain = 0;
+  let verificationMissing = 0;
 
   for (const task of taskRows) {
     const counts = task.counts ?? task.progress?.counts ?? {};
     totalSteps += number(counts.total);
     succeededSteps += number(counts.succeeded);
     runningSteps += number(counts.running);
+    const verificationCounts = task.verificationCounts ?? {};
+    verificationRequired += number(verificationCounts.required);
+    verificationReceipts += number(verificationCounts.receipts);
+    verificationVerified += number(verificationCounts.verified);
+    verificationFailed += number(verificationCounts.failed);
+    verificationUncertain += number(verificationCounts.uncertain);
+    verificationMissing += number(verificationCounts.missing);
     if (
       task.status === "running" ||
       task.progress?.phase === "executing" ||
@@ -406,6 +427,14 @@ export function buildMonitorModel({
       totalSteps,
       succeededSteps,
       runningSteps,
+    },
+    verification: {
+      required: verificationRequired,
+      receipts: verificationReceipts,
+      verified: verificationVerified,
+      failed: verificationFailed,
+      uncertain: verificationUncertain,
+      missing: verificationMissing,
     },
     processes: {
       total: processRows.length,

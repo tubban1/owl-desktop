@@ -589,6 +589,47 @@ export function MonitorPage({
             </div>
             <ShieldCheck size={18} />
           </div>
+          <SegmentedBar
+            items={[
+              {
+                label: "Verified",
+                value: model.verification.verified,
+                kind: "completed",
+              },
+              {
+                label: "Uncertain",
+                value: model.verification.uncertain,
+                kind: "claimed",
+              },
+              {
+                label: "Failed",
+                value: model.verification.failed,
+                kind: "attention",
+              },
+              {
+                label: "Missing",
+                value: model.verification.missing,
+                kind: "cancelled",
+              },
+            ]}
+          />
+          <div className="monitor-stat-row verification-stats">
+            <SmallStat
+              label="Required"
+              value={model.verification.required}
+              caption="Steps requiring verification"
+            />
+            <SmallStat
+              label="Receipts"
+              value={model.verification.receipts}
+              caption="Canonical Runtime receipts"
+            />
+            <SmallStat
+              label="Verified"
+              value={model.verification.verified}
+              caption="Postcondition confirmed"
+            />
+          </div>
           <div className="monitor-gate-grid">
             <div>
               <span>Task review</span>
@@ -612,9 +653,9 @@ export function MonitorPage({
             </div>
           </div>
           <p className="monitor-footnote">
-            The lightweight Task list does not expose per-step VerificationReceipt
-            totals. Monitor shows only canonical review/failure gates rather than
-            inventing a “verified” success rate.
+            Verification totals come from Runtime's public Task summary aggregate.
+            Monitor receives counts only — receipt evidence and internal Runtime
+            paths remain behind the Runtime authority boundary.
           </p>
         </section>
 

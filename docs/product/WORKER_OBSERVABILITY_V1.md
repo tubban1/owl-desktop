@@ -96,18 +96,25 @@ Projected from `RuntimeSkillManagerPort`:
 
 ### Verification and policy
 
-The lightweight Task-list projection does not expose a complete aggregate of per-step `VerificationReceipt` records.
+Runtime public Task summaries expose a bounded `verificationCounts` aggregate:
 
-Monitor therefore shows only canonical signals that can be proven from current public data:
+- required;
+- receipts;
+- verified;
+- failed;
+- uncertain;
+- missing.
+
+Monitor renders that aggregate directly as the historical Verification distribution across retained Tasks. Receipt evidence and internal Runtime paths remain behind the Runtime authority boundary.
+
+Current intervention gates remain separate from the historical distribution:
 
 - Tasks in needs-review;
 - Tasks waiting approval;
 - Cloud commands with uncertain completion;
 - invalid active Skill Candidates.
 
-Monitor must not invent a “verification success percentage”.
-
-A future Runtime aggregate may add verified/failed/uncertain receipt counts after Verification Coverage is expanded.
+This separation prevents historical Verification statistics from being confused with current worker health.
 
 ### Activity sources
 
