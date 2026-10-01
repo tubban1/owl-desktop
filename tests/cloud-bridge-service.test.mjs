@@ -82,6 +82,7 @@ function createService({
   onAgentRequest = vi.fn(),
   onAuthRejected = vi.fn(),
   onEvent = vi.fn(),
+  telemetryEnabled = true,
 } = {}) {
   return {
     client,
@@ -98,6 +99,7 @@ function createService({
       appVersion: "0.1.0",
       pollIntervalMs: 60_000,
       presenceIntervalMs: 60_000,
+      telemetryEnabled,
       buildPresence: async () => ({
         capabilities: { cloudBridge: "m1-polling-v1" },
         runtimeCompatibility: { runtimeApiVersion: "0.1" },
@@ -691,6 +693,20 @@ describe("CloudBridgeService", () => {
         status: "supported",
       }),
     );
+  });
+
+  it("still sends the mandatory usage snapshot when optional telemetry is disabled", async () => {
+    const client = createClient();
+    const setup = createService({ client, telemetryEnabled: false });
+
+    await setup.service.syncOnce({ forceHeartbeat: true });
+
+    expect(client.heartbeat).toHaveBeenCalledTimes(1);
+    expect(client.postTelemetry).toHaveBeenCalledTimes(1);
+    expect(client.postTelemetry.mock.calls[0][0][0]).toMatchObject({
+      eventType: "desktop.device.usage.snapshot",
+      operation: "presence",
+    });
   });
 
   it("heartbeats, polls and drains durable outbox in a sync cycle", async () => {

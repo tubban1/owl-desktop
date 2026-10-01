@@ -978,11 +978,12 @@ export class CloudBridgeService {
       `telemetry:presence:${this.deviceId}:${String(
         usage.sampledAt ?? new Date().toISOString(),
       )}`,
+      { required: true },
     );
   }
 
-  queueTelemetry(input, eventId) {
-    if (!this.telemetryEnabled) return null;
+  queueTelemetry(input, eventId, options = {}) {
+    if (!this.telemetryEnabled && options.required !== true) return null;
     const payload = {
       eventId: eventId ?? `telemetry:${randomUUID()}`,
       eventType: input.eventType,
