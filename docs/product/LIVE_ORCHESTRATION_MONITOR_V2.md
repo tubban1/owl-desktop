@@ -177,3 +177,39 @@ overallPercent: 33
 canonicalTaskGraph: PASS
 selectedTaskInspector: PASS
 ```
+
+## Stream-independent recovery
+
+ChatGPT response-stream continuity is not an OWL execution authority.
+
+Desktop MCP now exposes the read-only orchestration_snapshot tool for reconnect and stream-recovery scenarios.
+
+The tool compacts canonical Runtime and Agent Inbox state into one bounded recovery projection:
+
+- active durable Tasks;
+- explicit orchestration worksets;
+- selected focus Task;
+- latest meaningful Runtime progress;
+- Verification counts;
+- active / waiting / needs-review steps;
+- next pending step;
+- open AgentRequests relevant to the logical MCP owner.
+
+If active durable work exists, the snapshot returns doNotCreateReplacementTask = true and recommends continuing the existing Task/workset instead of creating duplicate work after an interrupted ChatGPT response.
+
+The tool does not:
+
+- start or resume a Task;
+- claim AgentRequests;
+- replay side effects;
+- depend on ChatGPT UI scraping;
+- expose Runtime staging/CAS paths.
+
+Latest recovery acceptance:
+
+- MCP recovery snapshot: PASS;
+- MCP core tool surface: PASS;
+- disconnect survival: PASS;
+- reconnect soak: PASS;
+- Desktop full tests: 26 files / 125 tests PASS;
+- TypeScript + Vite build: PASS.

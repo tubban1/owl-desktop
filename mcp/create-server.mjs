@@ -80,6 +80,173 @@ function primitiveResult(envelope) {
   return envelope;
 }
 
+const RECOVERABLE_TASK_STATES = new Set([
+  "pending",
+  "running",
+  "waiting_approval",
+  "needs_review",
+  "blocked",
+  "paused",
+]);
+
+function runtimeTaskRows(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return [];
+  for (const key of ["tasks", "items", "result"]) {
+    if (Array.isArray(value[key])) return value[key];
+  }
+  return [];
+}
+
+function recoveryTimestamp(value) {
+  if (typeof value !== "string") return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compactRecoveryTask(task) {
+  const progress = task?.progress ?? {};
+  const counts = task?.counts ?? progress?.counts ?? {};
+  return {
+    taskId: typeof task?.id === "string" ? task.id : null,
+    label: typeof task?.label === "string" ? task.label : null,
+    status: typeof task?.status === "string" ? task.status : "unknown",
+    ownerSessionId:
+      typeof task?.ownerSessionId === "string" ? task.ownerSessionId : null,
+    orchestration:
+      task?.orchestration && typeof task.orchestration === "object"
+        ? {
+            orchestrationId:
+              typeof task.orchestration.orchestrationId === "string"
+                ? task.orchestration.orchestrationId
+                : null,
+            label:
+              typeof task.orchestration.label === "string"
+                ? task.orchestration.label
+                : null,
+            parentTaskId:
+              typeof task.orchestration.parentTaskId === "string"
+                ? task.orchestration.parentTaskId
+                : null,
+          }
+        : null,
+    progress: {
+      revision:
+        typeof progress?.revision === "number" ? progress.revision : null,
+      phase: typeof progress?.phase === "string" ? progress.phase : null,
+      terminal: progress?.terminal === true,
+      counts: {
+        total: Number(counts?.total ?? 0),
+        pending: Number(counts?.pending ?? 0),
+        running: Number(counts?.running ?? 0),
+        waitingApproval: Number(counts?.waitingApproval ?? 0),
+        succeeded: Number(counts?.succeeded ?? 0),
+        failed: Number(counts?.failed ?? 0),
+        needsReview: Number(counts?.needsReview ?? 0),
+      },
+      lastMeaningfulAt:
+        typeof progress?.lastMeaningfulAt === "string"
+          ? progress.lastMeaningfulAt
+          : null,
+      message: typeof progress?.message === "string" ? progress.message : null,
+      lastEvent:
+        progress?.lastEvent && typeof progress.lastEvent === "object"
+          ? {
+              at:
+                typeof progress.lastEvent.at === "string"
+                  ? progress.lastEvent.at
+                  : null,
+              type:
+                typeof progress.lastEvent.type === "string"
+                  ? progress.lastEvent.type
+                  : null,
+              stepId:
+                typeof progress.lastEvent.stepId === "string"
+                  ? progress.lastEvent.stepId
+                  : null,
+              message:
+                typeof progress.lastEvent.message === "string"
+                  ? progress.lastEvent.message
+                  : null,
+            }
+          : null,
+    },
+    verificationCounts:
+      task?.verificationCounts && typeof task.verificationCounts === "object"
+        ? {
+            required: Number(task.verificationCounts.required ?? 0),
+            receipts: Number(task.verificationCounts.receipts ?? 0),
+            verified: Number(task.verificationCounts.verified ?? 0),
+            failed: Number(task.verificationCounts.failed ?? 0),
+            uncertain: Number(task.verificationCounts.uncertain ?? 0),
+            missing: Number(task.verificationCounts.missing ?? 0),
+          }
+        : null,
+    createdAt: typeof task?.createdAt === "string" ? task.createdAt : null,
+    updatedAt: typeof task?.updatedAt === "string" ? task.updatedAt : null,
+  };
+}
+
+function compactRecoveryDetail(detail) {
+  if (!detail || typeof detail !== "object") return null;
+  const steps = Array.isArray(detail.steps) ? detail.steps : [];
+  const activeSteps = steps
+    .filter((step) =>
+      ["running", "waiting_approval", "needs_review"].includes(step?.state),
+    )
+    .slice(0, 8)
+    .map((step) => ({
+      id: typeof step?.id === "string" ? step.id : null,
+      action:
+        typeof step?.action === "string"
+          ? step.action
+          : typeof step?.primitive === "string"
+            ? step.primitive
+            : null,
+      state: typeof step?.state === "string" ? step.state : "unknown",
+      verificationStatus:
+        typeof step?.verification?.status === "string"
+          ? step.verification.status
+          : step?.requiresVerification === true
+            ? "missing"
+            : null,
+    }));
+  const nextStep = steps.find((step) =>
+    ["pending", "waiting_approval", "needs_review"].includes(step?.state),
+  );
+  const lastEvent =
+    Array.isArray(detail.events) && detail.events.length > 0
+      ? detail.events[detail.events.length - 1]
+      : null;
+  return {
+    activeSteps,
+    nextStep: nextStep
+      ? {
+          id: typeof nextStep.id === "string" ? nextStep.id : null,
+          action:
+            typeof nextStep.action === "string"
+              ? nextStep.action
+              : typeof nextStep.primitive === "string"
+                ? nextStep.primitive
+                : null,
+          state:
+            typeof nextStep.state === "string" ? nextStep.state : "unknown",
+        }
+      : null,
+    lastEvent:
+      lastEvent && typeof lastEvent === "object"
+        ? {
+            at: typeof lastEvent.at === "string" ? lastEvent.at : null,
+            type: typeof lastEvent.type === "string" ? lastEvent.type : null,
+            stepId:
+              typeof lastEvent.stepId === "string" ? lastEvent.stepId : null,
+            message:
+              typeof lastEvent.message === "string" ? lastEvent.message : null,
+          }
+        : null,
+  };
+}
+
 function tool(server, name, description, schema, annotations, handler) {
   server.tool(name, description, schema, annotations, async (args) => {
     const context = currentMcpRequestContext();
@@ -124,7 +291,7 @@ export function createOwlMcpServer() {
         "Do not claim work you cannot actually handle. Release it if blocked. Complete it only after the referenced work is actually resolved.",
         "Never treat an AgentRequest as permission to install, promote, publish, send, delete, spend, or otherwise perform consequential actions without the normal OWL Runtime/user approval path.",
         "For long-running or multi-step work, prefer task_submit with a stable submission_id so Runtime execution is accepted durably and the MCP call returns promptly; use task_start only for an already-created Task.",
-        "After a reconnect or stream recovery, call task_list with active_only=true before starting replacement work, then use task_status on the existing task. If retrying task_submit, reuse the exact same submission_id so create/start replay is idempotent.",
+        "After a reconnect or stream recovery, call orchestration_snapshot before starting replacement work. If it reports active durable work, continue the existing task/workset instead of creating a duplicate. Use task_status for deeper inspection and reuse the exact same submission_id when retrying task_submit.",
         "When a durable Task remains active during an interactive ChatGPT turn, use its real progress projection to give the user a concise progress update before the frontend would otherwise sit silent too long. Never invent progress or infer completion before canonical Task state is terminal.",
       ].join(" "),
     },
@@ -1626,6 +1793,182 @@ export function createOwlMcpServer() {
         taskId,
         status: started?.status ?? created?.status ?? "pending",
         progress: started?.progress ?? null,
+      };
+    },
+  );
+
+  tool(
+    server,
+    "orchestration_snapshot",
+    "Recover a compact canonical OWL work snapshot after a ChatGPT reconnect, interrupted response, stream recovery failure, or session handoff. It is read-only and never starts replacement work. Prefer this before task_list/task_status when context may have been lost.",
+    {
+      task_id: z.string().min(1).optional(),
+      orchestration_id: z.string().min(1).optional(),
+      include_agent_requests: z.boolean().optional(),
+      active_limit: z.number().int().min(1).max(50).optional(),
+    },
+    {
+      title: "Recover OWL Orchestration Snapshot",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async ({ task_id, orchestration_id, include_agent_requests, active_limit }) => {
+      const context = currentMcpRequestContext();
+      const listed = runtimeTaskRows(
+        await invoke("tasks.list", undefined, 10_000),
+      );
+      const newestFirst = [...listed].sort(
+        (a, b) => recoveryTimestamp(b?.updatedAt) - recoveryTimestamp(a?.updatedAt),
+      );
+      const active = newestFirst.filter((task) =>
+        RECOVERABLE_TASK_STATES.has(task?.status),
+      );
+      const ownedActive = active.filter(
+        (task) => task?.ownerSessionId === context.runtimeSessionId,
+      );
+
+      let focus =
+        (task_id
+          ? newestFirst.find((task) => task?.id === task_id)
+          : null) ??
+        (orchestration_id
+          ? newestFirst.find(
+              (task) =>
+                task?.orchestration?.orchestrationId === orchestration_id,
+            )
+          : null) ??
+        ownedActive[0] ??
+        active[0] ??
+        newestFirst[0] ??
+        null;
+
+      const resolvedOrchestrationId =
+        orchestration_id ??
+        (typeof focus?.orchestration?.orchestrationId === "string"
+          ? focus.orchestration.orchestrationId
+          : null);
+
+      if (task_id && !focus) {
+        const error = new Error(
+          "RECOVERY_TASK_NOT_FOUND: requested task_id is not visible in Runtime task history.",
+        );
+        error.code = "RECOVERY_TASK_NOT_FOUND";
+        throw error;
+      }
+      if (orchestration_id && !focus) {
+        const error = new Error(
+          "RECOVERY_ORCHESTRATION_NOT_FOUND: no visible Runtime Task belongs to the requested orchestration_id.",
+        );
+        error.code = "RECOVERY_ORCHESTRATION_NOT_FOUND";
+        throw error;
+      }
+
+      const workset = resolvedOrchestrationId
+        ? newestFirst.filter(
+            (task) =>
+              task?.orchestration?.orchestrationId === resolvedOrchestrationId,
+          )
+        : focus
+          ? [focus]
+          : [];
+
+      const detail = focus?.id
+        ? await invoke(
+            "tasks.get",
+            { taskId: focus.id, includeResults: false },
+            10_000,
+          )
+        : null;
+
+      const activeByOrchestration = new Map();
+      const ungroupedActive = [];
+      for (const task of active.slice(0, active_limit ?? 25)) {
+        const orchestrationId =
+          typeof task?.orchestration?.orchestrationId === "string"
+            ? task.orchestration.orchestrationId
+            : null;
+        if (!orchestrationId) {
+          ungroupedActive.push(compactRecoveryTask(task));
+          continue;
+        }
+        if (!activeByOrchestration.has(orchestrationId)) {
+          activeByOrchestration.set(orchestrationId, {
+            orchestrationId,
+            label:
+              typeof task?.orchestration?.label === "string"
+                ? task.orchestration.label
+                : null,
+            tasks: [],
+          });
+        }
+        activeByOrchestration
+          .get(orchestrationId)
+          .tasks.push(compactRecoveryTask(task));
+      }
+
+      const openAgentRequests =
+        include_agent_requests !== false && context.agentInbox
+          ? context.agentInbox.list({
+              statuses: ["pending", "claimed"],
+              limit: 10,
+              ownerId: context.runtimeSessionId,
+            })
+          : [];
+
+      const activeFocus =
+        focus && RECOVERABLE_TASK_STATES.has(focus.status);
+      const ambiguousActiveWork =
+        active.length > 1 &&
+        !task_id &&
+        !orchestration_id &&
+        ownedActive.length === 0;
+
+      return {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        logicalOwner: {
+          runtimeSessionId: context.runtimeSessionId,
+          ownerStable: context.ownerStable,
+        },
+        recovery: {
+          hasActiveWork: active.length > 0,
+          doNotCreateReplacementTask: active.length > 0,
+          ambiguousActiveWork,
+          recommendedAction: activeFocus
+            ? "continue_existing_task"
+            : active.length > 0
+              ? "select_existing_active_work"
+              : "no_active_durable_work",
+          focusTaskId: typeof focus?.id === "string" ? focus.id : null,
+          orchestrationId: resolvedOrchestrationId,
+        },
+        focus: focus ? compactRecoveryTask(focus) : null,
+        focusDetail: compactRecoveryDetail(detail),
+        workset: resolvedOrchestrationId
+          ? {
+              orchestrationId: resolvedOrchestrationId,
+              label:
+                typeof focus?.orchestration?.label === "string"
+                  ? focus.orchestration.label
+                  : null,
+              taskCount: workset.length,
+              tasks: workset.map(compactRecoveryTask),
+            }
+          : null,
+        activeWorksets: [...activeByOrchestration.values()],
+        ungroupedActive,
+        openAgentRequests: openAgentRequests.map((request) => ({
+          requestId: request.requestId,
+          type: request.type,
+          priority: request.priority,
+          status: request.status,
+          subject: request.subject,
+          reasonCode: request.reasonCode,
+          requiresUserConfirmation: request.requiresUserConfirmation,
+          updatedAt: request.updatedAt,
+        })),
       };
     },
   );

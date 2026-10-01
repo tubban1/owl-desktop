@@ -92,6 +92,7 @@ describe("OWL MCP compatibility surface", () => {
       "task_resolve_step",
       "task_delete",
       "task_submit",
+      "orchestration_snapshot",
       "task_list",
       "task_start",
       "task_status",
