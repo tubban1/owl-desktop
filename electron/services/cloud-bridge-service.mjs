@@ -434,6 +434,8 @@ export class CloudBridgeService {
       if (forceHeartbeat || now - lastHeartbeat >= this.presenceIntervalMs) {
         const presence = await this.buildPresence();
         await this.client.heartbeat(presence);
+        this.queuePresenceTelemetry(presence);
+        await this.flushOutbox();
         this.state.lastHeartbeatAt = new Date().toISOString();
         this.noteContact();
       }
@@ -926,6 +928,56 @@ export class CloudBridgeService {
         payload,
       },
       eventId,
+    );
+  }
+
+  queuePresenceTelemetry(presence) {
+    const capabilities = isObject(presence?.capabilities)
+      ? presence.capabilities
+      : {};
+    const authorization = isObject(capabilities.authorization)
+      ? capabilities.authorization
+      : {};
+    const usage = isObject(capabilities.usage) ? capabilities.usage : {};
+
+    return this.queueTelemetry(
+      {
+        eventType: "desktop.device.usage.snapshot",
+        severity: "info",
+        operation: "presence",
+        attributes: {
+          operationalState:
+            typeof authorization.operationalState === "string"
+              ? authorization.operationalState
+              : "UNKNOWN",
+          accountSessionState:
+            typeof authorization.accountSessionState === "string"
+              ? authorization.accountSessionState
+              : "unknown",
+          entitlementStatus:
+            typeof authorization.entitlementStatus === "string"
+              ? authorization.entitlementStatus
+              : "unknown",
+          runtimeAccessState:
+            typeof authorization.runtimeAccessState === "string"
+              ? authorization.runtimeAccessState
+              : "UNKNOWN",
+          activeTasks: Number(usage.activeTasks ?? 0),
+          totalTasks: Number(usage.totalTasks ?? 0),
+          completedTasks: Number(usage.completedTasks ?? 0),
+          needsAttentionTasks: Number(usage.needsAttentionTasks ?? 0),
+          activeProcesses: Number(usage.activeProcesses ?? 0),
+          approvalsPending: Number(usage.approvalsPending ?? 0),
+          mcpSessions: Number(usage.mcpSessions ?? 0),
+          outboxPending: Number(usage.outboxPending ?? 0),
+          runtimeReachable: capabilities.runtimeReachable === true,
+          mcpAvailable: capabilities.mcpAvailable === true,
+          tunnelAvailable: capabilities.tunnelAvailable === true,
+        },
+      },
+      `telemetry:presence:${this.deviceId}:${String(
+        usage.sampledAt ?? new Date().toISOString(),
+      )}`,
     );
   }
 

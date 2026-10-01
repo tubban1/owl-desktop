@@ -705,7 +705,11 @@ describe("CloudBridgeService", () => {
 
     expect(client.heartbeat).toHaveBeenCalledTimes(1);
     expect(client.pullCommands).toHaveBeenCalledTimes(1);
-    expect(client.postTelemetry).toHaveBeenCalledTimes(1);
+    expect(client.postTelemetry).toHaveBeenCalledTimes(2);
+    expect(client.postTelemetry.mock.calls[1][0][0]).toMatchObject({
+      eventType: "desktop.device.usage.snapshot",
+      operation: "presence",
+    });
     expect(setup.store.snapshot().outboxPending).toBe(0);
     expect(setup.service.snapshot().status).toBe("connected");
   });

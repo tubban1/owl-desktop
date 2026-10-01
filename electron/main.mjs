@@ -499,8 +499,7 @@ async function completeCloudAccountLogin(url) {
       deviceId: cloudAccountState.deviceId,
       canRun: enrolled.access?.canRun === true,
     });
-    const settings = store.getSettings();
-    if (settings.cloudEnabled) await startCloudBridge();
+    await startCloudBridge();
     mainWindow?.webContents?.send("cloud:account-updated", cloudAccountSnapshot());
     return cloudAccountSnapshot();
   } catch (error) {
@@ -706,11 +705,55 @@ function createAgentRequest(input) {
 
 async function buildCloudPresence() {
   const client = runtimeClient();
-  const [info, manifest] = await Promise.all([
+  const [info, runtimeAccess] = await Promise.all([
     client.info().catch(() => null),
-    client.capabilities("").catch(() => null),
+    client.runtimeAccess().catch(() => null),
   ]);
+  const runtimeReady =
+    runtimeAccess?.mode === "compat" || runtimeAccess?.state === "READY";
+
+  const [manifest, tasks, approvals, processes] = runtimeReady
+    ? await Promise.all([
+        client.capabilities("").catch(() => null),
+        client.tasks().catch(() => []),
+        client.approvals().catch(() => []),
+        client.processes().catch(() => null),
+      ])
+    : [null, [], [], null];
+
   const capabilityCard = buildSafeDeviceCapabilityCard(manifest);
+  const taskRows = Array.isArray(tasks) ? tasks : [];
+  const approvalRows = Array.isArray(approvals) ? approvals : [];
+  const terminalTaskStates = new Set([
+    "completed",
+    "failed",
+    "cancelled",
+    "blocked",
+  ]);
+  const activeTasks = taskRows.filter(
+    (task) => !terminalTaskStates.has(String(task?.status ?? "")),
+  ).length;
+  const completedTasks = taskRows.filter(
+    (task) => String(task?.status ?? "") === "completed",
+  ).length;
+  const needsAttentionTasks = taskRows.filter((task) =>
+    ["failed", "blocked"].includes(String(task?.status ?? "")),
+  ).length;
+  const approvalsPending = approvalRows.filter((approval) =>
+    ["pending", "requested", "waiting"].includes(
+      String(approval?.state ?? approval?.status ?? "pending"),
+    ),
+  ).length;
+  const activeProcesses = collectionSize(processes, ["processes", "items"]);
+  const sampledAt = new Date().toISOString();
+  const leaseExpiresAt = runtimeAccess?.grant?.expiresAt ?? null;
+
+  const operationalState =
+    runtimeAccess?.state === "REVOKED"
+      ? "REVOKED"
+      : runtimeReady
+        ? "READY"
+        : "ONLINE_LOCKED";
 
   return {
     capabilities: {
@@ -723,6 +766,28 @@ async function buildCloudPresence() {
       runtimeReachable: Boolean(info),
       mcpAvailable: mcpState.status === "running",
       tunnelAvailable: tunnelSupervisor?.status().state === "running",
+      authorization: {
+        operationalState,
+        accountSessionState: cloudAccountState.status,
+        entitlementPlan: cloudAccountState.entitlement?.plan ?? null,
+        entitlementStatus: cloudAccountState.entitlement?.status ?? null,
+        runtimeAccessState: runtimeAccess?.state ?? "UNKNOWN",
+        runtimeAccessMode: runtimeAccess?.mode ?? null,
+        leaseExpiresAt,
+        signatureVerified:
+          runtimeAccess?.grant?.signatureVerified === true,
+      },
+      usage: {
+        sampledAt,
+        activeTasks,
+        totalTasks: taskRows.length,
+        completedTasks,
+        needsAttentionTasks,
+        activeProcesses,
+        approvalsPending,
+        mcpSessions: mcpServer?.snapshot()?.sessionCount ?? 0,
+        outboxPending: cloudBridgeStore?.snapshot()?.outboxPending ?? 0,
+      },
       providers: capabilityCard.providers,
       skillRegistry: capabilityCard.skillRegistry,
       verification: capabilityCard.verification,
@@ -780,8 +845,6 @@ async function stopCloudBridge() {
 async function startCloudBridge() {
   const settings = store.getSettings();
   await stopCloudBridge();
-
-  if (!settings.cloudEnabled) return cloudBridgeSnapshot();
 
   if (!settings.cloudBaseUrl?.trim()) {
     cloudBridgeState = {
@@ -1446,7 +1509,11 @@ function registerIpc() {
       "cloudPresenceIntervalMs" in (patch ?? {}) ||
       "cloudTelemetryEnabled" in (patch ?? {})
     ) {
-      if (next.cloudEnabled) {
+      if (
+        next.cloudBaseUrl?.trim() &&
+        next.cloudDeviceId?.trim() &&
+        cloudDeviceCredential()
+      ) {
         await startCloudBridge();
       } else {
         await stopCloudBridge();
@@ -1482,7 +1549,9 @@ function registerIpc() {
     }
     if (meta.name === "OWL_CLOUD_DEVICE_CREDENTIAL") {
       const settings = store.getSettings();
-      if (settings.cloudEnabled) await startCloudBridge();
+      if (settings.cloudBaseUrl?.trim() && settings.cloudDeviceId?.trim()) {
+        await startCloudBridge();
+      }
     }
     return meta;
   });
@@ -1592,7 +1661,11 @@ if (!hasLock) {
         });
       });
     }
-    if (settings.cloudEnabled && settings.cloudAutoStart) {
+    if (
+      settings.cloudDeviceId?.trim() &&
+      cloudDeviceCredential() &&
+      settings.cloudBaseUrl?.trim()
+    ) {
       await startCloudBridge().catch((error) => {
         record("error", "cloud", "Cloud Bridge auto-start failed", {
           code: error?.code ?? null,

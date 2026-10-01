@@ -187,6 +187,8 @@ export function DevicesPage({
   );
 
   const selectedCapabilities = object(selected?.capabilities);
+  const authorization = nested(selectedCapabilities, "authorization");
+  const usage = nested(selectedCapabilities, "usage");
   const providers = nested(selectedCapabilities, "providers");
   const filesystem = nested(providers, "filesystem");
   const shell = nested(providers, "shell");
@@ -198,8 +200,13 @@ export function DevicesPage({
         (value): value is string => typeof value === "string",
       )
     : [];
+  const runtimeAccessState =
+    typeof authorization.runtimeAccessState === "string"
+      ? authorization.runtimeAccessState
+      : null;
   const remoteRunReady =
     bool(selectedCapabilities.runtimeReachable) &&
+    (runtimeAccessState === null || runtimeAccessState === "READY") &&
     remoteKinds.includes("runtime.task.create-and-start@1");
 
   const runHealthCheck = async () => {
@@ -362,6 +369,31 @@ export function DevicesPage({
                     {sending ? "Sending…" : "Run test"}
                   </button>
                 </div>
+              </div>
+
+              <div className="about-grid">
+                <span>Operational state</span>
+                <strong>{String(authorization.operationalState ?? "Unknown").replaceAll("_", " ")}</strong>
+                <span>Account session</span>
+                <strong>{String(authorization.accountSessionState ?? "Unknown").replaceAll("_", " ")}</strong>
+                <span>Entitlement</span>
+                <strong>{String(authorization.entitlementStatus ?? "Unknown").replaceAll("_", " ")}</strong>
+                <span>Runtime access</span>
+                <strong>{String(authorization.runtimeAccessState ?? "Unknown")}</strong>
+                <span>Lease</span>
+                <strong>{bool(authorization.signatureVerified) ? "Cloud signed" : "Not active"}</strong>
+                <span>Lease expires</span>
+                <strong>{typeof authorization.leaseExpiresAt === "string" ? new Date(authorization.leaseExpiresAt).toLocaleString() : "—"}</strong>
+                <span>Active tasks</span>
+                <strong>{Number(usage.activeTasks ?? 0)}</strong>
+                <span>Processes</span>
+                <strong>{Number(usage.activeProcesses ?? 0)}</strong>
+                <span>Approvals pending</span>
+                <strong>{Number(usage.approvalsPending ?? 0)}</strong>
+                <span>MCP sessions</span>
+                <strong>{Number(usage.mcpSessions ?? 0)}</strong>
+                <span>Usage sampled</span>
+                <strong>{typeof usage.sampledAt === "string" ? new Date(usage.sampledAt).toLocaleTimeString() : "—"}</strong>
               </div>
 
               <div className="device-capability-grid">

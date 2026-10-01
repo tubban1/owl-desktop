@@ -273,3 +273,37 @@ describe("CloudEnrollmentService", () => {
     expect(snapshot.access.canRun).toBe(true);
   });
 });
+
+it("sign-out removes only the account refresh token and preserves enrolled device identity", () => {
+  const store = fakeStore();
+  store.upsertSecret({
+    name: cloudEnrollmentSecretNames.deviceCredential,
+    project: cloudEnrollmentSecretNames.project,
+    value: "owldev1.dev_keep.device-secret",
+  });
+  store.upsertSecret({
+    name: cloudEnrollmentSecretNames.accountRefreshToken,
+    project: cloudEnrollmentSecretNames.project,
+    value: "refresh-remove",
+  });
+  const service = new CloudEnrollmentService({
+    cloudClient: {},
+    auth: {},
+    store,
+  });
+
+  service.clearAccountSession();
+
+  expect(
+    store.readSecret(
+      cloudEnrollmentSecretNames.accountRefreshToken,
+      cloudEnrollmentSecretNames.project,
+    ),
+  ).toBeUndefined();
+  expect(
+    store.readSecret(
+      cloudEnrollmentSecretNames.deviceCredential,
+      cloudEnrollmentSecretNames.project,
+    ),
+  ).toBe("owldev1.dev_keep.device-secret");
+});
