@@ -38,6 +38,40 @@ describe("OWL MCP logical owner identity", () => {
     expect(a.runtimeSessionId).not.toBe(b.runtimeSessionId);
   });
 
+
+  it("uses the persistent Desktop session as a stable fallback across transports", () => {
+    const a = resolveOwnerIdentity(
+      {},
+      "transport-1",
+      "owl-desktop:persistent-session-1",
+    );
+    const b = resolveOwnerIdentity(
+      {},
+      "transport-2",
+      "owl-desktop:persistent-session-1",
+    );
+
+    expect(a.stable).toBe(true);
+    expect(a.source).toBe("desktop-session");
+    expect(a.runtimeSessionId).toBe(b.runtimeSessionId);
+  });
+
+  it("prefers an explicit owner over the Desktop fallback", () => {
+    const explicit = resolveOwnerIdentity(
+      { "x-owl-owner-id": "chat-a" },
+      "transport-1",
+      "owl-desktop:persistent-session-1",
+    );
+    const fallback = resolveOwnerIdentity(
+      {},
+      "transport-1",
+      "owl-desktop:persistent-session-1",
+    );
+
+    expect(explicit.source).toBe("explicit-header");
+    expect(explicit.runtimeSessionId).not.toBe(fallback.runtimeSessionId);
+  });
+
   it("accepts the legacy owner header during migration", () => {
     const legacy = resolveOwnerIdentity(
       { "x-computer-mcp-owner-id": "legacy-chat" },

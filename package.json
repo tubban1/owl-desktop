@@ -11,6 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "verify:local-e2e": "node scripts/verify-local-e2e.mjs",
+    "verify:durable-submit": "node scripts/verify-durable-submit.mjs",
     "verify:consequential-replay-live": "node scripts/verify-consequential-replay-live-e2e.mjs",
     "verify:stream-recovery-live": "node scripts/verify-stream-recovery-live-e2e.mjs",
     "stage:runtime": "node scripts/stage-runtime-component.mjs",

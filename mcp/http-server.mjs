@@ -11,6 +11,7 @@ export async function startOwlMcpHttpServer({
   runtimeBaseUrl = "http://127.0.0.1:8788",
   runtimeToken,
   mcpToken,
+  fallbackOwnerId,
   agentInbox,
   onEvent = () => {},
   sessionIdleTtlMs = 30 * 60_000,
@@ -134,6 +135,7 @@ export async function startOwlMcpHttpServer({
       const identity = resolveOwnerIdentity(
         req.headers,
         transportSessionId,
+        fallbackOwnerId,
       );
       active.runtimeSessionId = identity.runtimeSessionId;
       active.ownerStable = identity.stable;

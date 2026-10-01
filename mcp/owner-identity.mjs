@@ -15,7 +15,11 @@ function digest(value) {
   return createHash("sha256").update(value).digest("hex").slice(0, 32);
 }
 
-export function resolveOwnerIdentity(headers, transportSessionId) {
+export function resolveOwnerIdentity(
+  headers,
+  transportSessionId,
+  fallbackOwnerId,
+) {
   const explicit =
     firstHeader(headers, OWL_OWNER_HEADER) ??
     firstHeader(headers, LEGACY_OWNER_HEADER);
@@ -25,6 +29,16 @@ export function resolveOwnerIdentity(headers, transportSessionId) {
       runtimeSessionId: `owl-owner:${digest(explicit)}`,
       stable: true,
       source: "explicit-header",
+    };
+  }
+
+  const fallback =
+    typeof fallbackOwnerId === "string" ? fallbackOwnerId.trim() : "";
+  if (fallback && fallback.length <= 512) {
+    return {
+      runtimeSessionId: `owl-owner:${digest(fallback)}`,
+      stable: true,
+      source: "desktop-session",
     };
   }
 

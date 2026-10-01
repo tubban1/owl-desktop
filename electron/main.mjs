@@ -748,6 +748,7 @@ async function startMcp() {
       runtimeBaseUrl: settings.runtimeBaseUrl,
       runtimeToken: runtimeToken(),
       mcpToken: mcpToken(),
+      fallbackOwnerId: settings.sessionId,
       agentInbox,
       onEvent(level, message, meta) {
         record(level, "mcp", message, meta);

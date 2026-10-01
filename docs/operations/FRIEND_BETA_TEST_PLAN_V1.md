@@ -242,3 +242,28 @@ After the fallback change, Desktop regression is:
 20 test files / 100 tests PASS
 build PASS
 ```
+### Transport/durable recovery hardening — 2026-10-01
+
+The repeated ChatGPT stream-recovery stalls were treated as a P0 reliability issue. Source-level hardening now covers three layers:
+
+1. An accepted MCP request is no longer automatically cancelled merely because the upstream HTTP/Tunnel response connection closes.
+2. OWL Tunnel automatically restarts after unexpected exit with bounded exponential backoff.
+3. Long-running or multi-step work can use `task_submit`: one bounded MCP call creates + starts a durable Runtime Task and returns a `taskId`. Reconnects recover through `task_list` / `task_status`.
+
+Owner identity was also hardened. When an upstream client does not provide `x-owl-owner-id`, packaged Desktop now supplies its persisted `settings.sessionId` as the fallback logical owner. Therefore a fresh MCP transport after Tunnel/stream recovery remains attached to the same Runtime owner instead of becoming a new transport-scoped owner.
+
+Direct MCP SDK verification (independent of Vitest) passed:
+
+```text
+2 fresh MCP transports
+stable Runtime sessions: 1
+same submission_id create replay key: stable
+same submission_id start replay key: stable
+task rediscovered after reconnect: PASS
+```
+
+Gate: `npm run verify:durable-submit`.
+
+The current installed friend-beta-final does not yet contain `task_submit`; live ChatGPT verification of this new surface is deferred to the next packaged build.
+
+Development-runner note: this Mac currently has x64/Rosetta Node modules for owl-desktop while native arm64 Node lacks the matching Rollup optional binary. Vitest also intermittently stalls before test collection under the current local runner. This is a development-test environment issue and must not be confused with Runtime task execution. Direct Node verification is used for the new durable recovery gate until the local dependency architecture is normalized.
