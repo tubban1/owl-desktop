@@ -30,8 +30,8 @@ export class CloudEnrollmentService {
     this.runtimeCompatibility = runtimeCompatibility;
   }
 
-  async begin() {
-    return await this.auth.begin();
+  async begin(options) {
+    return await this.auth.begin(options);
   }
 
   async complete(callbackUrl) {

@@ -12,6 +12,7 @@ function config() {
     tokenEndpoint: "https://login.example.test/oauth2/token",
     logoutEndpoint: "https://login.example.test/logout",
     redirectUri: "owl-desktop://auth/callback",
+    developmentRedirectUri: "http://127.0.0.1:18991/auth/callback",
     logoutRedirectUri: "owl-desktop://auth/logout",
     scopes: ["openid", "email", "profile"],
     responseType: "code",
@@ -38,6 +39,43 @@ describe("CloudAccountAuth", () => {
     expect(url.searchParams.get("code_challenge")).toBeTruthy();
     expect(url.searchParams.get("state")).toBeTruthy();
     expect(auth.hasPending()).toBe(true);
+  });
+
+  it("uses the loopback callback for development authorization and token exchange", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          access_token: "access-token",
+          id_token: "id-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const auth = new CloudAccountAuth({
+      cloudClient: { authConfig: vi.fn(async () => config()) },
+      fetchImpl,
+    });
+
+    const started = await auth.begin({ useDevelopmentRedirect: true });
+    const authorize = new URL(started.authorizationUrl);
+    expect(started.redirectUri).toBe(
+      "http://127.0.0.1:18991/auth/callback",
+    );
+    expect(authorize.searchParams.get("redirect_uri")).toBe(
+      "http://127.0.0.1:18991/auth/callback",
+    );
+
+    const state = authorize.searchParams.get("state");
+    await auth.complete(
+      `http://127.0.0.1:18991/auth/callback?code=dev-code&state=${encodeURIComponent(state)}`,
+    );
+    const [, init] = fetchImpl.mock.calls[0];
+    const body = new URLSearchParams(init.body);
+    expect(body.get("redirect_uri")).toBe(
+      "http://127.0.0.1:18991/auth/callback",
+    );
   });
 
   it("rejects a callback with a mismatched state", async () => {

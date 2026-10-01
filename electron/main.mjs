@@ -18,6 +18,10 @@ import { CloudControlPlaneService } from "./services/cloud-control-plane-service
 import { RemoteSubmissionStore } from "./services/remote-submission-store.mjs";
 import { RemoteDeviceControlService } from "./services/remote-device-control-service.mjs";
 import { PlannerContinuationStore } from "./services/planner-continuation-store.mjs";
+import {
+  DevAuthCallbackServer,
+  DEV_AUTH_CALLBACK_URI,
+} from "./services/dev-auth-callback-server.mjs";
 import { buildSafeDeviceCapabilityCard } from "./services/device-capability-card.mjs";
 import { CloudBridgeStore } from "./services/cloud-bridge-store.mjs";
 import { CloudBridgeService } from "./services/cloud-bridge-service.mjs";
@@ -40,6 +44,7 @@ let remoteSubmissionStore;
 let plannerContinuationStore;
 let cloudAccountAuth;
 let cloudEnrollmentService;
+let devAuthCallbackServer;
 let pendingCloudAuthCallbackUrl = null;
 let agentInbox;
 let cloudBridge;
@@ -400,14 +405,41 @@ async function safeSyncRuntimeAccess(account, access, deviceId) {
 
 async function beginCloudAccountLogin() {
   const service = ensureCloudEnrollmentService();
+  const useDevelopmentRedirect = !app.isPackaged;
+  if (useDevelopmentRedirect) {
+    await devAuthCallbackServer?.stop().catch(() => undefined);
+    devAuthCallbackServer = new DevAuthCallbackServer({
+      onCallback: async (url) => {
+        await completeCloudAccountLogin(url);
+      },
+    });
+    await devAuthCallbackServer.start();
+  }
   cloudAccountState = {
     ...cloudAccountState,
     status: "authorizing",
     lastErrorCode: null,
     lastErrorMessage: null,
   };
-  const started = await service.begin();
-  await shell.openExternal(started.authorizationUrl);
+  let started;
+  try {
+    started = await service.begin({ useDevelopmentRedirect });
+    if (
+      useDevelopmentRedirect &&
+      started.redirectUri !== DEV_AUTH_CALLBACK_URI
+    ) {
+      throw new Error(
+        `OWL Cloud development redirect mismatch: expected ${DEV_AUTH_CALLBACK_URI} but discovery returned ${started.redirectUri}.`,
+      );
+    }
+    await shell.openExternal(started.authorizationUrl);
+  } catch (error) {
+    if (useDevelopmentRedirect) {
+      await devAuthCallbackServer?.stop().catch(() => undefined);
+      devAuthCallbackServer = null;
+    }
+    throw error;
+  }
   record("info", "cloud", "OWL LAB account login opened in system browser", {
     provider: started.provider,
     region: started.region,
@@ -987,14 +1019,8 @@ async function runtimeSnapshot(options = {}) {
 }
 
 function registerCloudAuthProtocol() {
-  if (process.defaultApp) {
-    const appEntry = process.argv[1] ? path.resolve(process.argv[1]) : undefined;
-    if (appEntry) {
-      app.setAsDefaultProtocolClient("owl-desktop", process.execPath, [appEntry]);
-    }
-  } else {
-    app.setAsDefaultProtocolClient("owl-desktop");
-  }
+  if (!app.isPackaged) return;
+  app.setAsDefaultProtocolClient("owl-desktop");
 }
 
 function isCloudAuthCallbackUrl(value) {
@@ -1544,6 +1570,7 @@ if (!hasLock) {
   });
 
   app.on("before-quit", () => {
+    void devAuthCallbackServer?.stop();
     void cloudBridge?.stop();
     runtimeAgentRequestEventBridge?.stop();
     void tunnelSupervisor?.stop();

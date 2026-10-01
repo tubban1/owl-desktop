@@ -38,9 +38,23 @@ export class CloudAccountAuth {
     this.pending = null;
   }
 
-  async begin() {
-    const config = await this.cloudClient.authConfig();
-    assertAuthConfig(config);
+  async begin({ useDevelopmentRedirect = false } = {}) {
+    const discovered = await this.cloudClient.authConfig();
+    assertAuthConfig(discovered);
+    const redirectUri = useDevelopmentRedirect
+      ? discovered.developmentRedirectUri
+      : discovered.redirectUri;
+    if (typeof redirectUri !== "string" || !redirectUri.trim()) {
+      throw new Error(
+        useDevelopmentRedirect
+          ? "OWL Cloud auth configuration is missing developmentRedirectUri."
+          : "OWL Cloud auth configuration is missing redirectUri.",
+      );
+    }
+    const config = {
+      ...discovered,
+      redirectUri,
+    };
 
     const verifier = base64url(randomBytes(48));
     const state = base64url(randomBytes(32));
