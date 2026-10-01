@@ -150,6 +150,18 @@ export type OrchestrationModel = {
     totalSteps: number;
     status: string;
   };
+  workset: {
+    orchestrationId: string;
+    label: string;
+    taskCount: number;
+    tasks: Array<{
+      id: string;
+      label: string;
+      status: string;
+      progressPercent: number | null;
+      parentTaskId: string | null;
+    }>;
+  } | null;
   focusTaskId: string | null;
   taskChoices: Array<{
     id: string;
@@ -644,11 +656,23 @@ export function buildOrchestrationModel(input: {
       ? (taskDetail as Row)
       : null;
 
-  const activeTasks = tasks.filter((task) =>
-    ACTIVE_TASK_STATES.has(String(task.status)),
-  );
-  const scope =
-    activeTasks.length > 0 ? activeTasks : focusTask ? [focusTask] : [];
+  const orchestrationId =
+    focusTask && typeof focusTask.orchestration?.orchestrationId === "string"
+      ? focusTask.orchestration.orchestrationId
+      : null;
+  const scope = orchestrationId
+    ? tasks.filter(
+        (task) => task.orchestration?.orchestrationId === orchestrationId,
+      )
+    : focusTask
+      ? [focusTask]
+      : [];
+  const orchestrationLabel =
+    orchestrationId && typeof focusTask?.orchestration?.label === "string"
+      ? focusTask.orchestration.label
+      : focusTask
+        ? String(focusTask.label ?? focusTask.id)
+        : "No durable work selected";
   const totalSteps = scope.reduce(
     (sum, task) =>
       sum + num(task.counts?.total ?? task.progress?.counts?.total),
@@ -676,24 +700,63 @@ export function buildOrchestrationModel(input: {
   );
   const overallPercent =
     totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+  const aggregateStatus = scope.some((task) =>
+    ["failed", "blocked", "needs_review"].includes(String(task.status)),
+  )
+    ? "needs_attention"
+    : scope.some((task) => String(task.status) === "running")
+      ? "running"
+      : scope.some((task) =>
+            ["pending", "waiting_approval", "paused"].includes(
+              String(task.status),
+            ),
+          )
+        ? "waiting"
+        : scope.length > 0 &&
+            scope.every((task) => String(task.status) === "completed")
+          ? "completed"
+          : String(focusTask?.status ?? "idle");
 
   return {
     headline: {
-      label: focusTask
-        ? String(focusTask.label ?? focusTask.id)
-        : "No durable work selected",
+      label: orchestrationLabel,
       detail: focusTask
-        ? String(focusTask.status ?? "unknown") +
-          " · " +
-          String(focusTask.ownerSessionId ?? "unowned")
+        ? orchestrationId
+          ? String(scope.length) +
+            " durable task" +
+            (scope.length === 1 ? "" : "s") +
+            " · selected " +
+            String(focusTask.label ?? focusTask.id)
+          : String(focusTask.status ?? "unknown") +
+            " · " +
+            String(focusTask.ownerSessionId ?? "unowned")
         : "Runtime is ready for a new Task.",
       overallPercent,
       running,
       waiting,
       completedSteps,
       totalSteps,
-      status: String(focusTask?.status ?? "idle"),
+      status: aggregateStatus,
     },
+    workset: orchestrationId
+      ? {
+          orchestrationId,
+          label: orchestrationLabel,
+          taskCount: scope.length,
+          tasks: [...scope]
+            .sort((a, b) => timestamp(a.createdAt) - timestamp(b.createdAt))
+            .map((task) => ({
+              id: String(task.id),
+              label: String(task.label ?? task.id),
+              status: String(task.status ?? "unknown"),
+              progressPercent: taskProgressPercent(task),
+              parentTaskId:
+                typeof task.orchestration?.parentTaskId === "string"
+                  ? task.orchestration.parentTaskId
+                  : null,
+            })),
+        }
+      : null,
     focusTaskId: focusTask ? String(focusTask.id) : null,
     taskChoices: [...tasks]
       .sort((a, b) => timestamp(b.updatedAt) - timestamp(a.updatedAt))

@@ -382,5 +382,118 @@ describe("buildOrchestrationModel", () => {
     });
     expect(history.focusTaskId).toBe("task_done");
     expect(history.headline.label).toBe("Old completed work");
+    expect(history.workset).toBeNull();
+  });
+
+  it("aggregates only Tasks with the same explicit orchestrationId", () => {
+    const groupedSnapshot = {
+      ...snapshot,
+      tasks: [
+        {
+          ...snapshot.tasks[1],
+          orchestration: {
+            schemaVersion: 1,
+            orchestrationId: "orch_release",
+            label: "OWL LAB release",
+            parentTaskId: null,
+          },
+        },
+        {
+          id: "task_release_docs",
+          label: "Release documentation",
+          status: "completed",
+          ownerSessionId: "owl-owner:different-session-is-allowed",
+          createdAt: "2026-10-01T19:52:00.000Z",
+          updatedAt: "2026-10-01T19:59:00.000Z",
+          orchestration: {
+            schemaVersion: 1,
+            orchestrationId: "orch_release",
+            label: "OWL LAB release",
+            parentTaskId: "task_live",
+          },
+          counts: {
+            total: 3,
+            pending: 0,
+            running: 0,
+            waitingApproval: 0,
+            succeeded: 3,
+            failed: 0,
+            needsReview: 0,
+          },
+          verificationCounts: {
+            required: 1,
+            receipts: 1,
+            verified: 1,
+            failed: 0,
+            uncertain: 0,
+            missing: 0,
+          },
+        },
+        {
+          id: "task_unrelated",
+          label: "Unrelated active work",
+          status: "running",
+          ownerSessionId: "owl-owner:stable-session",
+          createdAt: "2026-10-01T19:55:00.000Z",
+          updatedAt: "2026-10-01T20:01:00.000Z",
+          orchestration: {
+            schemaVersion: 1,
+            orchestrationId: "orch_other",
+            label: "Different goal",
+            parentTaskId: null,
+          },
+          counts: {
+            total: 10,
+            pending: 9,
+            running: 1,
+            waitingApproval: 0,
+            succeeded: 0,
+            failed: 0,
+            needsReview: 0,
+          },
+        },
+      ],
+    } as any;
+
+    const model = buildOrchestrationModel({
+      snapshot: groupedSnapshot,
+      agentRequests: [],
+      skillSnapshot: skills,
+      activity: [],
+      system,
+      selectedTaskId: "task_live",
+      taskDetail: {
+        ...detail,
+        orchestration: {
+          schemaVersion: 1,
+          orchestrationId: "orch_release",
+          label: "OWL LAB release",
+          parentTaskId: null,
+        },
+      },
+    });
+
+    expect(model.headline).toMatchObject({
+      label: "OWL LAB release",
+      overallPercent: 71,
+      running: 1,
+      waiting: 0,
+      completedSteps: 5,
+      totalSteps: 7,
+      status: "running",
+    });
+    expect(model.workset).toMatchObject({
+      orchestrationId: "orch_release",
+      label: "OWL LAB release",
+      taskCount: 2,
+    });
+    expect(model.workset?.tasks.map((task) => task.id)).toEqual([
+      "task_live",
+      "task_release_docs",
+    ]);
+    expect(
+      model.workset?.tasks.some((task) => task.id === "task_unrelated"),
+    ).toBe(false);
+    expect(model.headline.detail).toContain("2 durable tasks");
   });
 });

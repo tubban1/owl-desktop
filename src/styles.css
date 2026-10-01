@@ -2685,3 +2685,74 @@ input:focus { border-color: #41634b; box-shadow: 0 0 0 3px rgba(78,128,92,.08); 
     flex-wrap: wrap;
   }
 }
+
+
+.orch-workset-panel {
+  margin-bottom: 12px;
+}
+.orch-workset-list {
+  display: grid;
+}
+.orch-workset-list article {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-height: 58px;
+  padding: 8px 0;
+  border-top: 1px solid #181d20;
+}
+.orch-workset-list article:first-child {
+  border-top: 0;
+}
+.orch-workset-list article.selected {
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 8px;
+  background: rgba(79, 122, 91, .08);
+}
+.orch-workset-index {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  border: 1px solid #252c30;
+  color: #6e777d;
+  font-size: 8px;
+  background: #0a0e10;
+}
+.orch-workset-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.orch-workset-copy strong {
+  color: #bbc3c7;
+  font-size: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.orch-workset-copy > span {
+  color: #505a60;
+  font-size: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.orch-workset-foot {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-top: 1px solid #181d20;
+  margin-top: 5px;
+  padding-top: 8px;
+  color: #4f585e;
+  font-size: 8px;
+}
+.orch-workset-foot code {
+  color: #6b757b;
+  font-size: 8px;
+}

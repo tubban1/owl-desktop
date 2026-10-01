@@ -166,6 +166,64 @@ function TaskInspector({ model }: { model: OrchestrationModel }) {
   );
 }
 
+function WorksetView({ model }: { model: OrchestrationModel }) {
+  if (!model.workset || model.workset.taskCount <= 1) return null;
+  return (
+    <section className="panel orch-workset-panel">
+      <div className="panel-heading">
+        <div>
+          <span className="eyebrow">GOAL WORKSET</span>
+          <h3>{model.workset.label}</h3>
+        </div>
+        <span className="neutral-pill">
+          {model.workset.taskCount} durable tasks
+        </span>
+      </div>
+      <div className="orch-workset-list">
+        {model.workset.tasks.map((task, index) => (
+          <article
+            key={task.id}
+            className={task.id === model.focusTaskId ? "selected" : ""}
+          >
+            <div className="orch-workset-index">{index + 1}</div>
+            <div className="orch-workset-copy">
+              <strong>{task.label}</strong>
+              <span>
+                {task.parentTaskId
+                  ? "child of " + task.parentTaskId
+                  : "root / sibling task"}
+              </span>
+              {typeof task.progressPercent === "number" && (
+                <div className="orch-progress-track compact">
+                  <i style={{ width: String(task.progressPercent) + "%" }} />
+                </div>
+              )}
+            </div>
+            <StatusBadge
+              status={task.status}
+              tone={
+                task.status === "completed"
+                  ? "healthy"
+                  : task.status === "running"
+                    ? "active"
+                    : ["failed", "blocked", "needs_review"].includes(task.status)
+                      ? "attention"
+                      : "waiting"
+              }
+            />
+          </article>
+        ))}
+      </div>
+      <div className="orch-workset-foot">
+        <code>{model.workset.orchestrationId}</code>
+        <span>
+          Membership comes from Runtime orchestration metadata, not session inference.
+        </span>
+      </div>
+    </section>
+  );
+}
+
 function LiveView({ model }: { model: OrchestrationModel }) {
   return (
     <>
@@ -196,6 +254,8 @@ function LiveView({ model }: { model: OrchestrationModel }) {
           detail="Current work scope"
         />
       </section>
+
+      <WorksetView model={model} />
 
       <section className="panel orch-actors-panel">
         <div className="panel-heading">
@@ -316,6 +376,7 @@ function GraphView({ model }: { model: OrchestrationModel }) {
 
   return (
     <>
+      <WorksetView model={model} />
       <section className="panel orch-graph-panel">
         <div className="panel-heading">
           <div>
