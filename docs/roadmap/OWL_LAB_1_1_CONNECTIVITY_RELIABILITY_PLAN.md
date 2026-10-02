@@ -288,6 +288,16 @@ Completed:
   - STARTING/RECOVERING is waiting;
   - the graph carries last health evidence and marks recovery as current work.
 
+- **P1.3 durable process output wait**
+  - Runtime 1.0 remains unchanged;
+  - the MCP compatibility layer now returns a stateless output cursor;
+  - follow-up reads may provide after_cursor + wait_ms (max 5 seconds);
+  - the read returns immediately when durable stdout/stderr or process state
+    changes, otherwise returns unchanged at the bounded deadline;
+  - terminal processes never wait;
+  - each internal Runtime observation uses a distinct read-only request identity,
+    avoiding stale idempotency replay across one long-poll operation.
+
 Also cleaned:
 
 - duplicate continuation projection in the MCP server snapshot.
@@ -302,3 +312,9 @@ Verification at this checkpoint:
 The implementation preserves the existing MCP guarantees that an accepted
 Runtime operation survives upstream disconnect and that live/in-flight MCP
 sessions are not reclaimed by idle TTL.
+
+Post-P1.3 verification:
+
+    full Desktop gate:          48/48 files, 223/223 tests PASS
+    TypeScript + Vite build:    PASS
+    git diff --check:           PASS

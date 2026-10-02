@@ -119,6 +119,83 @@ function primitiveResult(envelope) {
   return envelope;
 }
 
+function processOutputCursor(sample) {
+  const normalized = {
+    processId: sample?.processId ?? null,
+    running: Boolean(sample?.running),
+    status: sample?.status ?? null,
+    exitCode: sample?.exitCode ?? null,
+    stdout: typeof sample?.stdout === "string" ? sample.stdout : "",
+    stderr: typeof sample?.stderr === "string" ? sample.stderr : "",
+    recoveredAfterRestart: Boolean(sample?.recoveredAfterRestart),
+  };
+  return createHash("sha256")
+    .update(JSON.stringify(normalized))
+    .digest("hex")
+    .slice(0, 32);
+}
+
+function sleepWithSignal(ms, signal) {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onAbort = () => {
+      const error = new Error("Process output wait was cancelled.");
+      error.code = "PROCESS_OUTPUT_WAIT_ABORTED";
+      error.cause = signal?.reason;
+      finish(error);
+    };
+    const timer = setTimeout(() => finish(), ms);
+    timer.unref?.();
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function readManagedProcessOutput(
+  { process_id, tail_chars },
+  pollAttempt = 0,
+) {
+  const context = currentMcpRequestContext();
+  const params = {
+    primitive: "process.manage",
+    op: "output",
+    args: {
+      process_id,
+      tail_chars,
+    },
+  };
+  const idempotencyDigest = createHash("sha256")
+    .update(
+      JSON.stringify({
+        owner: context.runtimeSessionId,
+        requestId: context.runtimeRequestId,
+        processId: process_id,
+        tailChars: tail_chars,
+        pollAttempt,
+      }),
+    )
+    .digest("hex")
+    .slice(0, 40);
+
+  return primitiveResult(
+    await runtimeClient().invoke("primitive.call", params, {
+      timeoutMs: 5_000,
+      signal: context.signal,
+      requestId: `${context.runtimeRequestId}:process-output:${pollAttempt}`,
+      idempotencyKey: `owl-mcp-process-output:${idempotencyDigest}`,
+    }),
+  );
+}
+
 const RECOVERABLE_TASK_STATES = new Set([
   "pending",
   "running",
@@ -2304,10 +2381,12 @@ export function createOwlMcpServer() {
   tool(
     server,
     "get_process_output",
-    "Read a bounded tail from a managed Runtime process without waiting on the process to finish. Keep reads small and poll again later; this call should remain short even when the underlying process runs for hours.",
+    "Read a bounded tail from a durable Runtime process. The first read returns immediately with a cursor. For follow-up reads, pass after_cursor plus wait_ms (max 5000ms): OWL waits briefly and returns as soon as output or process state changes, without tying execution lifetime to the ChatGPT response stream.",
     {
       process_id: z.string().min(1),
       tail_chars: z.number().int().min(1000).max(50000).optional(),
+      after_cursor: z.string().min(8).max(80).optional(),
+      wait_ms: z.number().int().min(0).max(5000).optional(),
     },
     {
       title: "Get Process Output",
@@ -2316,14 +2395,50 @@ export function createOwlMcpServer() {
       idempotentHint: true,
       openWorldHint: false,
     },
-    async ({ process_id, tail_chars }) => primitiveResult(await invoke("primitive.call", {
-      primitive: "process.manage",
-      op: "output",
-      args: {
-        process_id,
-        tail_chars: tail_chars ?? 12_000,
-      },
-    }, 10_000)),
+    async ({ process_id, tail_chars, after_cursor, wait_ms }) => {
+      const context = currentMcpRequestContext();
+      const boundedTailChars = tail_chars ?? 12_000;
+      const boundedWaitMs = Math.min(Math.max(wait_ms ?? 0, 0), 5_000);
+      const started = Date.now();
+      let pollAttempt = 0;
+      let sample = await readManagedProcessOutput(
+        {
+          process_id,
+          tail_chars: boundedTailChars,
+        },
+        pollAttempt,
+      );
+      let cursor = processOutputCursor(sample);
+      let changed = !after_cursor || cursor !== after_cursor;
+
+      while (
+        !changed &&
+        sample?.running === true &&
+        Date.now() - started < boundedWaitMs
+      ) {
+        const remainingMs = boundedWaitMs - (Date.now() - started);
+        if (remainingMs <= 0) break;
+        await sleepWithSignal(Math.min(200, remainingMs), context.signal);
+        pollAttempt += 1;
+        sample = await readManagedProcessOutput(
+          {
+            process_id,
+            tail_chars: boundedTailChars,
+          },
+          pollAttempt,
+        );
+        cursor = processOutputCursor(sample);
+        changed = cursor !== after_cursor;
+      }
+
+      return {
+        ...sample,
+        cursor,
+        changed,
+        waitedMs: Date.now() - started,
+        pollCount: pollAttempt + 1,
+      };
+    },
   );
 
   tool(
