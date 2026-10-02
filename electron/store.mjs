@@ -13,9 +13,10 @@ const writeJson = (file, value) => {
 };
 
 export class DesktopStore {
-  constructor() {
-    this.settingsFile = path.join(app.getPath("userData"), "settings.json");
-    this.secretsFile = path.join(app.getPath("userData"), "secrets.json");
+  constructor({ root } = {}) {
+    const userDataRoot = root ? path.resolve(root) : app.getPath("userData");
+    this.settingsFile = path.join(userDataRoot, "settings.json");
+    this.secretsFile = path.join(userDataRoot, "secrets.json");
   }
 
   getSettings() {

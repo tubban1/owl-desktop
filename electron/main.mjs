@@ -47,6 +47,8 @@ const externalConnectionHostEnabled =
 const connectivityRecoveryOnly =
   process.env.OWL_CONNECTIVITY_RECOVERY_ONLY === "true" ||
   process.env.OWL_TUNNEL_RECOVERY_ONLY === "true";
+const cloudMcpLiveProbeOnly =
+  process.env.OWL_CLOUD_MCP_LIVE_PROBE_ONLY === "true";
 const desktopCapabilityBridgePort = Number(
   process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_PORT || "8792",
 );
@@ -1819,9 +1821,193 @@ async function runConnectivityRecoveryOnly() {
   return result;
 }
 
-const hasLock = connectivityRecoveryOnly ? true : app.requestSingleInstanceLock();
+async function runCloudMcpLiveProbeOnly() {
+  const canonicalDesktopRoot = path.join(
+    app.getPath("appData"),
+    "OWL LAB",
+    "desktop",
+  );
+  store = new DesktopStore({ root: canonicalDesktopRoot });
+  const settings = store.getSettings();
+  const refreshToken = store.readSecret(
+    "OWL_CLOUD_ACCOUNT_REFRESH_TOKEN",
+    "owl-cloud",
+  );
+  const deviceCredential = cloudDeviceCredential();
+  if (!settings.cloudBaseUrl?.trim()) {
+    throw new Error("OWL Cloud base URL is not configured.");
+  }
+  if (!settings.cloudDeviceId?.trim()) {
+    throw new Error("OWL Cloud device ID is not configured.");
+  }
+  if (!refreshToken) {
+    throw new Error("OWL Cloud account refresh token is unavailable.");
+  }
+  if (!deviceCredential) {
+    throw new Error("OWL Cloud device credential is unavailable.");
+  }
 
-if (connectivityRecoveryOnly) {
+  const authClient = new CloudHttpClient({
+    baseUrl: settings.cloudBaseUrl,
+  });
+  const auth = new CloudAccountAuth({ cloudClient: authClient });
+  const tokens = await auth.refresh(refreshToken);
+
+  const [
+    { CloudMcpCallConsumer },
+    { LocalMcpExecutor },
+  ] = await Promise.all([
+    import("../connection-host/cloud-mcp-call-consumer.mjs"),
+    import("../connection-host/local-mcp-executor.mjs"),
+  ]);
+
+  const executor = new LocalMcpExecutor({
+    mcpUrl: `http://127.0.0.1:${settings.mcpPort}/mcp`,
+    mcpToken: mcpToken(),
+  });
+  const consumer = new CloudMcpCallConsumer({
+    cloudClient: new CloudHttpClient({
+      baseUrl: settings.cloudBaseUrl,
+      deviceCredential,
+    }),
+    executor,
+    pollIntervalMs: 250,
+    leaseMs: 10_000,
+  });
+
+  let sessionId = null;
+  const gateway = async (request) => {
+    const response = await fetch(
+      `${settings.cloudBaseUrl.replace(/\/$/, "")}/mcp`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${tokens.idToken}`,
+          "content-type": "application/json",
+          accept: "application/json",
+          ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+        },
+        body: JSON.stringify(request),
+      },
+    );
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : null;
+    if (!response.ok) {
+      throw new Error(
+        `Cloud MCP HTTP ${response.status}: ${
+          payload?.message ?? payload?.error?.message ?? "request failed"
+        }`,
+      );
+    }
+    sessionId = response.headers.get("mcp-session-id") || sessionId;
+    return payload;
+  };
+
+  try {
+    const consumerReady = await consumer.start();
+    if (consumerReady?.ready !== true) {
+      throw new Error("Cloud MCP consumer did not prove readiness.");
+    }
+
+    await gateway({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "owl-live-parity-probe", version: "1.0" },
+      },
+    });
+    if (!sessionId) {
+      throw new Error("Cloud MCP initialize returned no session identity.");
+    }
+
+    const invoked = await gateway({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "owl_call",
+        arguments: {
+          deviceId: settings.cloudDeviceId,
+          toolName: "runtime_info",
+          arguments: {},
+          waitMs: 15_000,
+        },
+      },
+    });
+
+    const result = invoked?.result;
+    const callId =
+      result?._meta?.owlCallId ??
+      result?.structuredContent?.callId ??
+      null;
+    if (!callId) {
+      throw new Error("Cloud MCP result returned no durable call identity.");
+    }
+    if (result?.isError === true) {
+      throw new Error("Cloud MCP runtime_info completed with an MCP error.");
+    }
+    if (result?.structuredContent?.pending === true) {
+      throw new Error("Cloud MCP runtime_info remained pending after live wait.");
+    }
+
+    const snapshot = consumer.snapshot();
+    if ((snapshot?.processed ?? 0) < 1) {
+      throw new Error("Cloud MCP consumer did not record the completed call.");
+    }
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          gateway: "frankfurt",
+          durableCall: "completed",
+          callId,
+          consumerReady: snapshot.ready === true,
+          processed: snapshot.processed,
+          runtimeEvidence: Boolean(
+            JSON.stringify(result).includes("owl-runtime"),
+          ),
+          secretsPrinted: false,
+        },
+        null,
+        2,
+      ),
+    );
+    return { ok: true, callId };
+  } finally {
+    await consumer.stop().catch(() => undefined);
+  }
+}
+
+const hasLock =
+  connectivityRecoveryOnly || cloudMcpLiveProbeOnly
+    ? true
+    : app.requestSingleInstanceLock();
+
+if (cloudMcpLiveProbeOnly) {
+  const probeProfileRoot = path.join(
+    os.tmpdir(),
+    `owl-cloud-mcp-live-profile-${process.pid}`,
+  );
+  app.setPath("userData", probeProfileRoot);
+  app.setPath("sessionData", path.join(probeProfileRoot, "session"));
+  app
+    .whenReady()
+    .then(async () => {
+      await runCloudMcpLiveProbeOnly();
+      app.exit(0);
+    })
+    .catch((error) => {
+      console.error(
+        `Cloud MCP live probe failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      app.exit(1);
+    });
+} else if (connectivityRecoveryOnly) {
   storageLayout = configureOwlDesktopStorage(app);
   app
     .whenReady()
