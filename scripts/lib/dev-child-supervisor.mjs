@@ -76,7 +76,7 @@ export class DevChildSupervisor {
 
         if (effectiveRestartPolicy === "on-failure" && !abnormalExit) {
           this.logger.info?.(
-            `[dev:full] ${label} exited cleanly (${detail}); respecting intentional shutdown.`,
+            `[dev:full] ${label} exited cleanly (${detail}); not restarting this child. Other dev:full fault domains remain active. Press Ctrl+C to stop the full dev stack.`,
           );
           return;
         }
