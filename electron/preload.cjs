@@ -4,6 +4,10 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   environment: () => ipcRenderer.invoke("desktop:environment"),
   listActivity: () => ipcRenderer.invoke("desktop:activity:list"),
   refreshRuntime: (options) => ipcRenderer.invoke("runtime:refresh", options),
+  approveRuntimeApproval: (approvalId) =>
+    ipcRenderer.invoke("runtime:approval:approve", approvalId),
+  denyRuntimeApproval: (approvalId) =>
+    ipcRenderer.invoke("runtime:approval:deny", approvalId),
   monitorTaskDetail: (taskId, includeResults = false) =>
     ipcRenderer.invoke("monitor:task-detail", taskId, includeResults),
   cloudStatus: () => ipcRenderer.invoke("cloud:status"),

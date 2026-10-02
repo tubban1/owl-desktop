@@ -31,6 +31,8 @@ declare global {
       environment(): Promise<DesktopEnvironment>;
       listActivity(): Promise<ActivityEntry[]>;
       refreshRuntime(options?: { quiet?: boolean }): Promise<RuntimeSnapshot>;
+      approveRuntimeApproval(approvalId: string): Promise<unknown>;
+      denyRuntimeApproval(approvalId: string): Promise<unknown>;
       monitorTaskDetail(
         taskId: string,
         includeResults?: boolean,

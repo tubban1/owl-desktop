@@ -24,6 +24,7 @@ import type {
 import { buildMonitorModel } from "./monitorModel";
 import { buildMcpInteractionFeed } from "./interactionModel";
 import { LiveOperationsGraph } from "./LiveOperationsGraph";
+import { ApprovalAttention } from "../approvals/ApprovalAttention";
 import {
   buildWorkstreamBoard,
   type WorkstreamBoard,
@@ -985,11 +986,15 @@ export function MonitorPage({
   agentRequests,
   activity,
   onRefresh,
+  onApproveApproval,
+  onDenyApproval,
 }: {
   snapshot: RuntimeSnapshot | null;
   agentRequests: AgentRequest[];
   activity: ActivityEntry[];
   onRefresh(): Promise<void>;
+  onApproveApproval(approvalId: string): Promise<void>;
+  onDenyApproval(approvalId: string): Promise<void>;
 }) {
   const workstreamBoard = useMemo(
     () =>
@@ -1024,6 +1029,13 @@ export function MonitorPage({
           </button>
         </div>
       </div>
+
+      <ApprovalAttention
+        approvals={snapshot?.approvals}
+        onApprove={onApproveApproval}
+        onDeny={onDenyApproval}
+        compact
+      />
 
       <LiveOperationsGraph
         snapshot={snapshot}

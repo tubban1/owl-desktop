@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   Ban,
   CheckCircle2,
-  Clock3,
+  ChevronRight,
   FolderOpen,
   GitBranch,
   Globe2,
+  History,
   Laptop,
   MousePointer2,
-  Play,
   Puzzle,
   RefreshCw,
   Server,
@@ -18,10 +17,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import type {
-  CloudDeviceSummary,
-  CloudRemoteCommandSummary,
-} from "../types";
+import type { CloudDeviceSummary } from "../types";
 
 function bool(value: unknown): boolean {
   return value === true;
@@ -50,7 +46,9 @@ function onlineState(lastSeenAt: string | null, now = Date.now()) {
   }
   const ageMs = Math.max(0, now - seen);
   if (ageMs <= 90_000) return { state: "online", label: "Online", ageMs };
-  if (ageMs <= 5 * 60_000) return { state: "stale", label: "Recently online", ageMs };
+  if (ageMs <= 5 * 60_000) {
+    return { state: "stale", label: "Recently online", ageMs };
+  }
   return { state: "offline", label: "Offline", ageMs };
 }
 
@@ -61,18 +59,14 @@ function ageLabel(ageMs: number | null) {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
-  return `${hours}h ago`;
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function shortId(value: string) {
-  return value.length > 22 ? value.slice(0, 12) + "…" + value.slice(-6) : value;
-}
-
-function commandTone(status: string) {
-  if (["accepted"].includes(status)) return "healthy";
-  if (["queued", "dispatched"].includes(status)) return "active";
-  if (["rejected", "expired"].includes(status)) return "attention";
-  return "neutral";
+  return value.length > 22
+    ? value.slice(0, 12) + "…" + value.slice(-6)
+    : value;
 }
 
 function Capability({
@@ -107,40 +101,42 @@ export function DevicesPage({
 }) {
   const [devices, setDevices] = useState<CloudDeviceSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [commands, setCommands] = useState<CloudRemoteCommandSummary[]>([]);
   const [loading, setLoading] = useState(false);
-  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+
+  const activeDevices = useMemo(
+    () => devices.filter((device) => device.registrationState === "active"),
+    [devices],
+  );
+  const deviceHistory = useMemo(
+    () => devices.filter((device) => device.registrationState !== "active"),
+    [devices],
+  );
 
   const loadDevices = async () => {
     if (!accountReady) {
       setDevices([]);
-      setCommands([]);
+      setSelectedId(null);
       return;
     }
     const next = await window.owlDesktop.cloudListDevices();
     setDevices(next);
+    const active = next.filter(
+      (device) => device.registrationState === "active",
+    );
     setSelectedId((current) => {
-      if (current && next.some((device) => device.deviceId === current)) {
+      if (current && active.some((device) => device.deviceId === current)) {
         return current;
       }
       if (
         currentDeviceId &&
-        next.some((device) => device.deviceId === currentDeviceId)
+        active.some((device) => device.deviceId === currentDeviceId)
       ) {
         return currentDeviceId;
       }
-      return next[0]?.deviceId ?? null;
+      return active[0]?.deviceId ?? null;
     });
-  };
-
-  const loadCommands = async (deviceId = selectedId) => {
-    if (!accountReady || !deviceId) {
-      setCommands([]);
-      return;
-    }
-    setCommands(await window.owlDesktop.cloudListCommands(deviceId, 30));
   };
 
   const refresh = async () => {
@@ -148,7 +144,6 @@ export function DevicesPage({
     setLoading(true);
     try {
       await loadDevices();
-      if (selectedId) await loadCommands(selectedId);
       setNow(Date.now());
       setError(null);
     } catch (cause) {
@@ -165,25 +160,18 @@ export function DevicesPage({
   }, [accountReady, currentDeviceId]);
 
   useEffect(() => {
-    if (!selectedId || !accountReady) return;
-    void loadCommands(selectedId).catch((cause) => {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    });
-  }, [selectedId, accountReady]);
-
-  useEffect(() => {
     if (!accountReady) return;
     const timer = window.setInterval(() => {
       setNow(Date.now());
       void loadDevices().catch(() => undefined);
-      if (selectedId) void loadCommands(selectedId).catch(() => undefined);
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [accountReady, selectedId]);
+  }, [accountReady, currentDeviceId]);
 
   const selected = useMemo(
-    () => devices.find((device) => device.deviceId === selectedId) ?? null,
-    [devices, selectedId],
+    () =>
+      activeDevices.find((device) => device.deviceId === selectedId) ?? null,
+    [activeDevices, selectedId],
   );
 
   const selectedCapabilities = object(selected?.capabilities);
@@ -195,7 +183,9 @@ export function DevicesPage({
   const git = nested(providers, "git");
   const browser = nested(providers, "browser");
   const desktop = nested(providers, "desktop");
-  const remoteKinds = Array.isArray(selectedCapabilities.supportedRemoteCommands)
+  const remoteKinds = Array.isArray(
+    selectedCapabilities.supportedRemoteCommands,
+  )
     ? selectedCapabilities.supportedRemoteCommands.filter(
         (value): value is string => typeof value === "string",
       )
@@ -209,50 +199,22 @@ export function DevicesPage({
     (runtimeAccessState === null || runtimeAccessState === "READY") &&
     remoteKinds.includes("runtime.task.create-and-start@1");
 
-  const runHealthCheck = async () => {
-    if (!selected) return;
-    setSending(true);
-    try {
-      await window.owlDesktop.cloudCreateCommand(selected.deviceId, {
-        kind: "runtime.task.create-and-start",
-        payload: {
-          label: `Remote health check · ${selected.displayName}`,
-          steps: [
-            {
-              id: "runtime-info",
-              action: "runtime.info",
-              args: {},
-            },
-          ],
-          maxConcurrency: 1,
-          failFast: true,
-        },
-      });
-      await loadCommands(selected.deviceId);
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setSending(false);
-    }
-  };
-
   if (!accountReady) {
     return (
       <>
         <div className="section-header">
           <div>
             <h1>Devices</h1>
-            <p>Run durable work on another OWL LAB device through Cloud.</p>
+            <p>See which computers are enrolled and authorized for OWL LAB.</p>
           </div>
         </div>
         <section className="panel devices-empty-state">
           <CloudDeviceIllustration />
           <div>
-            <h3>Sign in to use your devices</h3>
+            <h3>Sign in to view your devices</h3>
             <p>
-              Device inventory and remote tasks use your OWL LAB account. Tokens
-              remain in the Desktop main process and OS Vault.
+              Device identity, authorization and presence are owned by your
+              OWL LAB account. Device credentials remain in the OS Vault.
             </p>
           </div>
         </section>
@@ -266,8 +228,8 @@ export function DevicesPage({
         <div>
           <h1>Devices</h1>
           <p>
-            Choose where OWL should run. Capabilities come from each device's
-            live Runtime heartbeat.
+            Current computers authorized for OWL LAB. Historical registrations
+            stay available for audit without cluttering the active fleet.
           </p>
         </div>
         <button className="secondary" onClick={refresh} disabled={loading}>
@@ -278,7 +240,6 @@ export function DevicesPage({
 
       {error && (
         <div className="inline-warning device-error">
-          <AlertTriangle size={15} />
           <span>{error}</span>
         </div>
       )}
@@ -287,12 +248,16 @@ export function DevicesPage({
         <section className="panel device-list-panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">MY DEVICES</span>
-              <h3>{devices.length} enrolled</h3>
+              <span className="eyebrow">ACTIVE DEVICES</span>
+              <h3>
+                {activeDevices.length} active
+                {activeDevices.length === 1 ? " device" : " devices"}
+              </h3>
             </div>
           </div>
+
           <div className="device-list">
-            {devices.map((device) => {
+            {activeDevices.map((device) => {
               const presence = onlineState(device.lastSeenAt, now);
               const isCurrent = device.deviceId === currentDeviceId;
               return (
@@ -317,14 +282,47 @@ export function DevicesPage({
                       {presence.label} · {ageLabel(presence.ageMs)}
                     </span>
                   </div>
-                  {isCurrent && <span className="current-device-pill">This Mac</span>}
+                  {isCurrent && (
+                    <span className="current-device-pill">This Mac</span>
+                  )}
                 </button>
               );
             })}
-            {devices.length === 0 && (
-              <div className="empty">No enrolled devices are visible to this account.</div>
+
+            {activeDevices.length === 0 && (
+              <div className="empty">
+                No active device registration is visible to this account.
+              </div>
             )}
           </div>
+
+          {deviceHistory.length > 0 && (
+            <details className="device-history">
+              <summary>
+                <History size={14} />
+                <span>{deviceHistory.length} historical registration{deviceHistory.length === 1 ? "" : "s"}</span>
+                <ChevronRight size={14} />
+              </summary>
+              <div className="device-history-list">
+                {deviceHistory.map((device) => {
+                  const presence = onlineState(device.lastSeenAt, now);
+                  return (
+                    <div className="device-history-row" key={device.deviceId}>
+                      <WifiOff size={13} />
+                      <div>
+                        <strong>{device.displayName}</strong>
+                        <span>
+                          {device.registrationState} · last seen{" "}
+                          {ageLabel(presence.ageMs)}
+                        </span>
+                      </div>
+                      <code title={device.deviceId}>{shortId(device.deviceId)}</code>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          )}
         </section>
 
         <section className="panel device-detail-panel">
@@ -352,48 +350,86 @@ export function DevicesPage({
                         "Runtime version unknown",
                     )}
                   </p>
-                  <code title={selected.deviceId}>{shortId(selected.deviceId)}</code>
-                </div>
-                <div className="device-detail-actions">
-                  <button
-                    className="primary"
-                    disabled={!remoteRunReady || sending}
-                    onClick={runHealthCheck}
-                    title={
-                      remoteRunReady
-                        ? "Queue a read-only Runtime health task on this device"
-                        : "This device has not advertised remote task execution"
-                    }
-                  >
-                    <Play size={14} />
-                    {sending ? "Sending…" : "Run test"}
-                  </button>
+                  <code title={selected.deviceId}>
+                    {shortId(selected.deviceId)}
+                  </code>
                 </div>
               </div>
 
+              <div className="device-section-heading">
+                <span className="eyebrow">AUTHORIZATION & PRESENCE</span>
+                <strong>
+                  {String(
+                    authorization.operationalState ?? "Unknown",
+                  ).replaceAll("_", " ")}
+                </strong>
+              </div>
+
               <div className="about-grid">
-                <span>Operational state</span>
-                <strong>{String(authorization.operationalState ?? "Unknown").replaceAll("_", " ")}</strong>
                 <span>Account session</span>
-                <strong>{String(authorization.accountSessionState ?? "Unknown").replaceAll("_", " ")}</strong>
+                <strong>
+                  {String(
+                    authorization.accountSessionState ?? "Unknown",
+                  ).replaceAll("_", " ")}
+                </strong>
                 <span>Entitlement</span>
-                <strong>{String(authorization.entitlementStatus ?? "Unknown").replaceAll("_", " ")}</strong>
+                <strong>
+                  {String(
+                    authorization.entitlementStatus ?? "Unknown",
+                  ).replaceAll("_", " ")}
+                </strong>
                 <span>Runtime access</span>
-                <strong>{String(authorization.runtimeAccessState ?? "Unknown")}</strong>
+                <strong>
+                  {String(authorization.runtimeAccessState ?? "Unknown")}
+                </strong>
                 <span>Lease</span>
-                <strong>{bool(authorization.signatureVerified) ? "Cloud signed" : "Not active"}</strong>
+                <strong>
+                  {bool(authorization.signatureVerified)
+                    ? "Cloud signed"
+                    : "Not active"}
+                </strong>
                 <span>Lease expires</span>
-                <strong>{typeof authorization.leaseExpiresAt === "string" ? new Date(authorization.leaseExpiresAt).toLocaleString() : "—"}</strong>
-                <span>Active tasks</span>
-                <strong>{Number(usage.activeTasks ?? 0)}</strong>
-                <span>Processes</span>
-                <strong>{Number(usage.activeProcesses ?? 0)}</strong>
-                <span>Approvals pending</span>
-                <strong>{Number(usage.approvalsPending ?? 0)}</strong>
-                <span>MCP sessions</span>
-                <strong>{Number(usage.mcpSessions ?? 0)}</strong>
-                <span>Usage sampled</span>
-                <strong>{typeof usage.sampledAt === "string" ? new Date(usage.sampledAt).toLocaleTimeString() : "—"}</strong>
+                <strong>
+                  {typeof authorization.leaseExpiresAt === "string"
+                    ? new Date(
+                        authorization.leaseExpiresAt,
+                      ).toLocaleString()
+                    : "—"}
+                </strong>
+                <span>Last presence</span>
+                <strong>
+                  {selected.lastSeenAt
+                    ? ageLabel(
+                        Math.max(
+                          0,
+                          now - Date.parse(selected.lastSeenAt),
+                        ),
+                      )
+                    : "Never"}
+                </strong>
+              </div>
+
+              <div className="device-section-heading">
+                <span className="eyebrow">CURRENT USAGE</span>
+                <strong>
+                  {typeof usage.sampledAt === "string"
+                    ? new Date(usage.sampledAt).toLocaleTimeString()
+                    : "No sample"}
+                </strong>
+              </div>
+
+              <div className="device-usage-strip">
+                <div><span>Tasks</span><strong>{Number(usage.activeTasks ?? 0)}</strong></div>
+                <div><span>Processes</span><strong>{Number(usage.activeProcesses ?? 0)}</strong></div>
+                <div><span>Approvals</span><strong>{Number(usage.approvalsPending ?? 0)}</strong></div>
+                <div><span>MCP sessions</span><strong>{Number(usage.mcpSessions ?? 0)}</strong></div>
+              </div>
+
+              <div className="device-section-heading">
+                <span className="eyebrow">CAPABILITIES</span>
+                <strong>
+                  {remoteRunReady ? "Remote work ready" : "Local only / unavailable"}
+                </strong>
               </div>
 
               <div className="device-capability-grid">
@@ -447,88 +483,23 @@ export function DevicesPage({
                   available={bool(selectedCapabilities.verification)}
                 />
                 <Capability
-                  label="Remote tasks"
+                  label="Remote work"
                   icon={Server}
                   available={remoteRunReady}
                 />
               </div>
 
-              <div className="device-command-heading">
-                <div>
-                  <span className="eyebrow">REMOTE WORK</span>
-                  <h3>Recent tasks sent by you</h3>
-                </div>
-                <span className="neutral-pill">{commands.length}</span>
-              </div>
-              <div className="device-command-list">
-                {commands.map((command) => (
-                  <article key={command.commandId}>
-                    <span className={"command-status-dot " + commandTone(command.status)} />
-                    <div className="device-command-copy">
-                      <strong>{command.label}</strong>
-                      <span>
-                        {command.kind} · {shortId(command.commandId)}
-                      </span>
-                      {command.runtimeTaskId && (
-                        <code>Runtime {shortId(command.runtimeTaskId)}</code>
-                      )}
-                    </div>
-                    <div className="device-command-meta">
-                      <span className={"command-status " + commandTone(command.status)}>
-                        {command.status.replaceAll("_", " ")}
-                      </span>
-                      <time>
-                        {command.createdAt
-                          ? new Date(command.createdAt).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              second: "2-digit",
-                            })
-                          : "—"}
-                      </time>
-                      {["queued", "dispatched"].includes(command.status) && (
-                        <button
-                          className="text-button danger-text"
-                          onClick={async () => {
-                            try {
-                              await window.owlDesktop.cloudCancelCommand(
-                                command.commandId,
-                              );
-                              await loadCommands(selected.deviceId);
-                            } catch (cause) {
-                              setError(
-                                cause instanceof Error
-                                  ? cause.message
-                                  : String(cause),
-                              );
-                            }
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                  </article>
-                ))}
-                {commands.length === 0 && (
-                  <div className="empty">
-                    No remote tasks sent to this device yet.
-                  </div>
-                )}
-              </div>
-
-              <div className="device-routing-note">
-                <Clock3 size={15} />
+              <div className="device-product-note">
+                <ShieldCheck size={15} />
                 <p>
-                  Device routing happens above Primitive ABI. The selected
-                  device receives a Cloud RemoteCommand, then its local Desktop
-                  hands the durable Task to its own Runtime. Individual
-                  primitives remain local execution semantics.
+                  This page describes device identity, authorization, presence and
+                  capability. Actual agent work is started and observed in Monitor
+                  or by a connected agent/Worker, not by a device test button.
                 </p>
               </div>
             </>
           ) : (
-            <div className="empty">Select an OWL LAB device.</div>
+            <div className="empty">Select an active OWL LAB device.</div>
           )}
         </section>
       </div>

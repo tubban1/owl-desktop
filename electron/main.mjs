@@ -1212,6 +1212,32 @@ function registerIpc() {
   }));
 
   ipcMain.handle("runtime:refresh", (_event, options) => runtimeSnapshot(options ?? {}));
+  ipcMain.handle("runtime:approval:approve", async (_event, approvalId) => {
+    if (typeof approvalId !== "string" || !approvalId.trim()) {
+      throw new Error("APPROVAL_ID_REQUIRED");
+    }
+    const result = await runtimeClient().approveApproval(approvalId.trim(), {
+      requestId: `desktop-approval:approve:${approvalId.trim()}:${Date.now().toString(36)}`,
+      idempotencyKey: `desktop-approval:approve:${approvalId.trim()}`,
+    });
+    record("info", "desktop", "Runtime approval granted", {
+      approvalId: approvalId.trim(),
+    });
+    return result;
+  });
+  ipcMain.handle("runtime:approval:deny", async (_event, approvalId) => {
+    if (typeof approvalId !== "string" || !approvalId.trim()) {
+      throw new Error("APPROVAL_ID_REQUIRED");
+    }
+    const result = await runtimeClient().denyApproval(approvalId.trim(), {
+      requestId: `desktop-approval:deny:${approvalId.trim()}:${Date.now().toString(36)}`,
+      idempotencyKey: `desktop-approval:deny:${approvalId.trim()}`,
+    });
+    record("info", "desktop", "Runtime approval denied", {
+      approvalId: approvalId.trim(),
+    });
+    return result;
+  });
   ipcMain.handle("monitor:task-detail", (_event, taskId, includeResults = false) => {
     if (typeof taskId !== "string" || !taskId.trim()) {
       throw new Error("MONITOR_TASK_ID_REQUIRED");

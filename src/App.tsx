@@ -11,6 +11,10 @@ import { SkillsPage } from "./skills/SkillsPage";
 import { deriveWorkState } from "./workState";
 import { MonitorPage } from "./monitor/MonitorPage";
 import { DevicesPage } from "./devices/DevicesPage";
+import {
+  ApprovalAttention,
+  pendingApprovals,
+} from "./approvals/ApprovalAttention";
 
 type Page = "overview" | "monitor" | "devices" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
 
@@ -18,14 +22,14 @@ const nav = [
   { id: "overview" as Page, label: "Home", icon: Gauge },
   { id: "monitor" as Page, label: "Monitor", icon: ChartNoAxesCombined },
   { id: "devices" as Page, label: "Devices", icon: Laptop },
-  { id: "agent-inbox" as Page, label: "Requests", icon: Inbox },
-  { id: "logs" as Page, label: "Activity", icon: Activity },
   { id: "skills" as Page, label: "Skills", icon: Puzzle },
-  { id: "accounts" as Page, label: "Accounts", icon: UserRound },
+  { id: "accounts" as Page, label: "Account", icon: UserRound },
   { id: "settings" as Page, label: "Settings", icon: Settings2 },
 ];
 
 const advancedNav = [
+  { id: "agent-inbox" as Page, label: "Coordination", icon: Inbox },
+  { id: "logs" as Page, label: "Activity", icon: Activity },
   { id: "sessions" as Page, label: "Sessions", icon: ListTree },
   { id: "runtime" as Page, label: "Runtime", icon: Boxes },
   { id: "secrets" as Page, label: "Secrets", icon: KeyRound },
@@ -255,6 +259,20 @@ export default function App() {
     window.setTimeout(() => setNotice(""), 2400);
   };
 
+  const approveRuntimeApproval = async (approvalId: string) => {
+    await window.owlDesktop.approveRuntimeApproval(approvalId);
+    await refresh(false);
+    setNotice("Approved · Runtime may continue the exact protected action");
+    window.setTimeout(() => setNotice(""), 2400);
+  };
+
+  const denyRuntimeApproval = async (approvalId: string) => {
+    await window.owlDesktop.denyRuntimeApproval(approvalId);
+    await refresh(false);
+    setNotice("Denied · protected action remains blocked");
+    window.setTimeout(() => setNotice(""), 2400);
+  };
+
   const addAllowedFolders = async () => {
     if (!settings) return;
     const picked = await window.owlDesktop.pickAllowedFolders();
@@ -419,6 +437,26 @@ export default function App() {
     () => agentRequests.filter((request) => request.status === "claimed"),
     [agentRequests],
   );
+  const openAgentRequests = useMemo(
+    () =>
+      agentRequests.filter(
+        (request) =>
+          request.status === "pending" || request.status === "claimed",
+      ),
+    [agentRequests],
+  );
+  const historicalAgentRequests = useMemo(
+    () =>
+      agentRequests.filter(
+        (request) =>
+          request.status === "completed" || request.status === "cancelled",
+      ),
+    [agentRequests],
+  );
+  const pendingRuntimeApprovals = useMemo(
+    () => pendingApprovals(snapshot?.approvals),
+    [snapshot?.approvals],
+  );
   const runtimeEventStatus = snapshot?.runtimeEvents;
   const runtimeEventNeedsAttention =
     runtimeEventStatus?.status === "needs_attention";
@@ -470,13 +508,20 @@ export default function App() {
       <div className="brand"><div className="brand-mark">O</div><div><strong>OWL LAB</strong><span>Desktop</span></div></div>
       <nav>{nav.map((item) => {
         const Icon = item.icon;
-        return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={17} /><span>{item.label}</span>{item.id === "agent-inbox" && runtimeEventNeedsAttention ? <span className="nav-badge attention">!</span> : item.id === "agent-inbox" && pendingAgentRequests.length > 0 ? <span className="nav-badge">{pendingAgentRequests.length}</span> : null}</button>;
+        return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={17} /><span>{item.label}</span></button>;
       })}
         <details className="nav-advanced" open={advancedNav.some((item) => item.id === page)}>
           <summary><span>Advanced</span><span>•••</span></summary>
           <div>{advancedNav.map((item) => {
             const Icon = item.icon;
-            return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={16} /><span>{item.label}</span></button>;
+            const badge = item.id === "agent-inbox"
+              ? runtimeEventNeedsAttention
+                ? "!"
+                : pendingAgentRequests.length > 0
+                  ? String(pendingAgentRequests.length)
+                  : null
+              : null;
+            return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={16} /><span>{item.label}</span>{badge && <span className={"nav-badge " + (runtimeEventNeedsAttention ? "attention" : "")}>{badge}</span>}</button>;
           })}</div>
         </details>
       </nav>
@@ -523,16 +568,23 @@ export default function App() {
               </div>
             </div>
             <div className="work-status-actions">
-              <button className="secondary" onClick={() => setPage("runtime")}>View work</button>
-              <button className="text-button" onClick={() => setPage("logs")}>View logs</button>
+              <button className="secondary" onClick={() => setPage("monitor")}>Open Monitor</button>
+              <button className="text-button" onClick={() => setPage("logs")}>Diagnostics</button>
             </div>
           </section>
 
+          <ApprovalAttention
+            approvals={snapshot?.approvals}
+            onApprove={approveRuntimeApproval}
+            onDeny={denyRuntimeApproval}
+            compact
+          />
+
           <div className="metrics-grid">
-            <MetricCard label="Tasks" value={snapshot?.metrics.tasks ?? "—"} caption="Recent & persistent" icon={HardDrive} />
+            <MetricCard label="Workstreams" value={snapshot?.mcp.continuation?.activeCheckpointCount ?? 0} caption="Current agent work" icon={ChartNoAxesCombined} />
             <MetricCard label="Background work" value={runningProcesses.length} caption="Running now" icon={Cpu} />
-            <MetricCard label="Approvals" value={snapshot?.metrics.approvals ?? "—"} caption="May need you" icon={ShieldCheck} />
-            <MetricCard label="Connected secrets" value={secrets.length} caption="Encrypted locally" icon={KeyRound} />
+            <MetricCard label="Approvals" value={pendingRuntimeApprovals.length} caption="Need your decision" icon={ShieldCheck} />
+            <MetricCard label="Device access" value={runtimeAccess?.state ?? "—"} caption={runtimeAccess?.grant?.signatureVerified ? "Cloud verified" : "Runtime gate"} icon={Laptop} />
           </div>
           <div className="two-col">
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">SYSTEM HEALTH</span><h3>Connections</h3></div></div>
@@ -540,7 +592,7 @@ export default function App() {
                 <div><span className="component-icon"><Boxes size={17} /></span><p><strong>Local engine</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
                 <div><span className="component-icon"><Terminal size={17} /></span><p><strong>ChatGPT connection</strong><small>{snapshot?.mcp.status === "running" ? "ChatGPT can reach this Mac" : snapshot?.mcp.error ?? "Not connected"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
                 <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL LAB account</strong><small>{accountConnected ? "Signed in · Cloud device connected" : cloudOnline ? "Cloud connected · account sign-in required" : "Cloud connection unavailable"}</small></p>{accountConnected ? <StatusPill online /> : <span className="neutral-pill">{cloudOnline ? (cloudAccount?.status?.replaceAll("_", " ") ?? "sign-in required") : cloudStatusLabel}</span>}</div>
-                <div><span className="component-icon"><Inbox size={17} /></span><p><strong>Requests</strong><small>{runtimeEventNeedsAttention ? "History needs attention before replay" : "Work waiting for an AI agent"}</small></p><span className={runtimeEventNeedsAttention ? "neutral-pill warning-pill" : "neutral-pill"}>{runtimeEventNeedsAttention ? "needs attention" : pendingAgentRequests.length + " pending"}</span></div>
+                <div><span className="component-icon"><ShieldCheck size={17} /></span><p><strong>Authorization</strong><small>{runtimeAccess?.state === "READY" ? (runtimeAccess?.grant?.signatureVerified ? "Cloud-signed Runtime access" : "Runtime access ready") : runtimeAccess?.reasonCode ?? "Runtime access unavailable"}</small></p><span className={"neutral-pill " + (runtimeAccess?.state === "READY" ? "" : "warning-pill")}>{runtimeAccess?.state?.toLowerCase() ?? "unknown"}</span></div>
               </div>
             </section>
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">RECENT ACTIVITY</span><h3>Local events</h3></div><button className="text-button" onClick={() => setPage("logs")}>View logs</button></div>
@@ -554,6 +606,8 @@ export default function App() {
           agentRequests={agentRequests}
           activity={activityRows}
           onRefresh={() => refresh(false)}
+          onApproveApproval={approveRuntimeApproval}
+          onDenyApproval={denyRuntimeApproval}
         />}
 
         {page === "devices" && <DevicesPage
@@ -575,8 +629,8 @@ export default function App() {
 
         {page === "agent-inbox" && <>
           <SectionHeader
-            title="Agent Inbox"
-            description="Structured reasoning work waiting for ChatGPT or another AI agent. Requests never override user intent or Runtime policy."
+            title="Agent Coordination"
+            description="Advanced queue for structured agent-to-agent or Runtime-to-agent coordination. Normal work appears in Monitor; this page is for debugging or intervention."
             action={<button className="secondary" onClick={() => void refresh()}><RefreshCw size={15} />Refresh</button>}
           />
 
@@ -688,11 +742,11 @@ export default function App() {
 
           <section className="panel agent-inbox-panel">
             <div className="panel-heading">
-              <div><span className="eyebrow">LOCAL AGENT QUEUE</span><h3>Requests</h3></div>
-              <span className="neutral-pill">{agentRequests.length} retained</span>
+              <div><span className="eyebrow">OPEN COORDINATION</span><h3>Requests needing an agent</h3></div>
+              <span className="neutral-pill">{openAgentRequests.length} open</span>
             </div>
             <div className="agent-request-list">
-              {agentRequests.map((request) => (
+              {openAgentRequests.map((request) => (
                 <article className={"agent-request " + request.status} key={request.requestId}>
                   <div className="agent-request-head">
                     <div>
@@ -739,15 +793,40 @@ export default function App() {
                   </div>
                 </article>
               ))}
-              {agentRequests.length === 0 && (
+              {openAgentRequests.length === 0 && (
                 <div className="agent-inbox-empty">
-                  <Inbox size={28} />
-                  <strong>No AgentRequests</strong>
-                  <span>OWL will place structured reasoning work here when a subsystem needs an LLM.</span>
+                  <CheckCircle2 size={28} />
+                  <strong>No coordination waiting</strong>
+                  <span>Normal agent work appears in Monitor. This queue only appears when a subsystem explicitly needs another agent to inspect or resolve something.</span>
                 </div>
               )}
             </div>
           </section>
+
+          {historicalAgentRequests.length > 0 && (
+            <details className="panel coordination-history">
+              <summary>
+                <div>
+                  <span className="eyebrow">HISTORY</span>
+                  <strong>{historicalAgentRequests.length} resolved coordination item{historicalAgentRequests.length === 1 ? "" : "s"}</strong>
+                </div>
+                <span className="neutral-pill">Audit only</span>
+              </summary>
+              <div className="coordination-history-list">
+                {historicalAgentRequests.map((request) => (
+                  <div className="coordination-history-row" key={request.requestId}>
+                    <CheckCircle2 size={14} />
+                    <div>
+                      <strong>{request.type}</strong>
+                      <span>{request.producer} · {request.reasonCode}</span>
+                    </div>
+                    <code>{request.resolution?.outcome ?? request.status}</code>
+                    <time>{formatTime(request.updatedAt)}</time>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
 
           <div className="contract-note">
             <ShieldCheck size={17} />
@@ -838,8 +917,8 @@ export default function App() {
 
         {page === "accounts" && <>
           <SectionHeader
-            title="Accounts"
-            description="OWL LAB account authorization plus the local Identity & Session Vault."
+            title="Account"
+            description="Your OWL LAB identity, entitlement and local Runtime authorization."
             action={cloudAccount?.status === "ready"
               ? <button className="secondary" disabled={busy} onClick={() => void signOutCloudAccount()}>Sign out</button>
               : <button className="primary" disabled={busy || !settings?.cloudBaseUrl?.trim() || cloudAccount?.status === "authorizing"} onClick={() => void signInCloudAccount()}>{cloudAccount?.status === "authorizing" ? "Waiting for browser…" : "Sign in to OWL LAB"}</button>}
@@ -860,6 +939,16 @@ export default function App() {
               <div><strong>Sign out locks local computer access, not the device identity.</strong><p>The device keeps reporting presence to OWL Cloud, while Runtime execution stays locked until the account signs in and receives a valid Cloud-signed lease.</p></div>
             </div>
           </section>
+          <details className="panel connected-identities">
+            <summary>
+              <div>
+                <span className="eyebrow">CONNECTED SERVICE IDENTITIES</span>
+                <strong>{accounts.length} managed service account{accounts.length === 1 ? "" : "s"}</strong>
+                <small>Advanced · reusable login/session metadata for agent workflows</small>
+              </div>
+              <span className="neutral-pill">Optional</span>
+            </summary>
+            <div className="connected-identities-body">
           <section className="panel secret-form account-form">
             <div><label>Service</label><input value={accountDraft.service} onChange={(e) => setAccountDraft({ ...accountDraft, service: e.target.value })} placeholder="WhatsApp / X / Shopify" /></div>
             <div><label>Account label</label><input value={accountDraft.label} onChange={(e) => setAccountDraft({ ...accountDraft, label: e.target.value })} placeholder="Main account" /></div>
@@ -870,6 +959,8 @@ export default function App() {
           </section>
           <div className="contract-note"><ShieldCheck size={17} /><div><strong>OWL does not bypass MFA.</strong><p>QR, SMS/email codes, passkeys and authenticator approvals become explicit login challenges. Native app sessions and browser profiles are reused without extracting their credentials.</p></div></div>
           <section className="panel"><div className="secret-table head"><span>Account</span><span>Auth</span><span>Status</span><span /></div>{accounts.map((account) => <div className="secret-table" key={account.id}><div><UserRound size={15} /><p><strong>{account.service} · {account.label}</strong><small>{account.identifier || "No identifier"}</small></p></div><code>{account.authMethod}</code><span>{account.status}</span><button className="danger-icon" onClick={async () => { await window.owlDesktop.deleteAccount(account.id); setAccounts(await window.owlDesktop.listAccounts()); }}><Trash2 size={15} /></button></div>)}{accounts.length === 0 && <div className="empty table-empty">No managed accounts yet.</div>}</section>
+            </div>
+          </details>
         </>}
 
         {page === "secrets" && <>

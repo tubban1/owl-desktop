@@ -115,6 +115,53 @@ describe("RuntimeHttpClient", () => {
     });
   });
 
+  it("maps explicit approval decisions to Runtime approval RPCs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: { state: "approved" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new RuntimeHttpClient({
+      baseUrl: "http://127.0.0.1:8788",
+      sessionId: "owl-desktop:approval-session",
+    });
+
+    await client.approveApproval("approval_1", {
+      requestId: "desktop-approval:approve:1",
+      idempotencyKey: "desktop-approval:approve:approval_1",
+    });
+    await client.denyApproval("approval_2", {
+      requestId: "desktop-approval:deny:2",
+      idempotencyKey: "desktop-approval:deny:approval_2",
+    });
+
+    const calls = fetchMock.mock.calls.map(([, options]) => ({
+      payload: JSON.parse(options.body),
+      headers: options.headers,
+    }));
+
+    expect(calls.map((call) => call.payload.method)).toEqual([
+      "approvals.approve",
+      "approvals.deny",
+    ]);
+    expect(calls[0].payload.params).toEqual({
+      approvalId: "approval_1",
+      confirm: true,
+    });
+    expect(calls[1].payload.params).toEqual({
+      approvalId: "approval_2",
+      confirm: true,
+    });
+    expect(calls[0].headers["x-owl-idempotency-key"]).toBe(
+      "desktop-approval:approve:approval_1",
+    );
+    expect(calls[1].headers["x-owl-idempotency-key"]).toBe(
+      "desktop-approval:deny:approval_2",
+    );
+  });
+
   it("propagates external cancellation to the Runtime HTTP request", async () => {
     const fetchMock = vi.fn().mockImplementation((_url, options) =>
       new Promise((_resolve, reject) => {
