@@ -1,3 +1,5 @@
+import { awaitAbortable } from "../../shared/abortable-await.mjs";
+
 const boundedTimeout = (value, fallback) =>
   Math.min(Math.max(Number(value) || fallback, 1), 120_000);
 
@@ -51,15 +53,18 @@ export class ConnectionHostClient {
     try {
       let response;
       try {
-        response = await this.fetchImpl(this.baseUrl + path, {
-          method,
-          headers: {
-            authorization: `Bearer ${this.token}`,
-            ...(body ? { "content-type": "application/json" } : {}),
-          },
-          ...(body ? { body: JSON.stringify(body) } : {}),
-          signal: controller.signal,
-        });
+        response = await awaitAbortable(
+          this.fetchImpl(this.baseUrl + path, {
+            method,
+            headers: {
+              authorization: `Bearer ${this.token}`,
+              ...(body ? { "content-type": "application/json" } : {}),
+            },
+            ...(body ? { body: JSON.stringify(body) } : {}),
+            signal: controller.signal,
+          }),
+          controller.signal,
+        );
       } catch (cause) {
         if (timedOut) {
           throw connectionHostError(
@@ -84,7 +89,10 @@ export class ConnectionHostClient {
 
       let payload;
       try {
-        payload = await response.json();
+        payload = await awaitAbortable(
+          response.json(),
+          controller.signal,
+        );
       } catch (cause) {
         if (timedOut) {
           throw connectionHostError(

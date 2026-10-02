@@ -58,6 +58,36 @@ describe("Desktop capability bridge bounded RPC", () => {
     });
   });
 
+  it("still times out when the bridge fetch ignores AbortSignal", async () => {
+    const rpc = createDesktopBridgeRpc({
+      baseUrl: "http://127.0.0.1:8792",
+      token: "bridge-token",
+      timeoutMs: 20,
+      fetchImpl: () => new Promise(() => {}),
+    });
+
+    await expect(rpc("agentInbox", "summary")).rejects.toMatchObject({
+      code: "DESKTOP_BRIDGE_TIMEOUT",
+    });
+  });
+
+  it("bounds a stalled bridge response body", async () => {
+    const rpc = createDesktopBridgeRpc({
+      baseUrl: "http://127.0.0.1:8792",
+      token: "bridge-token",
+      timeoutMs: 20,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: () => new Promise(() => {}),
+      }),
+    });
+
+    await expect(rpc("agentInbox", "summary")).rejects.toMatchObject({
+      code: "DESKTOP_BRIDGE_TIMEOUT",
+    });
+  });
+
   it("distinguishes unavailable bridge from timeout", async () => {
     const rpc = createDesktopBridgeRpc({
       baseUrl: "http://127.0.0.1:8792",

@@ -46,6 +46,34 @@ describe("ConnectionHostClient bounded RPC", () => {
     });
   });
 
+  it("still times out when the fetch implementation ignores AbortSignal", async () => {
+    const client = new ConnectionHostClient({
+      baseUrl: "http://127.0.0.1:8791",
+      token: "test-token",
+      fetchImpl: () => new Promise(() => {}),
+    });
+
+    await expect(client.health({ timeoutMs: 20 })).rejects.toMatchObject({
+      code: "CONNECTION_HOST_TIMEOUT",
+    });
+  });
+
+  it("bounds a stalled response body even when response.json ignores AbortSignal", async () => {
+    const client = new ConnectionHostClient({
+      baseUrl: "http://127.0.0.1:8791",
+      token: "test-token",
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: () => new Promise(() => {}),
+      }),
+    });
+
+    await expect(client.health({ timeoutMs: 20 })).rejects.toMatchObject({
+      code: "CONNECTION_HOST_TIMEOUT",
+    });
+  });
+
   it("distinguishes caller cancellation from a transport timeout", async () => {
     const client = new ConnectionHostClient({
       baseUrl: "http://127.0.0.1:8791",

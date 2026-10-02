@@ -1,3 +1,5 @@
+import { awaitAbortable } from "../shared/abortable-await.mjs";
+
 const boundedTimeout = (value, fallback) =>
   Math.min(Math.max(Number(value) || fallback, 1), 120_000);
 
@@ -47,15 +49,18 @@ export function createDesktopBridgeRpc({
     try {
       let response;
       try {
-        response = await fetchImpl(`${normalizedBaseUrl}/rpc`, {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${token}`,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ domain, method, args }),
-          signal: controller.signal,
-        });
+        response = await awaitAbortable(
+          fetchImpl(`${normalizedBaseUrl}/rpc`, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ domain, method, args }),
+            signal: controller.signal,
+          }),
+          controller.signal,
+        );
       } catch (cause) {
         if (timedOut) {
           onEvent("warn", "Desktop capability bridge RPC timed out", {
@@ -89,7 +94,10 @@ export function createDesktopBridgeRpc({
 
       let body;
       try {
-        body = await response.json();
+        body = await awaitAbortable(
+          response.json(),
+          controller.signal,
+        );
       } catch (cause) {
         if (timedOut) {
           onEvent("warn", "Desktop capability bridge response timed out", {
