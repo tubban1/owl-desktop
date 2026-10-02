@@ -347,3 +347,32 @@ Targeted closure gate:
 
     6 test files, 30/30 tests PASS
     git diff --check: PASS
+
+### Phase 2 Desktop Commander forensics and monotonic watchdog hardening
+
+The seven reliability commits selected from Desktop Commander 0.2.52 have now
+been traced from failure mode through implementation and regression evidence.
+The detailed study is:
+
+- `docs/architecture/DESKTOP_COMMANDER_RELIABILITY_FORENSICS_V1.md`
+
+The study produced an additional OWL-native correction from upstream commit
+`51b36a0`: watchdog elapsed-time decisions must use a monotonic clock rather
+than mutable wall clock.
+
+Tunnel Supervisor now records monotonic evidence age for:
+
+- process-generation startup grace;
+- last successful local health proof;
+- the last observed change in control-plane `last_success` evidence.
+
+Wall-clock timestamps remain available for diagnostics and UI, but moving the
+system clock cannot suppress or prematurely trigger the stale watchdog.
+
+The Tunnel health fetch is also wrapped in OWL's abortable await primitive, so
+a fetch implementation that ignores AbortSignal cannot permanently pin the
+watchdog.
+
+Regression coverage deliberately moves `Date.now()` six hours backward while
+monotonic evidence ages beyond the stale threshold and proves recovery still
+fires.

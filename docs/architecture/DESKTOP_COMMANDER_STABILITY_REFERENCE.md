@@ -4,6 +4,9 @@ Status: **third-party engineering research reference**.
 
 This document is not an OWL dependency contract.
 
+The commit-by-commit Phase 2 analysis is maintained in
+`docs/architecture/DESKTOP_COMMANDER_RELIABILITY_FORENSICS_V1.md`.
+
 ## Baseline
 
 ```text

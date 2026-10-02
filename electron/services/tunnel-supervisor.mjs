@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { awaitAbortable } from "../../shared/abortable-await.mjs";
 
 export function classifyTunnelDiagnostic(text) {
   const normalized = String(text ?? "").trim();
@@ -35,6 +36,7 @@ export class TunnelSupervisor {
     onEvent = () => {},
     fetchImpl = fetch,
     random = Math.random,
+    monotonicNow = () => performance.now(),
     restartBaseDelayMs = 1_000,
     restartMaxDelayMs = 30_000,
     healthCheckIntervalMs = 10_000,
@@ -45,6 +47,7 @@ export class TunnelSupervisor {
     this.onEvent = onEvent;
     this.fetchImpl = fetchImpl;
     this.random = random;
+    this.monotonicNow = monotonicNow;
     this.child = null;
     this.secretFile = null;
     this.healthUrlFile = null;
@@ -63,7 +66,11 @@ export class TunnelSupervisor {
     this.activeGeneration = 0;
     this.lastHealthProbeAt = null;
     this.lastHealthOkAt = null;
+    this.lastHealthOkMonotonicAtMs = null;
     this.lastControlPlaneOkAt = null;
+    this.lastControlPlaneEvidenceValue = null;
+    this.lastControlPlaneEvidenceMonotonicAtMs = null;
+    this.startedMonotonicAtMs = null;
     this.lastHealthError = null;
     this.consecutiveHealthFailures = 0;
     this.localReady = false;
@@ -211,7 +218,10 @@ export class TunnelSupervisor {
     this.healthBaseUrl = null;
     this.lastHealthProbeAt = null;
     this.lastHealthOkAt = null;
+    this.lastHealthOkMonotonicAtMs = null;
     this.lastControlPlaneOkAt = null;
+    this.lastControlPlaneEvidenceValue = null;
+    this.lastControlPlaneEvidenceMonotonicAtMs = null;
     this.lastHealthError = null;
     this.consecutiveHealthFailures = 0;
     this.localReady = false;
@@ -287,10 +297,13 @@ export class TunnelSupervisor {
     timeout.unref?.();
 
     try {
-      return await this.fetchImpl(baseUrl + pathname, {
-        method: "GET",
-        signal: controller.signal,
-      });
+      return await awaitAbortable(
+        this.fetchImpl(baseUrl + pathname, {
+          method: "GET",
+          signal: controller.signal,
+        }),
+        controller.signal,
+      );
     } catch (cause) {
       const error = new Error(
         timedOut
@@ -341,8 +354,10 @@ export class TunnelSupervisor {
     if (!child || generation <= 0) return this.status();
 
     const now = Date.now();
+    const monotonicNow = this.monotonicNow();
     const nowIso = new Date(now).toISOString();
-    const startedMs = parseTimestamp(this.startedAt) ?? now;
+    const startedMonotonicAtMs =
+      this.startedMonotonicAtMs ?? monotonicNow;
     this.lastHealthProbeAt = nowIso;
 
     try {
@@ -366,6 +381,7 @@ export class TunnelSupervisor {
       );
 
       this.lastHealthOkAt = nowIso;
+      this.lastHealthOkMonotonicAtMs = monotonicNow;
       this.consecutiveHealthFailures = 0;
       this.lastHealthError = null;
       this.localReady = readyResponse.ok;
@@ -373,16 +389,21 @@ export class TunnelSupervisor {
 
       const controlPlaneSuccessMs = parseTimestamp(controlPlane?.lastSuccess);
       if (controlPlaneSuccessMs !== null) {
-        this.lastControlPlaneOkAt = new Date(
-          controlPlaneSuccessMs,
-        ).toISOString();
+        const evidenceValue = new Date(controlPlaneSuccessMs).toISOString();
+        this.lastControlPlaneOkAt = evidenceValue;
+        if (evidenceValue !== this.lastControlPlaneEvidenceValue) {
+          this.lastControlPlaneEvidenceValue = evidenceValue;
+          this.lastControlPlaneEvidenceMonotonicAtMs = monotonicNow;
+        }
       }
 
-      const upstreamEvidenceMs =
-        controlPlaneSuccessMs ??
-        parseTimestamp(this.lastControlPlaneOkAt) ??
-        startedMs;
-      const upstreamEvidenceAgeMs = Math.max(0, now - upstreamEvidenceMs);
+      const upstreamEvidenceMonotonicAtMs =
+        this.lastControlPlaneEvidenceMonotonicAtMs ??
+        startedMonotonicAtMs;
+      const upstreamEvidenceAgeMs = Math.max(
+        0,
+        monotonicNow - upstreamEvidenceMonotonicAtMs,
+      );
 
       if (
         controlPlane?.status === "degraded" &&
@@ -401,7 +422,9 @@ export class TunnelSupervisor {
       } else if (controlPlane?.status === "ok" && this.localReady) {
         this.reachabilityState = "ready";
         this.restartAttempts = 0;
-      } else if (now - startedMs < this.healthStartupGraceMs) {
+      } else if (
+        monotonicNow - startedMonotonicAtMs < this.healthStartupGraceMs
+      ) {
         this.reachabilityState = "starting";
       } else {
         this.reachabilityState = "degraded";
@@ -419,10 +442,14 @@ export class TunnelSupervisor {
       };
       this.localReady = false;
 
-      const lastProofMs = parseTimestamp(this.lastHealthOkAt) ?? startedMs;
-      const proofAgeMs = Math.max(0, now - lastProofMs);
+      const lastProofMonotonicAtMs =
+        this.lastHealthOkMonotonicAtMs ?? startedMonotonicAtMs;
+      const proofAgeMs = Math.max(
+        0,
+        monotonicNow - lastProofMonotonicAtMs,
+      );
       const pastStartupGrace =
-        now - startedMs >= this.healthStartupGraceMs;
+        monotonicNow - startedMonotonicAtMs >= this.healthStartupGraceMs;
 
       if (pastStartupGrace && proofAgeMs >= this.healthStaleAfterMs) {
         this.reachabilityState = "stale";
@@ -538,6 +565,7 @@ export class TunnelSupervisor {
     this.activeGeneration = generation;
     this.child = child;
     this.startedAt = new Date().toISOString();
+    this.startedMonotonicAtMs = this.monotonicNow();
     this.lastExit = null;
 
     child.stdout.on("data", (chunk) => {
@@ -568,6 +596,7 @@ export class TunnelSupervisor {
         if (this.activeGeneration === generation) this.activeGeneration = 0;
       }
       this.startedAt = null;
+      this.startedMonotonicAtMs = null;
       this.clearHealthCheck();
       this.localReady = false;
       this.reachabilityState = this.desiredRunning ? "recovering" : "stopped";

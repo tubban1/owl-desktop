@@ -149,6 +149,28 @@ describe("TunnelSupervisor", () => {
     ).toBe(true);
   }, 15_000);
 
+  it("bounds a tunnel health request even when fetch ignores AbortSignal", async () => {
+    const supervisor = new TunnelSupervisor({
+      fetchImpl: () => new Promise(() => {}),
+      healthRequestTimeoutMs: 20,
+      healthCheckIntervalMs: 60_000,
+    });
+    supervisors.push(supervisor);
+    supervisor.child = { pid: 303 };
+    supervisor.activeGeneration = 1;
+    supervisor.generation = 1;
+    supervisor.healthBaseUrl = "http://127.0.0.1:41000";
+    supervisor.startedAt = new Date().toISOString();
+    supervisor.startedMonotonicAtMs = supervisor.monotonicNow();
+
+    await expect(supervisor.fetchHealth("/healthz")).rejects.toMatchObject({
+      code: "TUNNEL_HEALTH_TIMEOUT",
+    });
+
+    supervisor.child = null;
+    supervisor.activeGeneration = 0;
+  });
+
   it("reports READY only from tunnel health and control-plane evidence", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-tunnel-health-test-"));
     scratch.push(dir);
@@ -299,9 +321,11 @@ describe("TunnelSupervisor", () => {
       });
     };
 
+    let monotonicMs = 0;
     const supervisor = new TunnelSupervisor({
       fetchImpl,
       random: () => 0.5,
+      monotonicNow: () => monotonicMs,
       restartBaseDelayMs: 5_000,
       restartMaxDelayMs: 5_000,
       healthCheckIntervalMs: 100,
@@ -324,7 +348,19 @@ describe("TunnelSupervisor", () => {
       "utf8",
     );
 
-    const status = await supervisor.checkHealthNow();
+    const firstStatus = await supervisor.checkHealthNow();
+    expect(firstStatus.state).toBe("running");
+    expect(firstStatus.reachability.state).toBe("degraded");
+
+    monotonicMs = 1_500;
+    const realDateNow = Date.now;
+    Date.now = () => realDateNow() - 6 * 60 * 60 * 1000;
+    let status;
+    try {
+      status = await supervisor.checkHealthNow();
+    } finally {
+      Date.now = realDateNow;
+    }
 
     expect(status.state).toBe("restarting");
     expect(status.reachability.state).toBe("recovering");
