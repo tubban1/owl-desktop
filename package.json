@@ -43,6 +43,7 @@
     "prepare:runtime-host": "node scripts/prepare-runtime-host-component.mjs",
     "prepare:icon": "node scripts/prepare-macos-icon.mjs",
     "verify:packaged-smoke": "node scripts/verify-packaged-smoke.mjs",
+    "verify:packaged-connectivity-live": "OWL_PACKAGED_CONNECTIVITY_HOST_LIVE_PROBE_ONLY=true electron .",
     "prepare:helper": "node scripts/prepare-helper-component.mjs",
     "prepare:release-components": "npm run prepare:tunnel && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon",
     "verify:local-bootstrap-live": "node scripts/verify-local-bootstrap-live.mjs"
@@ -81,6 +82,8 @@
       "dist/**/*",
       "electron/**/*",
       "mcp/**/*",
+      "connection-host/**/*",
+      "shared/**/*",
       "package.json"
     ],
     "extraResources": [

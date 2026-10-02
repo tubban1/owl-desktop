@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { configureOwlDesktopStorage } from "./storage-layout.mjs";
@@ -33,22 +34,27 @@ import { AgentInboxStore } from "./services/agent-inbox-store.mjs";
 import { RuntimeAgentRequestEventConsumer } from "./services/runtime-agent-request-consumer.mjs";
 import { RuntimeAgentRequestEventBridge } from "./services/runtime-agent-request-event-bridge.mjs";
 import { createTunnelRecoveryPlan } from "./services/tunnel-recovery-plan.mjs";
+import { ConnectivityHostLaunchAgent } from "./services/connectivity-host-launch-agent.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let storageLayout;
 const devForceConnectivity =
   !app.isPackaged && process.env.OWL_DEV_FORCE_CONNECTIVITY === "true";
-const externalConnectionHostUrl =
+let externalConnectionHostUrl =
   process.env.OWL_CONNECTION_HOST_URL?.trim() || "";
-const externalConnectionHostToken =
+let externalConnectionHostToken =
   process.env.OWL_CONNECTION_HOST_CONTROL_TOKEN?.trim() || "";
-const externalConnectionHostEnabled =
+let externalConnectionHostEnabled =
   Boolean(externalConnectionHostUrl && externalConnectionHostToken);
 const connectivityRecoveryOnly =
   process.env.OWL_CONNECTIVITY_RECOVERY_ONLY === "true" ||
   process.env.OWL_TUNNEL_RECOVERY_ONLY === "true";
 const cloudMcpLiveProbeOnly =
   process.env.OWL_CLOUD_MCP_LIVE_PROBE_ONLY === "true";
+const packagedConnectivityHostLiveProbeOnly =
+  process.env.OWL_PACKAGED_CONNECTIVITY_HOST_LIVE_PROBE_ONLY === "true";
+const connectivityHostOnly =
+  process.env.OWL_CONNECTIVITY_HOST_ONLY === "true";
 const desktopCapabilityBridgePort = Number(
   process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_PORT || "8792",
 );
@@ -241,6 +247,53 @@ async function applyRuntimeUserPreferences(settings) {
   return { applied: true, requiresDevRestart: false, environment };
 }
 
+async function ensurePackagedConnectivityHost() {
+  if (!app.isPackaged || connectivityHostOnly) return null;
+  const token = connectivityHostControlToken({ create: true });
+  if (!token) {
+    throw new Error("Connectivity Host control token is unavailable.");
+  }
+
+  setExternalConnectionHost({
+    baseUrl: "http://127.0.0.1:8791",
+    token,
+  });
+  const service = new ConnectivityHostLaunchAgent({
+    desktopExecPath: process.execPath,
+    onEvent(level, message, meta) {
+      record(level, "connectivity-host-service", message, meta);
+    },
+  });
+  const ensured = await service.ensure();
+
+  const deadline = Date.now() + 20_000;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      const health = await connectionHostClient.health();
+      if (health?.ok === true && health?.service === "owl-connection-host") {
+        record("info", "connectivity-host-service", "Background Connectivity Host is ready", {
+          pid: health.pid ?? null,
+          launchd: ensured.launchd,
+        });
+        return { ...ensured, health };
+      }
+      lastError = new Error("Connectivity Host returned an invalid health payload.");
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw Object.assign(
+    new Error(
+      `Background Connectivity Host did not become ready: ${
+        lastError instanceof Error ? lastError.message : String(lastError)
+      }`,
+    ),
+    { code: "CONNECTIVITY_HOST_START_TIMEOUT" },
+  );
+}
+
 async function ensurePackagedLocalRuntime(settings) {
   if (!app.isPackaged) return null;
   const port = localRuntimeBootstrapPort(settings);
@@ -350,6 +403,42 @@ function cloudDeviceCredential() {
     store.readSecret("OWL_CLOUD_DEVICE_CREDENTIAL", "owl-cloud") ??
     store.readSecret("OWL_CLOUD_DEVICE_CREDENTIAL")
   );
+}
+
+function canonicalDesktopRoot() {
+  return path.join(app.getPath("appData"), "OWL LAB", "desktop");
+}
+
+function setExternalConnectionHost({ baseUrl, token }) {
+  externalConnectionHostUrl = String(baseUrl ?? "").trim();
+  externalConnectionHostToken = String(token ?? "").trim();
+  externalConnectionHostEnabled = Boolean(
+    externalConnectionHostUrl && externalConnectionHostToken,
+  );
+  connectionHostClient = externalConnectionHostEnabled
+    ? new ConnectionHostClient({
+        baseUrl: externalConnectionHostUrl,
+        token: externalConnectionHostToken,
+      })
+    : undefined;
+  return externalConnectionHostEnabled;
+}
+
+function connectivityHostControlToken({ create = false } = {}) {
+  const existing =
+    store.readSecret(
+      "OWL_CONNECTION_HOST_CONTROL_TOKEN",
+      "owl-connectivity",
+    ) ??
+    store.readSecret("OWL_CONNECTION_HOST_CONTROL_TOKEN");
+  if (existing || !create) return existing;
+  const value = randomBytes(32).toString("base64url");
+  store.upsertSecret({
+    name: "OWL_CONNECTION_HOST_CONTROL_TOKEN",
+    project: "owl-connectivity",
+    value,
+  });
+  return value;
 }
 
 async function syncConnectionHostCloudMcp() {
@@ -1821,6 +1910,131 @@ async function runConnectivityRecoveryOnly() {
   return result;
 }
 
+async function runConnectivityHostOnly() {
+  store = new DesktopStore({ root: canonicalDesktopRoot() });
+  const settings = store.getSettings();
+  const controlToken = connectivityHostControlToken();
+  if (!controlToken) {
+    throw new Error(
+      "Connectivity Host control token is missing. Open OWL LAB Desktop once to repair the background service.",
+    );
+  }
+
+  const runtimeApiToken = runtimeToken();
+  const localMcpToken = mcpToken();
+  process.env.OWL_RUNTIME_URL = effectiveRuntimeBaseUrl(settings);
+  if (runtimeApiToken) process.env.OWL_RUNTIME_API_TOKEN = runtimeApiToken;
+  else delete process.env.OWL_RUNTIME_API_TOKEN;
+  if (localMcpToken) process.env.OWL_MCP_API_TOKEN = localMcpToken;
+  else delete process.env.OWL_MCP_API_TOKEN;
+  process.env.OWL_MCP_PORT = String(settings.mcpPort);
+  process.env.OWL_CONNECTION_HOST_PORT =
+    process.env.OWL_CONNECTION_HOST_PORT?.trim() || "8791";
+  process.env.OWL_CONNECTION_HOST_CONTROL_TOKEN = controlToken;
+  process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_URL =
+    `http://127.0.0.1:${desktopCapabilityBridgePort}`;
+  process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_TOKEN = controlToken;
+  process.env.OWL_DESKTOP_USER_DATA_DIR = canonicalDesktopRoot();
+  if (settings.sessionId) {
+    process.env.OWL_DESKTOP_FALLBACK_OWNER_ID = settings.sessionId;
+  } else {
+    delete process.env.OWL_DESKTOP_FALLBACK_OWNER_ID;
+  }
+
+  await import("../connection-host/server.mjs");
+
+  const client = new ConnectionHostClient({
+    baseUrl: `http://127.0.0.1:${process.env.OWL_CONNECTION_HOST_PORT}`,
+    token: controlToken,
+  });
+
+  let reconciling = false;
+  const reconcile = async () => {
+    if (reconciling) return;
+    reconciling = true;
+    try {
+      const current = store.getSettings();
+      const health = await client.health();
+
+      const wantsTunnel =
+        current.tunnelEnabled === true &&
+        current.tunnelAutoStart === true &&
+        Boolean(current.tunnelId?.trim()) &&
+        Boolean(tunnelApiKey());
+      if (wantsTunnel) {
+        if (!["running", "restarting"].includes(health?.tunnel?.state)) {
+          await client.startTunnel({
+            binaryPath: effectiveTunnelBinary(current),
+            tunnelId: current.tunnelId,
+            apiKey: tunnelApiKey(),
+            mcpUrl: `http://127.0.0.1:${current.mcpPort}/mcp`,
+          });
+        }
+      } else if (
+        health?.tunnel?.state !== "stopped" ||
+        health?.tunnel?.desiredRunning === true
+      ) {
+        await client.stopTunnel();
+      }
+
+      const deviceCredential = cloudDeviceCredential();
+      const wantsCloudMcp =
+        current.cloudEnabled === true &&
+        Boolean(current.cloudBaseUrl?.trim()) &&
+        Boolean(current.cloudDeviceId?.trim()) &&
+        Boolean(deviceCredential);
+      const cloudConfig = health?.cloudMcp?.config ?? null;
+      const cloudConsumer = health?.cloudMcp?.consumer ?? null;
+      const cloudConfigMatches =
+        cloudConfig?.baseUrl === current.cloudBaseUrl?.trim() &&
+        cloudConfig?.deviceId === current.cloudDeviceId?.trim();
+
+      if (wantsCloudMcp) {
+        if (
+          health?.cloudMcp?.configured !== true ||
+          !cloudConfigMatches ||
+          cloudConsumer?.running !== true
+        ) {
+          await client.configureCloudMcp({
+            baseUrl: current.cloudBaseUrl.trim(),
+            deviceId: current.cloudDeviceId.trim(),
+            deviceCredential,
+            pollIntervalMs: current.cloudPollIntervalMs,
+          });
+        }
+      } else if (health?.cloudMcp?.configured === true) {
+        await client.stopCloudMcp();
+      }
+    } catch (error) {
+      console.warn(
+        `Connectivity Host reconciliation failed: ${
+          error?.code ?? error?.name ?? "ERROR"
+        }`,
+      );
+    } finally {
+      reconciling = false;
+    }
+  };
+
+  await reconcile();
+  const reconciliationTimer = setInterval(() => {
+    void reconcile();
+  }, 15_000);
+  reconciliationTimer.unref?.();
+
+  console.log(
+    JSON.stringify({
+      ok: true,
+      service: "owl-connectivity-host",
+      pid: process.pid,
+      controlUrl: `http://127.0.0.1:${process.env.OWL_CONNECTION_HOST_PORT}`,
+      mcpPort: settings.mcpPort,
+      secretSource: "electron-safeStorage",
+      secretsPrinted: false,
+    }),
+  );
+}
+
 async function runCloudMcpLiveProbeOnly() {
   const canonicalDesktopRoot = path.join(
     app.getPath("appData"),
@@ -1953,9 +2167,109 @@ async function runCloudMcpLiveProbeOnly() {
       throw new Error("Cloud MCP runtime_info remained pending after live wait.");
     }
 
+    const runtimeText = Array.isArray(result?.content)
+      ? result.content.find(
+          (item) => item && item.type === "text" && typeof item.text === "string",
+        )?.text
+      : null;
+    let runtimeInfo = null;
+    try {
+      runtimeInfo = runtimeText ? JSON.parse(runtimeText) : null;
+    } catch {}
+    if (
+      runtimeInfo?.apiVersion !== "0.1" ||
+      typeof runtimeInfo?.runtimeVersion !== "string" ||
+      !runtimeInfo.runtimeVersion
+    ) {
+      throw new Error("Cloud MCP runtime_info did not return Runtime contract evidence.");
+    }
+
+    const failedInvocation = await gateway({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "owl_call",
+        arguments: {
+          deviceId: settings.cloudDeviceId,
+          toolName: "__owl_e2e_missing_tool__",
+          arguments: {},
+          waitMs: 15_000,
+        },
+      },
+    });
+    const failedResult = failedInvocation?.result;
+    const failedCallId =
+      failedResult?._meta?.owlCallId ??
+      failedResult?.structuredContent?.callId ??
+      null;
+    if (!failedCallId || failedResult?.isError !== true) {
+      throw new Error(
+        "Cloud MCP did not preserve a local MCP tool failure as a failed durable call.",
+      );
+    }
+
+    await consumer.stop();
+    const offlineRequest = {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "owl_call",
+        arguments: {
+          deviceId: settings.cloudDeviceId,
+          toolName: "runtime_info",
+          arguments: {},
+          waitMs: 0,
+        },
+      },
+    };
+    const queuedWhileOffline = await gateway(offlineRequest);
+    const retriedWhileOffline = await gateway(offlineRequest);
+    const offlineCallId =
+      queuedWhileOffline?.result?._meta?.owlCallId ??
+      queuedWhileOffline?.result?.structuredContent?.callId ??
+      null;
+    const retryCallId =
+      retriedWhileOffline?.result?._meta?.owlCallId ??
+      retriedWhileOffline?.result?.structuredContent?.callId ??
+      null;
+    if (
+      !offlineCallId ||
+      offlineCallId !== retryCallId ||
+      queuedWhileOffline?.result?.structuredContent?.pending !== true
+    ) {
+      throw new Error(
+        "Cloud MCP offline queue did not preserve one durable retry identity.",
+      );
+    }
+
+    await consumer.start();
+    const resumed = await gateway({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: {
+        name: "owl_call_status",
+        arguments: {
+          callId: offlineCallId,
+          waitMs: 15_000,
+        },
+      },
+    });
+    if (
+      resumed?.result?._meta?.owlCallId !== offlineCallId ||
+      resumed?.result?.isError === true ||
+      resumed?.result?.structuredContent?.pending === true
+    ) {
+      throw new Error(
+        "Cloud MCP queued call did not resume through the same durable call identity.",
+      );
+    }
+
     const snapshot = consumer.snapshot();
-    if ((snapshot?.processed ?? 0) < 1) {
-      throw new Error("Cloud MCP consumer did not record the completed call.");
+    if ((snapshot?.processed ?? 0) < 2) {
+      throw new Error("Cloud MCP consumer did not record both successful calls.");
     }
     console.log(
       JSON.stringify(
@@ -1966,9 +2280,14 @@ async function runCloudMcpLiveProbeOnly() {
           callId,
           consumerReady: snapshot.ready === true,
           processed: snapshot.processed,
-          runtimeEvidence: Boolean(
-            JSON.stringify(result).includes("owl-runtime"),
-          ),
+          runtimeEvidence: true,
+          runtimeVersion: runtimeInfo.runtimeVersion,
+          runtimeApiVersion: runtimeInfo.apiVersion,
+          failureObserved: true,
+          failedCallId,
+          offlineQueueRecovered: true,
+          offlineCallId,
+          retryIdentityPreserved: offlineCallId === retryCallId,
           secretsPrinted: false,
         },
         null,
@@ -1982,11 +2301,60 @@ async function runCloudMcpLiveProbeOnly() {
 }
 
 const hasLock =
-  connectivityRecoveryOnly || cloudMcpLiveProbeOnly
+  connectivityRecoveryOnly ||
+  cloudMcpLiveProbeOnly ||
+  packagedConnectivityHostLiveProbeOnly ||
+  connectivityHostOnly
     ? true
     : app.requestSingleInstanceLock();
 
-if (cloudMcpLiveProbeOnly) {
+if (packagedConnectivityHostLiveProbeOnly) {
+  const probeProfileRoot = path.join(
+    os.tmpdir(),
+    `owl-packaged-connectivity-live-profile-${process.pid}`,
+  );
+  app.setPath("userData", probeProfileRoot);
+  app.setPath("sessionData", path.join(probeProfileRoot, "session"));
+  app
+    .whenReady()
+    .then(async () => {
+      app.dock?.hide();
+      const { runPackagedConnectivityHostLiveGate } = await import(
+        "../scripts/verify-packaged-connectivity-host-live.mjs"
+      );
+      await runPackagedConnectivityHostLiveGate();
+      app.exit(0);
+    })
+    .catch((error) => {
+      console.error(
+        `Packaged Connectivity Host live gate failed: ${
+          error instanceof Error ? error.stack || error.message : String(error)
+        }`,
+      );
+      app.exit(1);
+    });
+} else if (connectivityHostOnly) {
+  const hostProfileRoot = path.join(
+    os.tmpdir(),
+    `owl-connectivity-host-profile-${process.pid}`,
+  );
+  app.setPath("userData", hostProfileRoot);
+  app.setPath("sessionData", path.join(hostProfileRoot, "session"));
+  app
+    .whenReady()
+    .then(async () => {
+      app.dock?.hide();
+      await runConnectivityHostOnly();
+    })
+    .catch((error) => {
+      console.error(
+        `Connectivity Host startup failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      app.exit(1);
+    });
+} else if (cloudMcpLiveProbeOnly) {
   const probeProfileRoot = path.join(
     os.tmpdir(),
     `owl-cloud-mcp-live-profile-${process.pid}`,
@@ -2039,6 +2407,18 @@ if (cloudMcpLiveProbeOnly) {
 
   app.whenReady().then(async () => {
     store = new DesktopStore();
+    if (app.isPackaged) {
+      const token = connectivityHostControlToken({ create: true });
+      setExternalConnectionHost({
+        baseUrl: "http://127.0.0.1:8791",
+        token,
+      });
+    } else if (externalConnectionHostEnabled) {
+      setExternalConnectionHost({
+        baseUrl: externalConnectionHostUrl,
+        token: externalConnectionHostToken,
+      });
+    }
     identityVault = new IdentityVault();
     cloudBridgeStore = new CloudBridgeStore({
       file: path.join(app.getPath("userData"), "cloud-bridge-state.json"),
@@ -2047,10 +2427,6 @@ if (cloudMcpLiveProbeOnly) {
       file: path.join(app.getPath("userData"), "remote-submissions.json"),
     });
     if (externalConnectionHostEnabled) {
-      connectionHostClient = new ConnectionHostClient({
-        baseUrl: externalConnectionHostUrl,
-        token: externalConnectionHostToken,
-      });
       plannerContinuationStore = null;
     } else {
       plannerContinuationStore = new PlannerContinuationStore({
@@ -2085,7 +2461,11 @@ if (cloudMcpLiveProbeOnly) {
           record(level, "connection-host", message, meta);
         },
       });
-      await refreshConnectionHost();
+      await refreshConnectionHost().catch((error) => {
+        record("info", "connection-host", "Background Connectivity Host is not ready yet", {
+          code: error?.code ?? error?.name ?? "ERROR",
+        });
+      });
       await syncConnectionHostCloudMcp().catch((error) => {
         record("warn", "cloud-mcp", "Initial Connection Host Cloud MCP sync failed", {
           code: error?.code ?? error?.name ?? "ERROR",
@@ -2103,6 +2483,27 @@ if (cloudMcpLiveProbeOnly) {
     const settings = store.getSettings();
     createWindow();
     await ensurePackagedLocalRuntime(settings);
+    await ensurePackagedConnectivityHost().catch((error) => {
+      record("error", "connectivity-host-service", "Background Connectivity Host bootstrap failed", {
+        code: error?.code ?? "CONNECTIVITY_HOST_BOOTSTRAP_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
+    if (externalConnectionHostEnabled) {
+      if (!desktopCapabilityBridge) {
+        desktopCapabilityBridge = await startDesktopCapabilityBridge({
+          port: desktopCapabilityBridgePort,
+          token: externalConnectionHostToken,
+          agentInbox,
+          remoteDeviceControl,
+          onEvent(level, message, meta) {
+            record(level, "connection-host", message, meta);
+          },
+        });
+      }
+      await refreshConnectionHost().catch(() => null);
+      await syncConnectionHostCloudMcp().catch(() => null);
+    }
     if (settings.cloudBaseUrl?.trim()) {
       await resumeCloudAccountSession();
     }

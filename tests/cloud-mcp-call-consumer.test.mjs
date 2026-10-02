@@ -202,3 +202,40 @@ describe("CloudMcpCallConsumer parity", () => {
     expect(intervalHandle.unref).toHaveBeenCalled();
     await consumer.stop();
   });
+
+it("persists MCP tool isError results as failed Cloud completions", async () => {
+  const cloudClient = {
+    pullMcpCalls: vi.fn(async () => ({ calls: [call()] })),
+    claimMcpCall: vi.fn(async () => ({ ...call(), status: "executing" })),
+    completeMcpCall: vi.fn(async () => ({ ...call(), status: "failed" })),
+  };
+  const executor = {
+    execute: vi.fn(async () => ({
+      isError: true,
+      content: [{ type: "text", text: "Runtime denied the request." }],
+    })),
+    snapshot: () => null,
+  };
+  const consumer = new CloudMcpCallConsumer({
+    cloudClient,
+    executor,
+    pollIntervalMs: 60_000,
+  });
+
+  await consumer.start();
+
+  expect(cloudClient.completeMcpCall).toHaveBeenCalledWith(
+    "mcp_1",
+    expect.objectContaining({
+      error: {
+        code: "LOCAL_MCP_TOOL_ERROR",
+        message: "Runtime denied the request.",
+      },
+    }),
+  );
+  expect(cloudClient.completeMcpCall.mock.calls[0][1]).not.toHaveProperty(
+    "result",
+  );
+  expect(consumer.snapshot().processed).toBe(0);
+  await consumer.stop();
+});

@@ -503,3 +503,103 @@ Post-fix gate:
 This closes the active-ChatGPT Connection Host/Tunnel destructive restart gate.
 The remaining Reliability items are packaged-runtime behavioral soak and the
 signed/notarized distribution gate.
+
+### Cloud durable MCP + packaged Connectivity Host acceptance — 2026-10-02
+
+The Desktop Commander comparison exposed a structural reliability gap that
+cannot be solved by making the Tunnel reconnect faster: remote request
+correctness must not depend on one long-lived transport.
+
+OWL now has a second, durable path:
+
+    ChatGPT / MCP client
+      -> Frankfurt Cloud /mcp
+      -> durable McpCall
+      -> device claim lease
+      -> packaged Connectivity Host
+      -> local OWL MCP
+      -> OWL Runtime
+      -> local completion journal
+      -> Frankfurt completion
+
+Cloud changes were isolated in \`feature/mcp-durable-ingress\`:
+
+- \`eba7416\` adds durable MCP ingress with stable call identity, request digest,
+  at-least-once pull, executor claim leases and idempotent completion;
+- \`5614905\` adds a stateless JWT-protected \`/mcp\` gateway whose HTTP connection
+  is not the source of truth for execution;
+- \`c06c10f\` fixes real Aurora Data API JSONB decoding discovered by the live
+  Frankfurt test.
+
+The Cloud gate passed 70/70 tests and the latest Lambda/API Gateway revision
+was deployed to \`OwlCloudDevStack\` in \`eu-central-1\`.
+
+The Desktop durable consumer adds:
+
+- claim-before-execute;
+- automatic claim-lease refresh during long execution;
+- local stable idempotency derived from Cloud \`callId\`;
+- 0600 atomic completion journal before Cloud acknowledgement;
+- completion replay without local re-execution after Host restart;
+- MCP \`isError: true\` mapped to a durable Cloud \`failed\` state rather than a
+  false successful completion.
+
+Real Frankfurt acceptance used the existing OS-backed Desktop account/device
+credentials without printing them. The gate proved:
+
+    gateway:                   frankfurt
+    Runtime API:               0.1
+    Runtime version:           1.0.0-rc.4
+    successful durable call:   PASS
+    local MCP failure -> fail: PASS
+    call queued offline:       PASS
+    retry same request:        same callId
+    consumer recovery:         same callId completed
+    secrets printed:           false
+
+The packaged product boundary was then hardened so the Desktop UI is no longer
+the owner of the connectivity process lifetime:
+
+- macOS LaunchAgent label: \`ai.owl.desktop.connectivity-host\`;
+- \`RunAtLoad + KeepAlive + ProcessType=Background\`;
+- the plist contains no Runtime token, MCP token, Tunnel API key or Cloud
+  device credential;
+- the background process is the same packaged OWL LAB Desktop executable in
+  \`OWL_CONNECTIVITY_HOST_ONLY=true\` mode;
+- it opens no window and hides its Dock icon;
+- it reads secrets directly from the existing Electron \`safeStorage\` boundary;
+- normal Desktop startup installs/repairs the LaunchAgent after Runtime is
+  ready and then attaches the capability bridge;
+- UI quit does not stop MCP/Tunnel when the external background Host is active.
+
+Both unsigned smoke architectures were rebuilt. The packaged smoke gate now
+requires \`connection-host/**/*\`, the LaunchAgent service and shared abortable
+helpers to exist inside \`app.asar\`.
+
+Destructive packaged evidence:
+
+    packaged architecture:     arm64
+    Host PID before kill:      67291
+    Host PID after SIGKILL:    71147
+    launchd automatic restart: PASS
+    Runtime PID before:        69098
+    Runtime PID after:         69098
+    Runtime survived:          PASS
+    Cloud consumer after kill: ready
+    Cloud -> Runtime before:   PASS
+    Cloud -> Runtime after:    PASS
+    secrets printed:           false
+
+Post-change source gate:
+
+    full Desktop gate:          56/56 files, 256/256 tests PASS
+    TypeScript + Vite build:    PASS
+    release component gate:     PASS
+    arm64 packaged smoke:       PASS
+    x64 packaged smoke:         PASS
+    packaged Connectivity Host: present in app.asar
+    git diff --check:           PASS
+
+This closes the UI/Connection-Host fault-domain requirement at the unsigned
+development acceptance level. It does not close the signed/notarized
+distribution gate or the longer packaged Runtime soak.

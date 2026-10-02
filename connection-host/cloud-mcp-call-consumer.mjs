@@ -13,6 +13,20 @@ function sanitizedError(error) {
   };
 }
 
+function mcpToolResultError(result) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+  if (result.isError !== true) return null;
+  const content = Array.isArray(result.content) ? result.content : [];
+  const text = content
+    .filter((item) => item && typeof item === "object" && item.type === "text")
+    .map((item) => String(item.text ?? ""))
+    .filter(Boolean)
+    .join("\n");
+  const error = new Error(text || "Local MCP tool returned an error.");
+  error.code = "LOCAL_MCP_TOOL_ERROR";
+  return error;
+}
+
 export class CloudMcpCallConsumer {
   constructor({
     cloudClient,
@@ -208,6 +222,7 @@ export class CloudMcpCallConsumer {
           arguments: call.arguments ?? {},
           signal: controller.signal,
         });
+        executionError = mcpToolResultError(result);
       } catch (error) {
         executionError = error;
       } finally {

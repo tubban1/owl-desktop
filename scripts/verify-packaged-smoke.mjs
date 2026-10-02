@@ -66,6 +66,23 @@ for (const { arch, app } of apps) {
     throw new Error(`Packaged icon is missing: ${iconName}`);
   }
 
+  const asarFile = path.join(resources, "app.asar");
+  const asarTool = path.join(root, "node_modules/.bin/asar");
+  const asarEntries = run(asarTool, ["list", asarFile]);
+  const requiredAsarEntries = [
+    "/connection-host/server.mjs",
+    "/connection-host/cloud-mcp-call-consumer.mjs",
+    "/connection-host/cloud-mcp-completion-store.mjs",
+    "/connection-host/local-mcp-executor.mjs",
+    "/electron/services/connectivity-host-launch-agent.mjs",
+    "/shared/abortable-await.mjs",
+  ];
+  for (const entry of requiredAsarEntries) {
+    if (!asarEntries.includes(entry)) {
+      throw new Error(`Packaged connectivity file is missing for ${arch}: ${entry}`);
+    }
+  }
+
   const runtimeManifest = JSON.parse(
     fs.readFileSync(path.join(resources, "owl-runtime/component.json"), "utf8"),
   );
@@ -153,6 +170,7 @@ console.log(
         universal: true,
       },
       customIcon: true,
+      connectivityHostPackaged: true,
       signing: "intentionally skipped for smoke packaging",
     },
     null,

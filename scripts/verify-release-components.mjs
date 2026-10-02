@@ -23,6 +23,23 @@ if (
 if (!/notarize:\s*true/.test(releaseConfig)) {
   throw new Error("Release config must require macOS notarization.");
 }
+if (
+  !/^\s*-\s*connection-host\/\*\*\/\*\s*$/m.test(releaseConfig) ||
+  !/^\s*-\s*shared\/\*\*\/\*\s*$/m.test(releaseConfig)
+) {
+  throw new Error(
+    "Release config must package the Connectivity Host and shared runtime modules.",
+  );
+}
+const packagedSourceFiles = new Set(pkg.build?.files ?? []);
+if (
+  !packagedSourceFiles.has("connection-host/**/*") ||
+  !packagedSourceFiles.has("shared/**/*")
+) {
+  throw new Error(
+    "package.json must package the Connectivity Host and shared runtime modules.",
+  );
+}
 const protocol = JSON.parse(
   fs.readFileSync(path.join(root, "vendor/owl-tunnel/protocol.json"), "utf8"),
 );

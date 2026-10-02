@@ -9,6 +9,8 @@ files:
   - dist/**/*
   - electron/**/*
   - mcp/**/*
+  - connection-host/**/*
+  - shared/**/*
   - package.json
 extraResources:
   - from: vendor/owl-runtime
