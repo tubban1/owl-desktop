@@ -177,7 +177,6 @@ export default function App() {
         window.owlDesktop.cloudAccountStatus(),
       ]);
       setSnapshot(nextSnapshot);
-      setLiveActivity(nextSnapshot.activity ?? []);
       setAgentRequests(nextAgentRequests);
       setCloudAccount(nextCloudAccount);
       setNow(Date.now());

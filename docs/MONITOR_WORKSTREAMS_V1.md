@@ -290,3 +290,35 @@ The Live hierarchy is:
 5. Historical Timeline / Graph / System views
 
 Historical terminal/failed Runtime Tasks MUST NOT remain in the Live workstream list indefinitely. A legacy stream without a current transport/workstream/active execution is retained in Live only for a short recent window; durable history stays available in Timeline/Graph.
+
+
+## Single-view Agent Operations
+
+Monitor is a single live operations surface. The product UI does not require users to switch between Live, Timeline, Graph and System tabs to understand current agent work.
+
+The primary graph renders the actual current path:
+
+```text
+ChatGPT / Worker / Cloud
+→ OWL MCP / Tunnel
+→ Runtime authorization gate
+→ OWL Runtime
+→ current tool / task / process
+→ result back to source
+```
+
+The same surface carries:
+
+- Persistent: current recoverable/durable work;
+- Observable: Runtime event health and real MCP traffic;
+- Authorized: enforced access state and Cloud-signed lease verification;
+- current real request/response payload preview;
+- current workstreams and next actions.
+
+Historical terminal tasks, old AgentRequests and support diagnostics do not occupy the live surface. They remain Runtime/audit history but are not presented as current agent activity.
+
+### Live activity stability
+
+The 750 ms Activity IPC stream is the authoritative renderer source for real MCP interactions while Monitor is open.
+
+The slower Runtime snapshot refresh MUST NOT overwrite the renderer's live activity buffer. Snapshot activity is only a bootstrap/fallback source before the first Activity poll. This avoids alternating between a 200-event live buffer and the smaller snapshot projection, which previously caused real interaction cards to appear and disappear every few seconds.

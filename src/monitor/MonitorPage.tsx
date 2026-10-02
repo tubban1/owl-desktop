@@ -23,6 +23,7 @@ import type {
 } from "../types";
 import { buildMonitorModel } from "./monitorModel";
 import { buildMcpInteractionFeed } from "./interactionModel";
+import { LiveOperationsGraph } from "./LiveOperationsGraph";
 import {
   buildWorkstreamBoard,
   type WorkstreamBoard,
@@ -990,42 +991,6 @@ export function MonitorPage({
   activity: ActivityEntry[];
   onRefresh(): Promise<void>;
 }) {
-  const [tab, setTab] = useState<MonitorTab>("live");
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [taskDetail, setTaskDetail] = useState<Record<string, unknown> | null>(null);
-  const [taskDetailError, setTaskDetailError] = useState<string | null>(null);
-  const [taskDetailLoading, setTaskDetailLoading] = useState(false);
-  const [skillSnapshot, setSkillSnapshot] =
-    useState<SkillManagerSnapshot | null>(null);
-  const [skillLoading, setSkillLoading] = useState(false);
-
-  const loadSkills = async () => {
-    setSkillLoading(true);
-    try {
-      setSkillSnapshot(await window.owlDesktop.skillSnapshot());
-    } finally {
-      setSkillLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadSkills();
-    const timer = window.setInterval(() => void loadSkills(), 6000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const system = useMemo(
-    () =>
-      buildMonitorModel({
-        snapshot,
-        agentRequests,
-        skillSnapshot,
-        activity,
-        now: Date.now(),
-      }),
-    [snapshot, agentRequests, skillSnapshot, activity],
-  );
-
   const workstreamBoard = useMemo(
     () =>
       buildWorkstreamBoard({
@@ -1033,160 +998,47 @@ export function MonitorPage({
         agentRequests,
         now: Date.now(),
       }),
-    [snapshot, agentRequests],
-  );
-
-  const baseOrchestration = useMemo(
-    () =>
-      buildOrchestrationModel({
-        snapshot,
-        agentRequests,
-        skillSnapshot,
-        activity,
-        system,
-        selectedTaskId,
-        taskDetail: null,
-      }),
-    [snapshot, agentRequests, skillSnapshot, activity, system, selectedTaskId],
-  );
-
-  const focusTaskId = baseOrchestration.focusTaskId;
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!focusTaskId) {
-      setTaskDetail(null);
-      setTaskDetailError(null);
-      return;
-    }
-    setTaskDetailLoading(true);
-    void window.owlDesktop
-      .monitorTaskDetail(focusTaskId, false)
-      .then((detail) => {
-        if (cancelled) return;
-        setTaskDetail(detail);
-        setTaskDetailError(null);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setTaskDetail(null);
-        setTaskDetailError(error instanceof Error ? error.message : String(error));
-      })
-      .finally(() => {
-        if (!cancelled) setTaskDetailLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [focusTaskId, snapshot?.checkedAt]);
-
-  const model = useMemo(
-    () =>
-      buildOrchestrationModel({
-        snapshot,
-        agentRequests,
-        skillSnapshot,
-        activity,
-        system,
-        selectedTaskId,
-        taskDetail,
-      }),
-    [
-      snapshot,
-      agentRequests,
-      skillSnapshot,
-      activity,
-      system,
-      selectedTaskId,
-      taskDetail,
-    ],
+    [snapshot, agentRequests, activity],
   );
 
   return (
     <>
-      <div className="section-header orch-header">
+      <div className="section-header orch-header single-monitor-header">
         <div>
           <div className="orch-live-title">
             <span className="orch-live-dot" />
             <h1>Agent Operations</h1>
           </div>
           <p>
-            Real MCP interactions first · current workstreams second · historical execution stays in Timeline / Graph.
+            One live view of real agent traffic, authorization, durable execution
+            and current work.
           </p>
         </div>
         <div className="orch-header-actions">
-          {tab !== "live" && (
-            <select
-              aria-label="Selected durable task"
-              value={selectedTaskId ?? model.focusTaskId ?? ""}
-              onChange={(event) => setSelectedTaskId(event.target.value || null)}
-            >
-              {model.taskChoices.map((task) => (
-                <option value={task.id} key={task.id}>
-                  {task.label} · {task.status.replaceAll("_", " ")}
-                </option>
-              ))}
-            </select>
-          )}
           <button
             className="secondary"
-            onClick={async () => {
-              await Promise.all([onRefresh(), loadSkills()]);
-            }}
+            onClick={() => void onRefresh()}
           >
-            <RefreshCw size={15} className={skillLoading || taskDetailLoading ? "spin" : ""} />
+            <RefreshCw size={15} />
             Refresh
           </button>
         </div>
       </div>
 
-      <OperationsAssurance snapshot={snapshot} board={workstreamBoard} />
+      <LiveOperationsGraph
+        snapshot={snapshot}
+        activity={activity}
+        board={workstreamBoard}
+      />
 
-      <nav className="orch-tabs" aria-label="Monitor view">
-        {(["live", "timeline", "graph", "system"] as MonitorTab[]).map((item) => (
-          <button
-            type="button"
-            key={item}
-            className={tab === item ? "active" : ""}
-            onClick={() => setTab(item)}
-          >
-            {item === "live"
-              ? "Live"
-              : item === "timeline"
-                ? "Timeline"
-                : item === "graph"
-                  ? "Graph"
-                  : "System"}
-          </button>
-        ))}
-      </nav>
-
-      {taskDetailError && (
-        <div className="callout warning orch-detail-warning">
-          <AlertTriangle size={16} />
-          <div>
-            <strong>Task detail unavailable</strong>
-            <p>{taskDetailError}</p>
-          </div>
-        </div>
-      )}
-
-      {tab === "live" && (
-        <>
-          <LiveInteractionFeed activity={activity} />
-          <WorkstreamsView board={workstreamBoard} model={model} />
-        </>
-      )}
-      {tab === "timeline" && <TimelineView model={model} />}
-      {tab === "graph" && <GraphView model={model} />}
-      {tab === "system" && <SystemView model={model} />}
-
-      <div className="contract-note orch-contract-note">
+      <div className="contract-note orch-contract-note single-monitor-note">
         <Activity size={17} />
         <div>
-          <strong>One execution truth, multiple isolated workstreams.</strong>
+          <strong>Live means current.</strong>
           <p>
-            Live groups public Runtime facts by stable owner/session identity so concurrent ChatGPT and future Worker work cannot collapse into one task stream. Timeline, Graph and System remain deeper readings of the same Runtime-owned state; Desktop does not scrape chat transcripts or create a second execution authority.
+            Historical Runtime Tasks, old AgentRequests and diagnostic projections
+            no longer occupy this screen. This view follows actual MCP traffic and
+            current durable work only.
           </p>
         </div>
       </div>
