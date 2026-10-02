@@ -134,10 +134,42 @@ describe("MCP workstream isolation", () => {
       arguments: { workstream_id: a },
     });
 
+    const blocked = await client.callTool({
+      name: "runtime_info",
+      arguments: { workstream_id: a },
+    });
+    expect(blocked.isError).toBe(true);
+    expect(jsonText(blocked)).toMatchObject({
+      code: "PROGRESS_UPDATE_REQUIRED",
+      progressBoundary: {
+        workstreamId: a,
+        toolStepsSinceProgress: 3,
+        recommendedUpdateIntervalMs: 15000,
+        recommendedMaxToolStepsWithoutUpdate: 3,
+      },
+    });
+
+    const progress = jsonText(await client.callTool({
+      name: "workstream_progress",
+      arguments: {
+        workstream_id: a,
+        completed: ["Three Runtime checks"],
+        current: "Reporting progress before more tool work",
+        next_actions: ["Continue validation"],
+      },
+    }));
+    expect(progress.userVisibleProgress).toContain("Now: Reporting progress");
+
+    await client.callTool({
+      name: "runtime_info",
+      arguments: { workstream_id: a },
+    });
+
     const infoCalls = runtime.observed.filter((item) => item.method === "info");
     expect(infoCalls.map((item) => item.sessionId)).toEqual([
       a,
       b,
+      a,
       a,
       a,
       a,
@@ -150,13 +182,13 @@ describe("MCP workstream isolation", () => {
       clientLabel: "Chat A",
       workstream: {
         goal: "Build Monitor",
-        toolStepsSinceProgress: 3,
-        totalToolSteps: 4,
+        toolStepsSinceProgress: 1,
+        totalToolSteps: 5,
       },
     });
     expect(ownerA.workstream.progressEvents.at(-1)).toMatchObject({
-      current: "Running tests",
-      nextActions: ["Commit"],
+      current: "Reporting progress before more tool work",
+      nextActions: ["Continue validation"],
     });
     expect(ownerB).toMatchObject({
       clientKind: "worker",

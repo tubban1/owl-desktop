@@ -21,6 +21,10 @@ function fail(error) {
       text: JSON.stringify({
         error: error instanceof Error ? error.message : String(error),
         ...(error?.code ? { code: error.code } : {}),
+        ...(error?.causeCode ? { causeCode: error.causeCode } : {}),
+        ...(error?.progressBoundary
+          ? { progressBoundary: error.progressBoundary }
+          : {}),
       }, null, 2),
     }],
   };
@@ -342,6 +346,47 @@ const WORKSTREAM_META_TOOLS = new Set([
   "planner_checkpoint_complete",
 ]);
 
+const WORKSTREAM_PROGRESS_MAX_STEPS = 3;
+const WORKSTREAM_PROGRESS_MAX_SILENCE_MS = 15_000;
+
+function requireProgressBoundary(context, toolName) {
+  if (WORKSTREAM_META_TOOLS.has(toolName)) return;
+  if (!context.runtimeSessionId?.startsWith?.("owl-workstream:")) return;
+  const owner = context.plannerContinuation?.get?.(context.runtimeSessionId);
+  const workstream = owner?.workstream;
+  if (!workstream || workstream.status === "completed") return;
+
+  const steps = Number(workstream.toolStepsSinceProgress ?? 0);
+  const lastProgressMs = Date.parse(
+    workstream.lastProgressAt ??
+      workstream.updatedAt ??
+      workstream.createdAt ??
+      "",
+  );
+  const silenceMs = Number.isFinite(lastProgressMs)
+    ? Math.max(0, Date.now() - lastProgressMs)
+    : 0;
+  if (
+    steps < WORKSTREAM_PROGRESS_MAX_STEPS &&
+    silenceMs < WORKSTREAM_PROGRESS_MAX_SILENCE_MS
+  ) {
+    return;
+  }
+
+  const error = new Error(
+    "Progress update required before more OWL tool work. Send the user a concise visible update with what finished, what is happening now, and what comes next; then call workstream_progress with the same summary before continuing.",
+  );
+  error.code = "PROGRESS_UPDATE_REQUIRED";
+  error.progressBoundary = {
+    workstreamId: context.runtimeSessionId,
+    toolStepsSinceProgress: steps,
+    silenceMs,
+    recommendedUpdateIntervalMs: WORKSTREAM_PROGRESS_MAX_SILENCE_MS,
+    recommendedMaxToolStepsWithoutUpdate: WORKSTREAM_PROGRESS_MAX_STEPS,
+  };
+  throw error;
+}
+
 function bindRequestedWorkstream(context, workstreamId) {
   if (!workstreamId) return;
   const owner = context.plannerContinuation?.get?.(workstreamId);
@@ -411,6 +456,7 @@ function tool(server, name, description, schema, annotations, handler) {
         }),
       });
       try {
+        requireProgressBoundary(context, name);
         const value = await handler(args);
         const durationMs = Date.now() - started;
         if (!WORKSTREAM_META_TOOLS.has(name)) {
@@ -451,7 +497,10 @@ function tool(server, name, description, schema, annotations, handler) {
         return ok(value);
       } catch (error) {
         const durationMs = Date.now() - started;
-        if (!WORKSTREAM_META_TOOLS.has(name)) {
+        if (
+          !WORKSTREAM_META_TOOLS.has(name) &&
+          error?.code !== "PROGRESS_UPDATE_REQUIRED"
+        ) {
           context.plannerContinuation?.recordWorkstreamToolStep?.(
             context.runtimeSessionId,
             {
@@ -2313,6 +2362,15 @@ export function createOwlMcpServer() {
           status: status ?? "active",
         },
       );
+      const visibleProgress = [
+        completed?.length
+          ? "Finished: " + completed.slice(0, 2).join("; ") + "."
+          : null,
+        "Now: " + current + ".",
+        next_actions?.length
+          ? "Next: " + next_actions.slice(0, 2).join("; ") + "."
+          : null,
+      ].filter(Boolean).join(" ");
       return {
         workstreamId: owner.ownerId,
         status: owner.workstream?.status ?? status ?? "active",
@@ -2321,6 +2379,9 @@ export function createOwlMcpServer() {
           owner.workstream?.toolStepsSinceProgress ?? 0,
         current,
         nextActions: next_actions ?? [],
+        userVisibleProgress: visibleProgress,
+        instruction:
+          "Surface userVisibleProgress to the user before continuing substantive OWL tool work.",
       };
     },
   );
