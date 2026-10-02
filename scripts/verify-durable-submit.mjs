@@ -62,8 +62,11 @@ async function connect(label) {
     name: `durable-submit-${label}`,
     version: "0.1.0",
   });
+  // Desktop reconnects use the persistent Desktop owner. Headerless remote
+  // transports intentionally belong to distinct planner sessions.
   const transport = new StreamableHTTPClientTransport(
     new URL(mcp.url),
+    { requestInit: { headers: { "x-owl-client-kind": "desktop" } } },
   );
   await client.connect(transport);
   return { client, transport };
