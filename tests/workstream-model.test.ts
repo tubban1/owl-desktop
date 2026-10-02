@@ -191,9 +191,38 @@ describe("buildWorkstreamBoard", () => {
     expect(worker?.messages.some((message) => message.summary === "Build Desktop")).toBe(false);
   });
 
-  it("surfaces the 15-second / 3-step progress policy", () => {
+  it("surfaces real progress handoffs and the 15-second / 3-step cadence", () => {
+    const input = snapshot();
+    input.mcp.continuation.owners[0].workstream = {
+      schemaVersion: 1,
+      workstreamId: "owl-owner:a",
+      status: "active",
+      goal: "Improve OWL Monitor",
+      label: "Chat A",
+      clientKind: "chatgpt",
+      clientLabel: "Chat A",
+      createdAt: "2026-10-02T00:00:00.000Z",
+      updatedAt: "2026-10-02T00:00:29.000Z",
+      completedAt: null,
+      lastProgressAt: "2026-10-02T00:00:29.000Z",
+      toolStepsSinceProgress: 3,
+      totalToolSteps: 8,
+      progressEvents: [
+        {
+          eventId: "progress_a",
+          at: "2026-10-02T00:00:29.000Z",
+          status: "active",
+          completed: ["Identity isolation"],
+          current: "Running tests",
+          nextActions: ["Commit"],
+          summary: "Identity isolation done; tests running.",
+        },
+      ],
+      recentTools: [],
+    };
+
     const board = buildWorkstreamBoard({
-      snapshot: snapshot(),
+      snapshot: input,
       agentRequests: [],
       now: Date.parse("2026-10-02T00:00:31.000Z"),
     });
@@ -202,8 +231,19 @@ describe("buildWorkstreamBoard", () => {
     expect(chat?.progressPolicy).toMatchObject({
       intervalMs: 15000,
       maxToolSteps: 3,
+      toolStepsSinceProgress: 3,
       updateRecommended: true,
     });
+    expect(chat?.messages).toContainEqual(
+      expect.objectContaining({
+        id: "progress_a",
+        from: "Chat A",
+        to: "User",
+        kind: "progress",
+        summary: "Identity isolation done; tests running.",
+      }),
+    );
+    expect(chat?.nextActions).toEqual(["Commit"]);
   });
 
   it("keeps concurrent Cloud/Worker remote commands as independent workstreams", () => {

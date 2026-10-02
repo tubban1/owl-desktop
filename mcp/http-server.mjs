@@ -195,11 +195,33 @@ export async function startOwlMcpHttpServer({
         active.transport.sessionId ??
         `bootstrap:${randomUUID()}`;
 
-      const identity = resolveOwnerIdentity(
+      const baseIdentity = resolveOwnerIdentity(
         req.headers,
         transportSessionId,
         fallbackOwnerId,
       );
+      const hasExplicitOwner =
+        typeof req.headers["x-owl-owner-id"] === "string" ||
+        typeof req.headers["x-computer-mcp-owner-id"] === "string";
+      const boundOwner =
+        !hasExplicitOwner && active.boundWorkstreamId
+          ? plannerContinuation?.get?.(active.boundWorkstreamId)
+          : null;
+      const identity = boundOwner?.workstream
+        ? {
+            runtimeSessionId: boundOwner.ownerId,
+            stable: true,
+            source: "workstream-binding",
+            clientKind:
+              boundOwner.workstream.clientKind ??
+              boundOwner.clientKind ??
+              "chatgpt",
+            clientLabel:
+              boundOwner.workstream.clientLabel ??
+              boundOwner.clientLabel ??
+              null,
+          }
+        : baseIdentity;
       active.runtimeSessionId = identity.runtimeSessionId;
       active.ownerStable = identity.stable;
       active.ownerSource = identity.source;
@@ -261,6 +283,49 @@ export async function startOwlMcpHttpServer({
             agentInbox,
             remoteDeviceControl,
             plannerContinuation,
+            bindWorkstream: (workstreamId, metadata = {}) => {
+              const workstream = plannerContinuation?.get?.(workstreamId);
+              if (!workstream?.workstream) {
+                const error = new Error("Unknown OWL workstream.");
+                error.code = "WORKSTREAM_NOT_FOUND";
+                throw error;
+              }
+              active.boundWorkstreamId = workstreamId;
+              active.runtimeSessionId = workstreamId;
+              active.ownerStable = true;
+              active.ownerSource = "workstream-binding";
+              active.clientKind =
+                metadata.clientKind ??
+                workstream.workstream.clientKind ??
+                workstream.clientKind ??
+                "chatgpt";
+              active.clientLabel =
+                metadata.clientLabel ??
+                workstream.workstream.clientLabel ??
+                workstream.clientLabel ??
+                null;
+              plannerContinuation?.noteTransportActivity?.(
+                workstreamId,
+                transportSessionId,
+                undefined,
+                {
+                  clientKind: active.clientKind,
+                  clientLabel: active.clientLabel,
+                  ownerSource: "workstream-binding",
+                },
+              );
+            },
+            unbindWorkstream: (workstreamId) => {
+              if (
+                workstreamId &&
+                active.boundWorkstreamId &&
+                active.boundWorkstreamId !== workstreamId
+              ) {
+                return false;
+              }
+              active.boundWorkstreamId = null;
+              return true;
+            },
             onEvent,
           },
           () => active.transport.handleRequest(req, res, req.body),
@@ -370,6 +435,7 @@ export async function startOwlMcpHttpServer({
         ownerSource: session.ownerSource ?? "transport-session",
         clientKind: session.clientKind ?? null,
         clientLabel: session.clientLabel ?? null,
+        workstreamId: session.boundWorkstreamId ?? null,
         createdAt: session.createdAt,
         lastSeenAt: session.lastSeenAt,
         activeRequestCount: Number(session.activeRequestCount ?? 0),

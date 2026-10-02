@@ -148,3 +148,107 @@ Default Monitor Live view is intentionally compact:
 Detailed execution facts remain available under the collapsed detailed section and the Timeline / Graph / System tabs.
 
 This keeps normal monitoring readable without discarding Runtime evidence, verification or diagnostic detail.
+
+
+## Workstream protocol when upstream conversation identity is unavailable
+
+Current ChatGPT MCP traffic does not reliably provide OWL with a stable ChatGPT conversation identifier. OWL therefore MUST NOT assume the Desktop fallback owner is equivalent to one chat conversation.
+
+For meaningful multi-step work the planner opens an explicit workstream:
+
+```text
+workstream_open
+  goal
+  label?
+  client_kind?
+  resume_workstream_id?
+```
+
+OWL returns a random durable `owl-workstream:<uuid>`.
+
+Every OWL tool accepts an optional `workstream_id`. After opening a workstream, the planner should include that ID on every subsequent OWL call for the logical task.
+
+This gives two isolation paths:
+
+1. preferred: explicit `workstream_id` on each tool call;
+2. compatibility: the current MCP transport remembers the last bound workstream.
+
+The explicit ID is the authority when one MCP transport is reused across multiple logical conversations.
+
+Reconnect flow:
+
+```text
+Chat/Worker reconnects
+→ workstream_open(resume_workstream_id=<known id>)
+→ OWL validates the active workstream
+→ transport rebinds
+→ existing Runtime ownership continues
+```
+
+Completed workstreams cannot be resumed.
+
+## Progress protocol
+
+The planner mirrors concise user-visible progress into:
+
+```text
+workstream_progress
+  completed[]
+  current
+  next_actions[]
+  summary?
+  status?
+```
+
+This is semantic coordination data, not a copy of the assistant message.
+
+Each non-meta OWL tool completion increments the active workstream's
+`toolStepsSinceProgress`. Calling `workstream_progress` resets that counter.
+
+Monitor marks a progress update due when active work satisfies either:
+
+- elapsed time since `lastProgressAt` >= 15 seconds;
+- `toolStepsSinceProgress` >= 3.
+
+Only the following bounded operational metadata is stored for recent tool calls:
+
+- tool name
+- completion timestamp
+- duration
+- success/error outcome
+
+Tool arguments, command text, file contents, browser content, prompts and full assistant/user messages are not copied into the workstream journal.
+
+## Workstream completion
+
+`workstream_complete` marks the logical workstream terminal and clears the transport's compatibility binding. It does not delete Runtime Tasks, verification evidence, process history, or Cloud audit records.
+
+## Product guarantees strip
+
+Monitor exposes three real-time guarantees above the workstream list:
+
+### PERSISTENT
+
+Derived from Runtime availability plus recoverable workstream/checkpoint state.
+
+It answers:
+
+> Will the work survive the chat/transport disappearing?
+
+### OBSERVABLE
+
+Derived from Runtime event health, source/workstream count, current executor and semantic handoffs.
+
+It answers:
+
+> Can I tell who is doing what, what changed, and what happens next?
+
+### AUTHORIZED
+
+Derived from Runtime access mode/state and signed lease verification.
+
+It answers:
+
+> Is this agent currently allowed to enter the local computer data plane?
+
+A green AUTHORIZED state requires enforced Runtime access with a verified Cloud-signed lease. A connected MCP/Tunnel without valid Runtime authorization remains visibly LOCKED.

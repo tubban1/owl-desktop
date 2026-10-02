@@ -68,6 +68,7 @@ function compactOwner(owner) {
             Date.parse(b.disconnectedAt) - Date.parse(a.disconnectedAt),
         )[0]?.disconnectedAt ?? null,
     checkpoint: owner.checkpoint ?? null,
+    workstream: owner.workstream ?? null,
     updatedAt: owner.updatedAt ?? null,
   };
 }
@@ -138,6 +139,210 @@ export class PlannerContinuationStore {
       updatedAt: now,
       completedAt: now,
       nextActions: [],
+    };
+    owner.updatedAt = now;
+    this.write(state);
+    return compactOwner(owner);
+  }
+
+  openWorkstream(input, now = new Date().toISOString()) {
+    const ownerId = `owl-workstream:${randomUUID()}`;
+    const state = this.read();
+    const owner = ownerRecord(state, ownerId);
+    const clientKind = input.clientKind ?? "chatgpt";
+    const clientLabel = input.clientLabel ?? null;
+    owner.clientKind = clientKind;
+    owner.clientLabel = clientLabel;
+    owner.ownerSource = "workstream";
+    owner.workstream = {
+      schemaVersion: 1,
+      workstreamId: ownerId,
+      status: input.status ?? "active",
+      goal: input.goal,
+      label: input.label ?? null,
+      clientKind,
+      clientLabel,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+      lastProgressAt: now,
+      toolStepsSinceProgress: 0,
+      totalToolSteps: 0,
+      progressEvents: [],
+      recentTools: [],
+    };
+    owner.checkpoint = {
+      schemaVersion: 1,
+      revision: 1,
+      status: input.status ?? "active",
+      goal: input.goal,
+      phase: input.phase ?? null,
+      summary: input.summary ?? null,
+      completed: [],
+      nextActions: Array.isArray(input.nextActions) ? [...input.nextActions] : [],
+      workspace: input.workspace ?? null,
+      orchestrationId: null,
+      taskIds: [],
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+    };
+    owner.updatedAt = now;
+    this.write(state);
+    return compactOwner(owner);
+  }
+
+  resumeWorkstream(ownerId, input = {}, now = new Date().toISOString()) {
+    const state = this.read();
+    const owner = state.owners[ownerId];
+    if (!owner?.workstream) {
+      throw new Error("Unknown OWL workstream.");
+    }
+    if (owner.workstream.status === "completed") {
+      throw new Error("Completed OWL workstreams cannot be resumed.");
+    }
+    owner.clientKind = input.clientKind ?? owner.clientKind ?? "chatgpt";
+    owner.clientLabel = input.clientLabel ?? owner.clientLabel ?? null;
+    owner.ownerSource = "workstream";
+    owner.workstream = {
+      ...owner.workstream,
+      clientKind: owner.clientKind,
+      clientLabel: owner.clientLabel,
+      ...(input.label ? { label: input.label } : {}),
+      updatedAt: now,
+    };
+    owner.updatedAt = now;
+    this.write(state);
+    return compactOwner(owner);
+  }
+
+  progressWorkstream(ownerId, input, now = new Date().toISOString()) {
+    const state = this.read();
+    const owner = state.owners[ownerId];
+    if (!owner?.workstream) {
+      throw new Error("WORKSTREAM_NOT_OPEN: call workstream_open first.");
+    }
+    if (owner.workstream.status === "completed") {
+      throw new Error("WORKSTREAM_COMPLETED: completed work cannot report progress.");
+    }
+    const status = input.status ?? "active";
+    const completed = Array.isArray(input.completed) ? [...input.completed] : [];
+    const nextActions = Array.isArray(input.nextActions) ? [...input.nextActions] : [];
+    const event = {
+      eventId: `progress:${randomUUID()}`,
+      at: now,
+      status,
+      completed,
+      current: input.current ?? null,
+      nextActions,
+      summary: input.summary ?? null,
+    };
+    const events = [
+      ...(Array.isArray(owner.workstream.progressEvents)
+        ? owner.workstream.progressEvents
+        : []),
+      event,
+    ].slice(-24);
+    owner.workstream = {
+      ...owner.workstream,
+      status,
+      updatedAt: now,
+      lastProgressAt: now,
+      toolStepsSinceProgress: 0,
+      progressEvents: events,
+    };
+    const previous = owner.checkpoint;
+    owner.checkpoint = {
+      schemaVersion: 1,
+      revision: Number(previous?.revision ?? 0) + 1,
+      status,
+      goal: previous?.goal ?? owner.workstream.goal,
+      phase: input.current ?? previous?.phase ?? null,
+      summary: input.summary ?? previous?.summary ?? null,
+      completed:
+        completed.length > 0 ? completed : Array.isArray(previous?.completed) ? previous.completed : [],
+      nextActions,
+      workspace: previous?.workspace ?? null,
+      orchestrationId: previous?.orchestrationId ?? null,
+      taskIds: Array.isArray(previous?.taskIds) ? previous.taskIds : [],
+      createdAt: previous?.createdAt ?? owner.workstream.createdAt ?? now,
+      updatedAt: now,
+      completedAt: null,
+    };
+    owner.updatedAt = now;
+    this.write(state);
+    return compactOwner(owner);
+  }
+
+  recordWorkstreamToolStep(
+    ownerId,
+    input,
+    now = new Date().toISOString(),
+  ) {
+    const state = this.read();
+    const owner = state.owners[ownerId];
+    if (!owner?.workstream || owner.workstream.status === "completed") {
+      return null;
+    }
+    const recentTools = [
+      ...(Array.isArray(owner.workstream.recentTools)
+        ? owner.workstream.recentTools
+        : []),
+      {
+        at: now,
+        tool: String(input.tool ?? "unknown").slice(0, 120),
+        outcome: input.outcome === "error" ? "error" : "success",
+        durationMs: Math.max(0, Number(input.durationMs ?? 0)),
+      },
+    ].slice(-12);
+    owner.workstream = {
+      ...owner.workstream,
+      updatedAt: now,
+      toolStepsSinceProgress:
+        Number(owner.workstream.toolStepsSinceProgress ?? 0) + 1,
+      totalToolSteps: Number(owner.workstream.totalToolSteps ?? 0) + 1,
+      recentTools,
+    };
+    owner.updatedAt = now;
+    this.write(state);
+    return compactOwner(owner);
+  }
+
+  completeWorkstream(ownerId, input = {}, now = new Date().toISOString()) {
+    const state = this.read();
+    const owner = state.owners[ownerId];
+    if (!owner?.workstream) {
+      throw new Error("WORKSTREAM_NOT_OPEN: call workstream_open first.");
+    }
+    owner.workstream = {
+      ...owner.workstream,
+      status: "completed",
+      updatedAt: now,
+      completedAt: now,
+      lastProgressAt: now,
+      toolStepsSinceProgress: 0,
+    };
+    const previous = owner.checkpoint;
+    owner.checkpoint = {
+      ...(previous ?? {
+        schemaVersion: 1,
+        revision: 0,
+        goal: owner.workstream.goal,
+        phase: null,
+        summary: null,
+        completed: [],
+        nextActions: [],
+        workspace: null,
+        orchestrationId: null,
+        taskIds: [],
+        createdAt: owner.workstream.createdAt ?? now,
+      }),
+      revision: Number(previous?.revision ?? 0) + 1,
+      status: "completed",
+      ...(input.summary ? { summary: input.summary } : {}),
+      nextActions: [],
+      updatedAt: now,
+      completedAt: now,
     };
     owner.updatedAt = now;
     this.write(state);

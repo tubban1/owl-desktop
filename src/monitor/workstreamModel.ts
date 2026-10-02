@@ -102,7 +102,7 @@ export type WorkstreamMessage = {
   at: string | null;
   from: string;
   to: string;
-  kind: "intent" | "dispatch" | "status" | "request" | "remote";
+  kind: "intent" | "dispatch" | "status" | "progress" | "request" | "remote";
   summary: string;
   tone: "neutral" | "active" | "waiting" | "attention" | "healthy";
 };
@@ -138,6 +138,8 @@ export type MonitorWorkstream = {
     intervalMs: number;
     maxToolSteps: number;
     checkpointAgeMs: number | null;
+    lastProgressAt: string | null;
+    toolStepsSinceProgress: number;
     updateRecommended: boolean;
   };
 };
@@ -328,7 +330,11 @@ export function buildWorkstreamBoard({
         .filter((command) => cloudCommandForTasks(command, taskIds))
         .sort((a, b) => timestamp(a.receivedAt) - timestamp(b.receivedAt));
 
-      const label = clientLabel(owner);
+      const workstream = owner.workstream ?? null;
+      const label =
+        workstream?.clientLabel?.trim() ||
+        workstream?.label?.trim() ||
+        clientLabel(owner);
       const checkpoint = owner.checkpoint ?? null;
       const messages: WorkstreamMessage[] = [];
 
@@ -341,6 +347,35 @@ export function buildWorkstreamBoard({
           kind: "intent",
           summary: checkpoint.goal,
           tone: "neutral",
+        });
+      }
+
+      for (const event of workstream?.progressEvents ?? []) {
+        const completed =
+          event.completed.length > 0
+            ? `Completed: ${event.completed.join(" · ")}`
+            : null;
+        const current = event.current ? `Now: ${event.current}` : null;
+        const next =
+          event.nextActions.length > 0
+            ? `Next: ${event.nextActions.join(" · ")}`
+            : null;
+        messages.push({
+          id: event.eventId,
+          at: event.at,
+          from: label,
+          to: "User",
+          kind: "progress",
+          summary:
+            (event.summary ??
+              [completed, current, next].filter(Boolean).join(" · ")) ||
+            "Progress updated",
+          tone:
+            event.status === "waiting_user"
+              ? "attention"
+              : event.status === "active"
+                ? "active"
+                : "waiting",
         });
       }
 
@@ -430,7 +465,8 @@ export function buildWorkstreamBoard({
         ownerTasks.find((task) => ACTIVE_TASK_STATES.has(task.status)) ??
         ownerTasks[0] ??
         null;
-      const checkpointStatus = checkpoint?.status ?? null;
+      const checkpointStatus =
+        workstream?.status ?? checkpoint?.status ?? null;
       const connected = owner.plannerConnected === true;
       const status = streamStatus(connected, checkpointStatus, ownerTasks);
       const checkpointTime = checkpoint?.updatedAt
@@ -438,9 +474,23 @@ export function buildWorkstreamBoard({
         : 0;
       const checkpointAgeMs =
         checkpointTime > 0 ? Math.max(0, now - checkpointTime) : null;
+      const lastProgressAt =
+        workstream?.lastProgressAt ??
+        workstream?.createdAt ??
+        checkpoint?.updatedAt ??
+        null;
+      const lastProgressTime = timestamp(lastProgressAt);
+      const progressAgeMs =
+        lastProgressTime > 0 ? Math.max(0, now - lastProgressTime) : null;
+      const toolStepsSinceProgress = Number(
+        workstream?.toolStepsSinceProgress ?? 0,
+      );
 
       let currentExecutor = label;
-      let currentAction = checkpoint?.phase ?? "Waiting";
+      let currentAction =
+        workstream?.progressEvents?.at(-1)?.current ??
+        checkpoint?.phase ??
+        "Waiting";
       if (activeTask && ACTIVE_TASK_STATES.has(activeTask.status)) {
         currentExecutor = "OWL Runtime";
         currentAction = activeTask.current ?? activeTask.label;
@@ -463,11 +513,18 @@ export function buildWorkstreamBoard({
         transportCount: owner.connectedTransportCount ?? 0,
         status,
         goal:
+          workstream?.goal ??
           checkpoint?.goal ??
           activeTask?.label ??
           "Connected session — no planner checkpoint yet",
-        phase: checkpoint?.phase ?? null,
-        summary: checkpoint?.summary ?? null,
+        phase:
+          workstream?.progressEvents?.at(-1)?.current ??
+          checkpoint?.phase ??
+          null,
+        summary:
+          workstream?.progressEvents?.at(-1)?.summary ??
+          checkpoint?.summary ??
+          null,
         updatedAt:
           checkpoint?.updatedAt ??
           activeTask?.updatedAt ??
@@ -479,15 +536,20 @@ export function buildWorkstreamBoard({
         currentAction,
         tasks: ownerTasks,
         messages: messages.slice(0, 6),
-        nextActions: checkpoint?.nextActions?.slice(0, 6) ?? [],
+        nextActions:
+          workstream?.progressEvents?.at(-1)?.nextActions?.slice(0, 6) ??
+          checkpoint?.nextActions?.slice(0, 6) ??
+          [],
         progressPolicy: {
           intervalMs: progressIntervalMs,
           maxToolSteps,
           checkpointAgeMs,
+          lastProgressAt,
+          toolStepsSinceProgress,
           updateRecommended:
             status === "working" &&
-            checkpointAgeMs !== null &&
-            checkpointAgeMs >= progressIntervalMs,
+            ((progressAgeMs !== null && progressAgeMs >= progressIntervalMs) ||
+              toolStepsSinceProgress >= maxToolSteps),
         },
       };
     })
@@ -558,6 +620,8 @@ export function buildWorkstreamBoard({
         intervalMs: progressIntervalMs,
         maxToolSteps,
         checkpointAgeMs: null,
+        lastProgressAt: null,
+        toolStepsSinceProgress: 0,
         updateRecommended: false,
       },
     });
@@ -627,6 +691,8 @@ export function buildWorkstreamBoard({
         intervalMs: progressIntervalMs,
         maxToolSteps,
         checkpointAgeMs: null,
+        lastProgressAt: null,
+        toolStepsSinceProgress: 0,
         updateRecommended: false,
       },
     });

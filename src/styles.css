@@ -3007,3 +3007,93 @@ input:focus { border-color: #41634b; box-shadow: 0 0 0 3px rgba(78,128,92,.08); 
     grid-template-columns: 1fr;
   }
 }
+
+/* Monitor assurance strip — Persistent / Observable / Authorized */
+.operations-assurance {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.assurance-card {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.assurance-card.healthy { border-color: rgba(105, 166, 123, 0.34); }
+.assurance-card.active { border-color: rgba(107, 150, 175, 0.38); }
+.assurance-card.waiting { border-color: rgba(192, 154, 87, 0.36); }
+.assurance-card.attention { border-color: rgba(185, 110, 97, 0.42); }
+
+.assurance-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.assurance-head > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.assurance-head span,
+.assurance-card small {
+  color: var(--muted);
+}
+
+.assurance-head > div > span {
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .13em;
+}
+
+.assurance-head strong {
+  font-size: 11px;
+  letter-spacing: .08em;
+}
+
+.assurance-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.045);
+  flex: 0 0 auto;
+}
+
+.assurance-card.healthy .assurance-icon,
+.assurance-card.healthy .assurance-head strong { color: #79b88b; }
+.assurance-card.active .assurance-icon,
+.assurance-card.active .assurance-head strong { color: #82afc8; }
+.assurance-card.waiting .assurance-icon,
+.assurance-card.waiting .assurance-head strong { color: #c8a464; }
+.assurance-card.attention .assurance-icon,
+.assurance-card.attention .assurance-head strong { color: #ca7c70; }
+
+.assurance-card > b {
+  font-size: 13px;
+  font-weight: 680;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.assurance-card > small {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+  .operations-assurance {
+    grid-template-columns: 1fr;
+  }
+}

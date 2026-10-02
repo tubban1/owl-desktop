@@ -392,6 +392,50 @@ export type PlannerCheckpoint = {
   completedAt: string | null;
 };
 
+export type WorkstreamProgressEvent = {
+  eventId: string;
+  at: string;
+  status:
+    | "active"
+    | "waiting_runtime"
+    | "waiting_user"
+    | "waiting_external";
+  completed: string[];
+  current: string | null;
+  nextActions: string[];
+  summary: string | null;
+};
+
+export type WorkstreamToolEvent = {
+  at: string;
+  tool: string;
+  outcome: "success" | "error";
+  durationMs: number;
+};
+
+export type PlannerWorkstream = {
+  schemaVersion: 1;
+  workstreamId: string;
+  status:
+    | "active"
+    | "waiting_runtime"
+    | "waiting_user"
+    | "waiting_external"
+    | "completed";
+  goal: string;
+  label: string | null;
+  clientKind: "chatgpt" | "worker" | "cloud" | "desktop" | "agent" | "mcp";
+  clientLabel: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  lastProgressAt: string | null;
+  toolStepsSinceProgress: number;
+  totalToolSteps: number;
+  progressEvents: WorkstreamProgressEvent[];
+  recentTools: WorkstreamToolEvent[];
+};
+
 export type PlannerContinuationOwner = {
   ownerId: string;
   clientKind: "chatgpt" | "worker" | "cloud" | "desktop" | "agent" | "mcp" | null;
@@ -402,6 +446,7 @@ export type PlannerContinuationOwner = {
   lastTransportSeenAt: string | null;
   lastDisconnectedAt: string | null;
   checkpoint: PlannerCheckpoint | null;
+  workstream?: PlannerWorkstream | null;
   updatedAt: string | null;
 };
 
@@ -442,6 +487,7 @@ export type RuntimeSnapshot = {
       ownerSource: string;
       clientKind?: "chatgpt" | "worker" | "cloud" | "desktop" | "agent" | "mcp" | null;
       clientLabel?: string | null;
+      workstreamId?: string | null;
       createdAt: string;
       lastSeenAt: string;
     }>;

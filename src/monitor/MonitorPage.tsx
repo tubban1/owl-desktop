@@ -315,6 +315,101 @@ function LiveView({ model }: { model: OrchestrationModel }) {
   );
 }
 
+function OperationsAssurance({
+  snapshot,
+  board,
+}: {
+  snapshot: RuntimeSnapshot | null;
+  board: WorkstreamBoard;
+}) {
+  const access = snapshot?.runtimeAccess ?? null;
+  const signedLease =
+    access?.mode === "enforced" &&
+    access.state === "READY" &&
+    access.grant?.signatureVerified === true;
+  const locked =
+    access?.state === "LOCKED" || access?.state === "REVOKED";
+  const eventState = snapshot?.runtimeEvents?.status ?? "stopped";
+  const observableHealthy =
+    snapshot?.mode === "live" &&
+    eventState === "healthy";
+  const progressTimes = board.streams
+    .map((stream) => stream.progressPolicy.lastProgressAt)
+    .filter((value): value is string => Boolean(value))
+    .map((value) => Date.parse(value))
+    .filter(Number.isFinite);
+  const latestProgressAt =
+    progressTimes.length > 0 ? new Date(Math.max(...progressTimes)).toISOString() : null;
+  const persistentHealthy = snapshot?.mode === "live";
+  const leaseExpiry = access?.grant?.expiresAt ?? null;
+
+  const cards = [
+    {
+      key: "persistent",
+      title: "PERSISTENT",
+      status: persistentHealthy ? "HEALTHY" : "ATTENTION",
+      tone: persistentHealthy ? "healthy" : "attention",
+      icon: <Clock3 size={18} />,
+      primary:
+        board.activeCount > 0
+          ? `${board.activeCount} recoverable workstream${board.activeCount === 1 ? "" : "s"}`
+          : "Ready for durable work",
+      detail: latestProgressAt
+        ? `Last progress ${formatClock(latestProgressAt)} · chat may disconnect`
+        : "Runtime-owned work survives chat disconnects",
+    },
+    {
+      key: "observable",
+      title: "OBSERVABLE",
+      status: observableHealthy ? "LIVE" : eventState.replaceAll("_", " ").toUpperCase(),
+      tone: observableHealthy ? "active" : "attention",
+      icon: <Activity size={18} />,
+      primary: `${board.connectedSources} source${board.connectedSources === 1 ? "" : "s"} · ${board.workingCount} executing`,
+      detail:
+        eventState === "healthy"
+          ? "Runtime events current · semantic handoffs visible"
+          : "Runtime event stream needs attention",
+    },
+    {
+      key: "authorized",
+      title: "AUTHORIZED",
+      status: signedLease ? "VERIFIED" : locked ? "LOCKED" : "CHECK",
+      tone: signedLease ? "healthy" : locked ? "attention" : "waiting",
+      icon: <ShieldCheck size={18} />,
+      primary: signedLease
+        ? "Cloud-signed Runtime access"
+        : locked
+          ? "Local computer access denied"
+          : access?.mode === "compat"
+            ? "Compatibility access"
+            : "Authorization state pending",
+      detail: signedLease
+        ? `Signature verified · lease until ${formatClock(leaseExpiry)}`
+        : locked
+          ? `Reason: ${access?.reasonCode ?? "AUTHORIZATION_REQUIRED"}`
+          : `Mode: ${access?.mode ?? "unknown"}`,
+    },
+  ];
+
+  return (
+    <section className="operations-assurance" aria-label="OWL LAB guarantees">
+      {cards.map((card) => (
+        <article className={"assurance-card " + card.tone} key={card.key}>
+          <div className="assurance-head">
+            <span className="assurance-icon">{card.icon}</span>
+            <div>
+              <span>{card.title}</span>
+              <strong>{card.status}</strong>
+            </div>
+          </div>
+          <b>{card.primary}</b>
+          <small>{card.detail}</small>
+        </article>
+      ))}
+    </section>
+  );
+}
+
 function WorkstreamsView({
   board,
   model,
@@ -391,8 +486,8 @@ function WorkstreamsView({
                   <span>Progress cadence</span>
                   <strong className={stream.progressPolicy.updateRecommended ? "workstream-due" : ""}>
                     {stream.progressPolicy.updateRecommended
-                      ? "Update due"
-                      : String(Math.round(stream.progressPolicy.intervalMs / 1000)) + "s / " + String(stream.progressPolicy.maxToolSteps) + " steps"}
+                      ? `Update due · ${stream.progressPolicy.toolStepsSinceProgress} steps since report`
+                      : `${stream.progressPolicy.toolStepsSinceProgress} / ${stream.progressPolicy.maxToolSteps} steps · ${Math.round(stream.progressPolicy.intervalMs / 1000)}s policy`}
                   </strong>
                 </div>
               </div>
@@ -926,6 +1021,8 @@ export function MonitorPage({
           </button>
         </div>
       </div>
+
+      <OperationsAssurance snapshot={snapshot} board={workstreamBoard} />
 
       <nav className="orch-tabs" aria-label="Monitor view">
         {(["live", "timeline", "graph", "system"] as MonitorTab[]).map((item) => (
