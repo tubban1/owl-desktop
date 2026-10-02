@@ -146,6 +146,10 @@ describe("MCP workstream isolation", () => {
         toolStepsSinceProgress: 3,
         recommendedUpdateIntervalMs: 15000,
         recommendedMaxToolStepsWithoutUpdate: 3,
+        durableExecution: {
+          recommended: true,
+          preferredTool: "task_submit",
+        },
       },
     });
 
@@ -159,6 +163,10 @@ describe("MCP workstream isolation", () => {
       },
     }));
     expect(progress.userVisibleProgress).toContain("Now: Reporting progress");
+    expect(progress.durableExecution).toMatchObject({
+      recommended: true,
+      preferredTool: "task_submit",
+    });
 
     await client.callTool({
       name: "runtime_info",

@@ -349,6 +349,40 @@ const WORKSTREAM_META_TOOLS = new Set([
 const WORKSTREAM_PROGRESS_MAX_STEPS = 3;
 const WORKSTREAM_PROGRESS_MAX_SILENCE_MS = 15_000;
 
+const VERIFICATION_SPEC_SCHEMA = z.object({
+  id: z.string().min(1).max(160),
+  description: z.string().max(500).optional(),
+  expectations: z.array(z.object({
+    path: z.string().min(1).max(240),
+    operator: z.enum([
+      "exists",
+      "equals",
+      "contains",
+      "matches",
+      "truthy",
+      "falsy",
+      "gt",
+      "gte",
+      "lt",
+      "lte",
+    ]),
+    expected: z.unknown().optional(),
+    description: z.string().max(500).optional(),
+  })).min(1).max(32),
+});
+
+const DURABLE_EXECUTION_RECOMMENDATION = {
+  recommended: true,
+  when:
+    "If the remaining steps are already known, submit them once as a durable Runtime task instead of continuing one MCP call at a time.",
+  preferredTool: "task_submit",
+  benefits: [
+    "survives ChatGPT/Tunnel/MCP disconnects",
+    "reduces interactive round trips",
+    "keeps execution observable by taskId",
+  ],
+};
+
 function requireProgressBoundary(context, toolName) {
   if (WORKSTREAM_META_TOOLS.has(toolName)) return;
   if (!context.runtimeSessionId?.startsWith?.("owl-workstream:")) return;
@@ -383,6 +417,7 @@ function requireProgressBoundary(context, toolName) {
     silenceMs,
     recommendedUpdateIntervalMs: WORKSTREAM_PROGRESS_MAX_SILENCE_MS,
     recommendedMaxToolStepsWithoutUpdate: WORKSTREAM_PROGRESS_MAX_STEPS,
+    durableExecution: DURABLE_EXECUTION_RECOMMENDATION,
   };
   throw error;
 }
@@ -566,7 +601,7 @@ export function createOwlMcpServer() {
         "For long-running or multi-step work, prefer task_submit with a stable submission_id so Runtime execution is accepted durably and the MCP call returns promptly; use task_start only for an already-created Task.",
         "After a reconnect or stream recovery, call orchestration_snapshot before starting replacement work. If it reports active durable work, continue the existing task/workset instead of creating a duplicate. Use task_status for deeper inspection and reuse the exact same submission_id when retrying task_submit.",
         "For multi-step planning or coding work that spans several tool calls, maintain a planner_checkpoint after meaningful milestones and before long-running operations. Store only compact operational context: goal, phase, completed evidence, next actions and workspace refs. Never store secrets, passwords, tokens or full conversation text in the checkpoint. Mark it complete when the goal is finished.",
-        "Progress reporting is part of the interactive contract. During active multi-step work, do not silently issue more than 3 substantive tool steps or leave the user without a concise visible progress update for roughly 15 seconds. Before continuing beyond either threshold, send a short user-visible update stating what finished, what is happening now, and what comes next, then call workstream_progress with the same semantic summary so OWL Monitor can show the handoff without storing the full chat message. Do not spam trivial updates and never invent progress.",
+        "Progress reporting is part of the interactive contract. During active multi-step work, do not silently issue more than 3 substantive tool steps or leave the user without a concise visible progress update for roughly 15 seconds. OWL enforces this boundary with PROGRESS_UPDATE_REQUIRED. Before continuing beyond either threshold, send a short user-visible update stating what finished, what is happening now, and what comes next, then call workstream_progress with the same semantic summary so OWL Monitor can show the handoff without storing the full chat message. At each progress boundary, if the remaining steps are already known, prefer one task_submit with verification over many individual MCP calls. Do not spam trivial updates and never invent progress.",
         "When a durable Task remains active during an interactive ChatGPT turn, use its real progress projection in those user-visible updates before the frontend would otherwise sit silent too long. Never infer completion before canonical Task state is terminal.",
         "For work on another OWL device, call device_list first and choose an explicit device_id. Use remote_task_submit with a stable submission_id; after reconnect or response loss, reuse the exact same submission_id and arguments or call remote_task_status. Never create replacement remote work while the prior submission outcome is uncertain.",
       ].join(" "),
@@ -1896,6 +1931,7 @@ export function createOwlMcpServer() {
         action: z.string().min(1),
         args: z.record(z.unknown()).optional(),
         depends_on: z.array(z.string()).optional(),
+        verify: VERIFICATION_SPEC_SCHEMA.optional(),
       })).min(1).max(50),
       max_concurrency: z.number().int().min(1).max(8).optional(),
       fail_fast: z.boolean().optional(),
@@ -1941,6 +1977,7 @@ export function createOwlMcpServer() {
           action: step.action,
           ...(step.args ? { args: step.args } : {}),
           ...(step.depends_on ? { dependsOn: step.depends_on } : {}),
+          ...(step.verify ? { verify: step.verify } : {}),
         })),
         ...(max_concurrency !== undefined
           ? { maxConcurrency: max_concurrency }
@@ -2155,6 +2192,7 @@ export function createOwlMcpServer() {
         action: z.string().min(1).max(160),
         args: z.record(z.unknown()).optional(),
         depends_on: z.array(z.string().min(1).max(160)).max(64).optional(),
+        verify: VERIFICATION_SPEC_SCHEMA.optional(),
       })).min(1).max(200),
       max_concurrency: z.number().int().min(1).max(8).optional(),
       fail_fast: z.boolean().optional(),
@@ -2198,6 +2236,7 @@ export function createOwlMcpServer() {
           action: step.action,
           ...(step.args ? { args: step.args } : {}),
           ...(step.depends_on ? { dependsOn: step.depends_on } : {}),
+          ...(step.verify ? { verify: step.verify } : {}),
         })),
         ...(max_concurrency !== undefined
           ? { maxConcurrency: max_concurrency }
@@ -2381,7 +2420,8 @@ export function createOwlMcpServer() {
         nextActions: next_actions ?? [],
         userVisibleProgress: visibleProgress,
         instruction:
-          "Surface userVisibleProgress to the user before continuing substantive OWL tool work.",
+          "Surface userVisibleProgress to the user before continuing substantive OWL tool work. If the remaining steps are known in advance, prefer one task_submit over many interactive tool calls.",
+        durableExecution: DURABLE_EXECUTION_RECOMMENDATION,
       };
     },
   );

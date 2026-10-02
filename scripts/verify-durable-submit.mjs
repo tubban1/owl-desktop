@@ -14,6 +14,7 @@ const runtime = http.createServer(async (req, res) => {
   const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   observed.push({
     method: body.method,
+    params: body.params,
     sessionId: req.headers["x-owl-session-id"],
     idempotencyKey: req.headers["x-owl-idempotency-key"],
   });
@@ -78,6 +79,15 @@ async function submit(connection) {
         id: "step-1",
         action: "fs.write",
         args: { path: "/tmp/example", content: "x" },
+        verify: {
+          id: "verify-write",
+          description: "Verify the durable write produced the expected path.",
+          expectations: [{
+            path: "data.path",
+            operator: "equals",
+            expected: "/tmp/example",
+          }],
+        },
       }],
     },
   });
@@ -123,6 +133,18 @@ assert.equal(
 assert.equal(
   startCalls[0].idempotencyKey,
   startCalls[1].idempotencyKey,
+);
+assert.deepEqual(
+  createCalls[0].params.steps[0].verify,
+  {
+    id: "verify-write",
+    description: "Verify the durable write produced the expected path.",
+    expectations: [{
+      path: "data.path",
+      operator: "equals",
+      expected: "/tmp/example",
+    }],
+  },
 );
 
 const sessions = new Set(
