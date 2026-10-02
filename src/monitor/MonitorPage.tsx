@@ -22,6 +22,7 @@ import type {
   SkillManagerSnapshot,
 } from "../types";
 import { buildMonitorModel } from "./monitorModel";
+import { buildMcpInteractionFeed } from "./interactionModel";
 import {
   buildWorkstreamBoard,
   type WorkstreamBoard,
@@ -406,6 +407,121 @@ function OperationsAssurance({
           <small>{card.detail}</small>
         </article>
       ))}
+    </section>
+  );
+}
+
+function LiveInteractionFeed({
+  activity,
+}: {
+  activity: ActivityEntry[];
+}) {
+  const interactions = useMemo(
+    () => buildMcpInteractionFeed(activity, 24),
+    [activity],
+  );
+
+  return (
+    <section className="panel live-interaction-panel">
+      <div className="panel-heading">
+        <div>
+          <span className="eyebrow">REAL MCP INTERACTIONS</span>
+          <h3>ChatGPT / agent ↔ OWL LAB · actual request and response payloads</h3>
+        </div>
+        <span className="neutral-pill">Live · 750 ms · {interactions.length} recent</span>
+      </div>
+
+      <p className="interaction-help">
+        This stream comes directly from the MCP tool wrapper. Payload previews are real and bounded;
+        credential-like fields are redacted automatically.
+      </p>
+
+      <div className="interaction-list">
+        {interactions.map((interaction) => (
+          <article
+            className={"interaction-card " + interaction.status}
+            key={interaction.id}
+          >
+            <div className="interaction-head">
+              <div className="interaction-route">
+                <strong>{interaction.clientLabel}</strong>
+                <ChevronRight size={13} />
+                <strong>OWL LAB</strong>
+                <code>{interaction.tool}</code>
+              </div>
+              <div className="interaction-state">
+                <StatusBadge
+                  status={interaction.status}
+                  tone={
+                    interaction.status === "success"
+                      ? "healthy"
+                      : interaction.status === "error"
+                        ? "attention"
+                        : "active"
+                  }
+                />
+                <time>{formatClock(interaction.completedAt ?? interaction.startedAt)}</time>
+                {interaction.durationMs !== null && (
+                  <span>{formatDuration(interaction.durationMs)}</span>
+                )}
+              </div>
+            </div>
+
+            <div className="interaction-pair">
+              <div className="interaction-direction request">
+                <div className="interaction-direction-head">
+                  <strong>{interaction.clientLabel} → OWL LAB</strong>
+                  <span>REQUEST</span>
+                </div>
+                <pre>{interaction.requestPreview ?? "No request payload captured."}</pre>
+              </div>
+
+              <div className="interaction-direction response">
+                <div className="interaction-direction-head">
+                  <strong>OWL LAB → {interaction.clientLabel}</strong>
+                  <span>{interaction.status === "running" ? "RUNNING" : "RESPONSE"}</span>
+                </div>
+                <pre>
+                  {interaction.status === "running"
+                    ? "Waiting for OWL Runtime / tool completion…"
+                    : interaction.responsePreview ?? "No response payload captured."}
+                </pre>
+              </div>
+            </div>
+
+            <div className="interaction-foot">
+              {interaction.workstreamId && (
+                <span title={interaction.workstreamId}>
+                  workstream {interaction.workstreamId.slice(-10)}
+                </span>
+              )}
+              {interaction.runtimeSessionId && (
+                <span title={interaction.runtimeSessionId}>
+                  runtime {interaction.runtimeSessionId.slice(-10)}
+                </span>
+              )}
+              {interaction.transportSessionId && (
+                <span title={interaction.transportSessionId}>
+                  transport {interaction.transportSessionId.slice(-8)}
+                </span>
+              )}
+              {interaction.errorCode && <span>error {interaction.errorCode}</span>}
+            </div>
+          </article>
+        ))}
+
+        {interactions.length === 0 && (
+          <div className="monitor-clear interaction-empty">
+            <Activity size={20} />
+            <div>
+              <strong>Waiting for the next real MCP interaction</strong>
+              <span>
+                The next ChatGPT/Worker tool call will appear here immediately as request → response.
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
     </section>
   );
 }
@@ -992,24 +1108,26 @@ export function MonitorPage({
         <div>
           <div className="orch-live-title">
             <span className="orch-live-dot" />
-            <h1>Live orchestration</h1>
+            <h1>Agent Operations</h1>
           </div>
           <p>
-            {workstreamBoard.activeCount} active workstream{workstreamBoard.activeCount === 1 ? "" : "s"} · sessions stay separated by stable owner identity.
+            Real MCP interactions first · current workstreams second · historical execution stays in Timeline / Graph.
           </p>
         </div>
         <div className="orch-header-actions">
-          <select
-            aria-label="Selected durable task"
-            value={selectedTaskId ?? model.focusTaskId ?? ""}
-            onChange={(event) => setSelectedTaskId(event.target.value || null)}
-          >
-            {model.taskChoices.map((task) => (
-              <option value={task.id} key={task.id}>
-                {task.label} · {task.status.replaceAll("_", " ")}
-              </option>
-            ))}
-          </select>
+          {tab !== "live" && (
+            <select
+              aria-label="Selected durable task"
+              value={selectedTaskId ?? model.focusTaskId ?? ""}
+              onChange={(event) => setSelectedTaskId(event.target.value || null)}
+            >
+              {model.taskChoices.map((task) => (
+                <option value={task.id} key={task.id}>
+                  {task.label} · {task.status.replaceAll("_", " ")}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             className="secondary"
             onClick={async () => {
@@ -1053,7 +1171,12 @@ export function MonitorPage({
         </div>
       )}
 
-      {tab === "live" && <WorkstreamsView board={workstreamBoard} model={model} />}
+      {tab === "live" && (
+        <>
+          <LiveInteractionFeed activity={activity} />
+          <WorkstreamsView board={workstreamBoard} model={model} />
+        </>
+      )}
       {tab === "timeline" && <TimelineView model={model} />}
       {tab === "graph" && <GraphView model={model} />}
       {tab === "system" && <SystemView model={model} />}

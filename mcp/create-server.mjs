@@ -287,6 +287,51 @@ function compactRecoveryDetail(detail) {
   };
 }
 
+const SENSITIVE_INTERACTION_KEY =
+  /(token|secret|password|authorization|cookie|credential|api[_-]?key|private[_-]?key|refresh[_-]?token|access[_-]?token)/i;
+
+function sanitizeInteractionValue(value, depth = 0) {
+  if (depth > 5) return "[depth limited]";
+  if (value === null || value === undefined) return value ?? null;
+  if (typeof value === "string") {
+    return value.length > 2400 ? value.slice(0, 2400) + "… [truncated]" : value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) {
+    const rows = value.slice(0, 16).map((item) =>
+      sanitizeInteractionValue(item, depth + 1),
+    );
+    if (value.length > 16) rows.push(`… [${value.length - 16} more]`);
+    return rows;
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value).slice(0, 40);
+    const result = {};
+    for (const [key, item] of entries) {
+      result[key] = SENSITIVE_INTERACTION_KEY.test(key)
+        ? "[redacted]"
+        : sanitizeInteractionValue(item, depth + 1);
+    }
+    if (Object.keys(value).length > 40) {
+      result.__truncated__ = `${Object.keys(value).length - 40} more fields`;
+    }
+    return result;
+  }
+  return String(value);
+}
+
+function interactionPreview(value, maxChars = 7000) {
+  let text;
+  try {
+    text = JSON.stringify(sanitizeInteractionValue(value), null, 2);
+  } catch {
+    text = String(value);
+  }
+  return text.length > maxChars
+    ? text.slice(0, maxChars) + "\n… [payload truncated]"
+    : text;
+}
+
 const WORKSTREAM_META_TOOLS = new Set([
   "workstream_open",
   "workstream_progress",
@@ -340,6 +385,31 @@ function tool(server, name, description, schema, annotations, handler) {
         bindRequestedWorkstream(context, workstreamId);
       }
       const started = Date.now();
+      const interactionId = `${context.runtimeRequestId}:${name}`;
+      const activeWorkstreamId =
+        workstreamId ??
+        (context.runtimeSessionId?.startsWith?.("owl-workstream:")
+          ? context.runtimeSessionId
+          : null);
+      const interactionMeta = {
+        eventKind: "mcp_interaction",
+        interactionId,
+        tool: name,
+        transportSessionId: context.transportSessionId,
+        runtimeSessionId: context.runtimeSessionId,
+        workstreamId: activeWorkstreamId,
+        clientKind: context.clientKind ?? null,
+        clientLabel: context.clientLabel ?? null,
+      };
+      context.onEvent?.("info", "MCP interaction request", {
+        ...interactionMeta,
+        phase: "request",
+        status: "running",
+        payload: interactionPreview({
+          ...(workstreamId ? { workstream_id: workstreamId } : {}),
+          ...args,
+        }),
+      });
       try {
         const value = await handler(args);
         const durationMs = Date.now() - started;
@@ -353,6 +423,20 @@ function tool(server, name, description, schema, annotations, handler) {
             },
           );
         }
+        context.onEvent?.("info", "MCP interaction response", {
+          ...interactionMeta,
+          runtimeSessionId: context.runtimeSessionId,
+          workstreamId:
+            context.runtimeSessionId?.startsWith?.("owl-workstream:")
+              ? context.runtimeSessionId
+              : activeWorkstreamId,
+          clientKind: context.clientKind ?? interactionMeta.clientKind,
+          clientLabel: context.clientLabel ?? interactionMeta.clientLabel,
+          phase: "response",
+          status: "success",
+          durationMs,
+          payload: interactionPreview(value),
+        });
         context.onEvent?.("info", `MCP ${name} completed`, {
           tool: name,
           transportSessionId: context.transportSessionId,
@@ -377,6 +461,24 @@ function tool(server, name, description, schema, annotations, handler) {
             },
           );
         }
+        context.onEvent?.("error", "MCP interaction response", {
+          ...interactionMeta,
+          runtimeSessionId: context.runtimeSessionId,
+          workstreamId:
+            context.runtimeSessionId?.startsWith?.("owl-workstream:")
+              ? context.runtimeSessionId
+              : activeWorkstreamId,
+          clientKind: context.clientKind ?? interactionMeta.clientKind,
+          clientLabel: context.clientLabel ?? interactionMeta.clientLabel,
+          phase: "response",
+          status: "error",
+          durationMs,
+          code: error?.code ?? null,
+          payload: interactionPreview({
+            error: error instanceof Error ? error.message : String(error),
+            ...(error?.code ? { code: error.code } : {}),
+          }),
+        });
         context.onEvent?.("error", `MCP ${name} failed`, {
           tool: name,
           transportSessionId: context.transportSessionId,

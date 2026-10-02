@@ -124,6 +124,7 @@ export type MonitorWorkstream = {
   connected: boolean;
   transportCount: number;
   status: "working" | "waiting" | "attention" | "idle" | "disconnected";
+  isCurrent: boolean;
   goal: string;
   phase: string | null;
   summary: string | null;
@@ -512,6 +513,10 @@ export function buildWorkstreamBoard({
         connected,
         transportCount: owner.connectedTransportCount ?? 0,
         status,
+        isCurrent:
+          connected ||
+          Boolean(workstream && workstream.status !== "completed") ||
+          ownerTasks.some((task) => ACTIVE_TASK_STATES.has(task.status)),
         goal:
           workstream?.goal ??
           checkpoint?.goal ??
@@ -555,12 +560,8 @@ export function buildWorkstreamBoard({
     })
     .filter((stream) => {
       const updated = timestamp(stream.updatedAt);
-      const recent = updated > 0 && now - updated <= 30 * 60_000;
-      return (
-        stream.connected ||
-        ["working", "waiting", "attention"].includes(stream.status) ||
-        recent
-      );
+      const recent = updated > 0 && now - updated <= 5 * 60_000;
+      return stream.isCurrent || recent;
     });
 
   const claimedRequestIds = new Set(
@@ -586,6 +587,7 @@ export function buildWorkstreamBoard({
       status: unclaimedRequests.some((request) => request.requiresUserConfirmation)
         ? "attention"
         : "waiting",
+      isCurrent: true,
       goal: `${unclaimedRequests.length} request${unclaimedRequests.length === 1 ? "" : "s"} waiting for an agent`,
       phase: "Coordination",
       summary: null,
@@ -657,6 +659,7 @@ export function buildWorkstreamBoard({
       connected: snapshot?.cloud.status === "connected",
       transportCount: 0,
       status: command.status === "uncertain" ? "attention" : "working",
+      isCurrent: true,
       goal: `Remote command · ${command.kind}`,
       phase: "Cloud → Desktop → Runtime",
       summary: null,

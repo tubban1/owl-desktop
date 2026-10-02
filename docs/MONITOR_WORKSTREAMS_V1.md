@@ -252,3 +252,41 @@ It answers:
 > Is this agent currently allowed to enter the local computer data plane?
 
 A green AUTHORIZED state requires enforced Runtime access with a verified Cloud-signed lease. A connected MCP/Tunnel without valid Runtime authorization remains visibly LOCKED.
+
+
+## Real MCP interaction stream
+
+Monitor Live MUST lead with real MCP traffic, not historical Runtime Task inference.
+
+Every MCP tool invocation emits two correlated operational events with the same interaction ID:
+
+```text
+request
+  client/workstream → OWL
+  tool
+  bounded real arguments preview
+
+response
+  OWL → client/workstream
+  success/error
+  duration
+  bounded real result preview
+```
+
+The request event is emitted before execution begins, so long-running calls appear as `RUNNING` immediately. The response event completes the same interaction when the tool returns.
+
+Interaction payloads are real MCP payload previews, not generated summaries. For privacy and safety:
+
+- credential-like keys are redacted;
+- strings, arrays, object depth and total preview size are bounded;
+- full chat transcripts and hidden model reasoning are never available to or reconstructed by Monitor.
+
+The Live hierarchy is:
+
+1. Persistent / Observable / Authorized assurance strip
+2. Real MCP interaction stream
+3. Current/recent workstreams
+4. Detailed execution (collapsed)
+5. Historical Timeline / Graph / System views
+
+Historical terminal/failed Runtime Tasks MUST NOT remain in the Live workstream list indefinitely. A legacy stream without a current transport/workstream/active execution is retained in Live only for a short recent window; durable history stays available in Timeline/Graph.

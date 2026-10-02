@@ -384,14 +384,15 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (page !== "logs") return;
+    if (page !== "logs" && page !== "monitor") return;
     let cancelled = false;
     const pollActivity = async () => {
       const rows = await window.owlDesktop.listActivity().catch(() => null);
       if (!cancelled && rows) setLiveActivity(rows);
     };
     void pollActivity();
-    const timer = window.setInterval(() => void pollActivity(), 1000);
+    const intervalMs = page === "monitor" ? 750 : 1000;
+    const timer = window.setInterval(() => void pollActivity(), intervalMs);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
