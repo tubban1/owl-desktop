@@ -104,8 +104,8 @@ Completed in the current Desktop source tree:
 
 Acceptance reached during this checkpoint:
 
-    Desktop full gate: 45/45 test files, 201/201 tests PASS
-    Continuity compatibility targeted gate: 4/4 files, 12/12 tests PASS
+    Desktop full gate: 45/45 test files, 203/203 tests PASS
+    Continuity calibration/epoch targeted gate: 4/4 files, 10/10 tests PASS
     TypeScript + Vite build: PASS
     git diff --check: PASS
     live dev:full startup verification: PASS
@@ -146,10 +146,19 @@ context restatement.
      transport;
    - no replacement Runtime Task was created.
 
-3. Risk calibration
-   - current V1 scoring is intentionally explainable and conservative;
-   - calibrate thresholds from dogfood telemetry without claiming OpenAI private
-     context-window state.
+3. Risk calibration — V2 calibrated from live dogfood
+   - live dogfood observed ~267K MCP chars (~67K token-equivalent floor), 108
+     substantive OWL calls and nearly four hours of planner activity but only
+     scored 30/MEDIUM under the original thresholds;
+   - V2 moves observed-volume signals to ~40K / ~60K / ~90K OWL-visible
+     token-equivalent floors, so a ~65K floor + 100 calls + two hours reaches
+     50/HIGH and prepares a handoff predictively;
+   - the meter is now scoped to a planner continuity epoch rather than the whole
+     workstream: Chat B keeps the workstream/checkpoint/Runtime Task identity but
+     begins a fresh context meter, while the previous epoch is retained only as
+     a bounded statistical summary;
+   - Monitor labels the metric "Observed context floor" because ordinary ChatGPT
+     conversation text is not visible to OWL and the true context may be larger.
 
 Package/application version remains development 0.1.0 until the 1.1 release
 gate is complete. The first intended public product version remains 1.1.0.

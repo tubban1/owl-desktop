@@ -197,6 +197,87 @@ describe("Conversation Continuity Meter", () => {
     );
   });
 
+  it("starts a fresh planner epoch on handoff without resetting the workstream", () => {
+    const store = createStore();
+    const owner = store.openWorkstream(
+      {
+        goal: "Keep workstream identity while rotating planner context",
+        clientKind: "chatgpt",
+      },
+      "2026-10-02T12:00:00.000Z",
+    );
+
+    for (let index = 0; index < 80; index += 1) {
+      store.recordWorkstreamToolStep(
+        owner.ownerId,
+        { tool: "read_file", outcome: "success", durationMs: 5 },
+        "2026-10-02T13:20:00.000Z",
+      );
+    }
+    store.recordConversationTraffic(
+      owner.ownerId,
+      {
+        tool: "read_file",
+        requestChars: 40_000,
+        responseChars: 160_000,
+        requestDigest: "epoch-request",
+        responseDigest: "epoch-response",
+      },
+      "2026-10-02T13:20:00.000Z",
+    );
+
+    const rotated = store.startContinuityEpoch(
+      owner.ownerId,
+      { reason: "planner_handoff", handoffId: "handoff_epoch_1" },
+      "2026-10-02T13:30:00.000Z",
+    );
+    expect(rotated).toMatchObject({
+      modelVersion: 2,
+      risk: "low",
+      state: "healthy",
+      observedChars: 0,
+      observedTokenEquivalent: 0,
+      toolCallCount: 0,
+      sessionAgeMs: 0,
+      workstreamAgeMs: 90 * 60_000,
+    });
+    expect(rotated.continuityEpochId).toMatch(/^continuity:/);
+
+    const raw = store.read().owners[owner.ownerId].continuity;
+    expect(raw.history).toHaveLength(1);
+    expect(raw.history[0]).toMatchObject({
+      handoffId: "handoff_epoch_1",
+      observedChars: 200_000,
+      observedTokenEquivalent: 50_000,
+      toolCallCount: 80,
+      reason: "planner_handoff",
+    });
+    expect(JSON.stringify(raw.history[0])).not.toContain("epoch-request");
+
+    store.recordWorkstreamToolStep(owner.ownerId, {
+      tool: "git_status",
+      outcome: "success",
+      durationMs: 2,
+    }, "2026-10-02T13:31:00.000Z");
+    const next = store.recordConversationTraffic(
+      owner.ownerId,
+      {
+        tool: "git_status",
+        requestChars: 100,
+        responseChars: 400,
+        requestDigest: "new-request",
+        responseDigest: "new-response",
+      },
+      "2026-10-02T13:31:00.000Z",
+    );
+    expect(next).toMatchObject({
+      observedChars: 500,
+      toolCallCount: 1,
+      sessionAgeMs: 60_000,
+    });
+    expect(store.get(owner.ownerId).workstream.totalToolSteps).toBe(81);
+  });
+
   it("counts exact repeated sanitized payload digests without retaining payload text", () => {
     const store = createStore();
     const owner = store.openWorkstream({

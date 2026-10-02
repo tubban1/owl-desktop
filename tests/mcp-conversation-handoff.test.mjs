@@ -170,6 +170,27 @@ describe("MCP Conversation Continuity", () => {
       goal: "Finish OWL LAB 1.1 continuity",
     });
 
+    const continuity = jsonText(
+      await chatB.client.callTool({
+        name: "conversation_continuity_status",
+        arguments: { workstream_id: workstreamId },
+      }),
+    );
+    expect(continuity).toMatchObject({
+      modelVersion: 2,
+      risk: "low",
+      state: "handoff_ready",
+      handoffReady: true,
+      toolCallCount: 0,
+    });
+    expect(continuity.continuityEpochId).toMatch(/^continuity:/);
+    expect(continuity.sessionAgeMs).toBeLessThan(5_000);
+    const epochState = continuation.read().owners[workstreamId].continuity;
+    expect(epochState.history.at(-1)).toMatchObject({
+      reason: "planner_resume",
+    });
+    expect(epochState.history.at(-1).epochId).not.toBe(epochState.epochId);
+
     const checkpoint = jsonText(
       await chatB.client.callTool({
         name: "planner_checkpoint_status",

@@ -168,8 +168,15 @@ token-equivalent volume for:
 - repeated payloads;
 - recent growth rate.
 
-It must not label that number as ChatGPT's actual context size or remaining
-tokens.
+The UI calls this value the Observed context floor. It is a lower-bound heuristic,
+not ChatGPT's actual context size or remaining tokens, because ordinary planner
+conversation text is not visible to OWL.
+
+Risk model V2 calibrates observed-volume signals at approximately 40K, 60K and
+90K OWL-visible token-equivalent floors. These are intentionally predictive:
+other signals such as planner-session age, substantive OWL call count, rapid
+growth, repeated payloads and active durable work combine with volume before a
+HIGH/CRITICAL recommendation is emitted.
 
 User-facing state is categorical:
 
@@ -182,6 +189,18 @@ Risk is:
 ```text
 LOW | MEDIUM | HIGH | CRITICAL
 ```
+
+### Planner continuity epochs
+
+Conversation risk belongs to the current planner conversation segment, not to
+the durable workstream. When a new planner resumes an existing workstream, OWL
+keeps the workstream ID, checkpoint and Runtime Task references unchanged but
+starts a new Continuity epoch. Observed traffic, recent growth, duplicate ratio,
+substantive-call baseline and planner-session age restart for the new Chat.
+
+The previous epoch is retained only as a bounded statistics record (volume,
+score, risk, age and related counters). Full chat text and MCP payload contents
+are not archived into epoch history.
 
 ## Fail-safe rule
 
@@ -230,6 +249,13 @@ to discover the existing READY OWL LAB handoff and the already-known skill_run
 tool to execute owl.continuity.resume. The original workstream was rebound and
 the handoff was durably consumed. Post-resume summary reported zero READY
 handoffs and the original workstream connected as a ChatGPT workstream-binding.
+
+That dogfood also supplied the first real calibration sample: about 267K
+OWL-observed MCP characters (~67K token-equivalent floor), 108 substantive calls
+and nearly four hours of planner activity. V1 scored only 30/MEDIUM, which was
+too late for a predictive warning. V2 moves the volume thresholds earlier and
+separates planner continuity epochs from the durable workstream so a newly
+opened Chat does not inherit the old Chat's context-risk counters.
 
 
 ## Visible progress acknowledgement protocol

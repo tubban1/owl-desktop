@@ -863,6 +863,10 @@ function continuityCompatibilitySkill(skill, args = {}) {
       clientKind: context.clientKind,
       clientLabel: context.clientLabel,
     });
+    store.startContinuityEpoch(owner.ownerId, {
+      reason: "planner_handoff",
+      handoffId: handoff.id,
+    });
 
     let supersededWorkstreamId = null;
     if (
@@ -2884,6 +2888,11 @@ export function createOwlMcpServer() {
             ...(next_actions ? { nextActions: next_actions } : {}),
             ...(workspace ? { workspace } : {}),
           });
+      if (resume_workstream_id) {
+        store.startContinuityEpoch(owner.ownerId, {
+          reason: "planner_resume",
+        });
+      }
       context.runtimeSessionId = owner.ownerId;
       context.ownerStable = true;
       context.ownerSource = "workstream";

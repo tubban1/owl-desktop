@@ -68,27 +68,6 @@ describe("MCP Conversation Continuity guard", () => {
       nextActions: ["continue existing task"],
       taskIds: ["task_812"],
     });
-    continuation.recordConversationTraffic(source.ownerId, {
-      tool: "large_result",
-      requestChars: 100_000,
-      responseChars: 3_000_000,
-      requestDigest: "request-large",
-      responseDigest: "response-large",
-    });
-    for (let index = 0; index < 3; index += 1) {
-      continuation.recordWorkstreamToolStep(source.ownerId, {
-        tool: "read_file",
-        outcome: "success",
-        durationMs: 10,
-      });
-    }
-
-    expect(continuation.continuityStatus(source.ownerId)).toMatchObject({
-      risk: "high",
-      handoffReady: false,
-      state: "handoff_recommended",
-    });
-
     const runtimeBaseUrl = await startRuntime();
     const mcp = await startOwlMcpHttpServer({
       port: 0,
@@ -122,6 +101,35 @@ describe("MCP Conversation Continuity guard", () => {
       resumed: true,
     });
 
+    continuation.recordConversationTraffic(source.ownerId, {
+      tool: "large_result",
+      requestChars: 100_000,
+      responseChars: 3_000_000,
+      requestDigest: "request-large",
+      responseDigest: "response-large",
+    });
+    for (let index = 0; index < 3; index += 1) {
+      continuation.recordWorkstreamToolStep(source.ownerId, {
+        tool: "read_file",
+        outcome: "success",
+        durationMs: 10,
+      });
+    }
+    expect(continuation.continuityStatus(source.ownerId)).toMatchObject({
+      risk: "high",
+      handoffReady: false,
+      state: "handoff_recommended",
+    });
+
+    const readyBeforeBoundary = continuation.latestHandoff();
+    expect(readyBeforeBoundary).toBeNull();
+
+    const blocked = await client.callTool({
+      name: "task_list",
+      arguments: { workstream_id: source.ownerId },
+    });
+    expect(blocked.isError).toBe(true);
+
     const ready = continuation.latestHandoff();
     expect(ready).toMatchObject({
       status: "ready",
@@ -130,11 +138,6 @@ describe("MCP Conversation Continuity guard", () => {
       reason: "continuity_high",
     });
 
-    const blocked = await client.callTool({
-      name: "task_list",
-      arguments: { workstream_id: source.ownerId },
-    });
-    expect(blocked.isError).toBe(true);
     const payload = jsonText(blocked);
     expect(payload).toMatchObject({
       code: "PROGRESS_UPDATE_REQUIRED",

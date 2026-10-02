@@ -440,7 +440,7 @@ export type PlannerWorkstream = {
 };
 
 export type ConversationContinuityStatus = {
-  modelVersion: 1;
+  modelVersion: 2;
   basis: "owl_observed_mcp_traffic";
   risk: "low" | "medium" | "high" | "critical";
   state: "healthy" | "growing" | "handoff_recommended" | "handoff_ready";
@@ -457,6 +457,9 @@ export type ConversationContinuityStatus = {
   duplicateRatio: number;
   toolCallCount: number;
   sessionAgeMs: number;
+  workstreamAgeMs: number;
+  continuityEpochId: string | null;
+  continuityEpochStartedAt: string | null;
   checkpointAgeMs: number | null;
   activeTaskCount: number;
   reasons: Array<{
