@@ -24,6 +24,7 @@ export class DevChildSupervisor {
     env = {},
     {
       restartOnExit = false,
+      restartPolicy = null,
       restartDelayMs = 1000,
       onLaunch = () => {},
     } = {},
@@ -49,7 +50,18 @@ export class DevChildSupervisor {
           ? `error=${error instanceof Error ? error.message : String(error)}`
           : `code=${code ?? "null"}, signal=${signal ?? "null"}`;
 
-        if (restartOnExit) {
+        const effectiveRestartPolicy =
+          restartPolicy ??
+          (restartOnExit ? "always" : "never");
+        const abnormalExit =
+          Boolean(error) ||
+          signal !== null ||
+          (typeof code === "number" && code !== 0);
+        const shouldRestart =
+          effectiveRestartPolicy === "always" ||
+          (effectiveRestartPolicy === "on-failure" && abnormalExit);
+
+        if (shouldRestart) {
           this.logger.warn?.(
             `[dev:full] ${label} terminated (${detail}); restarting without touching other healthy fault domains.`,
           );
@@ -59,6 +71,13 @@ export class DevChildSupervisor {
           }, Math.max(0, Number(restartDelayMs) || 0));
           timer.unref?.();
           this.restartTimers.add(timer);
+          return;
+        }
+
+        if (effectiveRestartPolicy === "on-failure" && !abnormalExit) {
+          this.logger.info?.(
+            `[dev:full] ${label} exited cleanly (${detail}); respecting intentional shutdown.`,
+          );
           return;
         }
 

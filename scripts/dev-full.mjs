@@ -519,12 +519,12 @@ try {
         desktopCapabilityBridgePort,
       ),
     },
-    { restartOnExit: true, restartDelayMs: 1200 },
+    { restartPolicy: "on-failure", restartDelayMs: 1200 },
   );
   await waitFor("http://127.0.0.1:5173/", "Vite renderer");
 
   console.log(
-    "[dev:full] VERIFIED: ChatGPT → Tunnel → Connection Host MCP → isolated Runtime DEV; Desktop UI is restart-isolated.",
+    "[dev:full] VERIFIED: ChatGPT → Tunnel → Connection Host MCP → isolated Runtime DEV; Desktop crashes restart in isolation and clean user quit is respected.",
   );
   console.log(
     `[dev:full] Runtime DEV endpoint: ${runtimeBaseUrl} (persistent Desktop settings unchanged).`,

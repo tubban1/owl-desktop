@@ -70,6 +70,76 @@ describe("DevChildSupervisor fault-domain isolation", () => {
     expect(hostLaunches[1].kills).toEqual(["SIGTERM"]);
   });
 
+  it("respects an intentional clean Desktop exit when restart policy is on-failure", async () => {
+    const launches = [];
+    const infos = [];
+    const fatals = [];
+    const supervisor = new DevChildSupervisor({
+      spawnImpl(command) {
+        const child = new FakeChild(command);
+        launches.push(child);
+        return child;
+      },
+      logger: {
+        warn() {},
+        error() {},
+        info(message) {
+          infos.push(message);
+        },
+      },
+      onFatal(code, meta) {
+        fatals.push({ code, meta });
+      },
+    });
+
+    const desktop = supervisor.start(
+      "desktop",
+      "/tmp",
+      "desktop-command",
+      [],
+      {},
+      { restartPolicy: "on-failure", restartDelayMs: 10 },
+    );
+
+    desktop.emit("exit", 0, null);
+    await sleep(30);
+
+    expect(launches).toHaveLength(1);
+    expect(fatals).toEqual([]);
+    expect(infos.some((message) => message.includes("exited cleanly"))).toBe(true);
+    expect(supervisor.children.size).toBe(0);
+  });
+
+  it("restarts Desktop after an abnormal exit when restart policy is on-failure", async () => {
+    const launches = [];
+    const supervisor = new DevChildSupervisor({
+      spawnImpl(command) {
+        const child = new FakeChild(command);
+        launches.push(child);
+        return child;
+      },
+      logger: { warn() {}, error() {}, info() {} },
+    });
+
+    const desktop = supervisor.start(
+      "desktop",
+      "/tmp",
+      "desktop-command",
+      [],
+      {},
+      { restartPolicy: "on-failure", restartDelayMs: 10 },
+    );
+
+    desktop.emit("exit", 1, null);
+    await sleep(30);
+
+    expect(
+      launches.filter((child) => child.command === "desktop-command"),
+    ).toHaveLength(2);
+
+    supervisor.shutdown();
+  });
+
   it("handles spawn error plus exit only once for a non-restartable fault domain", () => {
     const fatals = [];
     const supervisor = new DevChildSupervisor({
