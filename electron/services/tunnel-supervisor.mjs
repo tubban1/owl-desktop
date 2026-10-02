@@ -301,7 +301,7 @@ export class TunnelSupervisor {
     return this.healthBaseUrl;
   }
 
-  async fetchHealth(pathname) {
+  async fetchHealth(pathname, readResponse = (response) => response) {
     const baseUrl = this.resolveHealthBaseUrl();
     if (!baseUrl) {
       const error = new Error("OWL Tunnel health URL is not available yet.");
@@ -322,13 +322,16 @@ export class TunnelSupervisor {
     timeout.unref?.();
 
     try {
-      return await awaitAbortable(
+      const response = await awaitAbortable(
         this.fetchImpl(baseUrl + pathname, {
           method: "GET",
           signal: controller.signal,
         }),
         controller.signal,
       );
+      // Headers alone do not complete a probe. Keep body consumption under the
+      // same deadline, even if the response reader ignores AbortSignal.
+      return await awaitAbortable(readResponse(response), controller.signal);
     } catch (cause) {
       const error = new Error(
         timedOut
@@ -386,7 +389,13 @@ export class TunnelSupervisor {
     this.lastHealthProbeAt = nowIso;
 
     try {
-      const healthResponse = await this.fetchHealth("/health?details=true");
+      const { response: healthResponse, body: health } = await this.fetchHealth(
+        "/health?details=true",
+        async (response) => ({
+          response,
+          body: response.ok ? await response.json() : null,
+        }),
+      );
       if (!healthResponse.ok) {
         const error = new Error(
           `OWL Tunnel health endpoint returned HTTP ${healthResponse.status}.`,
@@ -395,7 +404,6 @@ export class TunnelSupervisor {
         throw error;
       }
 
-      const health = await healthResponse.json();
       if (!this.isCurrentGeneration(child, generation)) return this.status();
 
       const readyResponse = await this.fetchHealth("/readyz");
