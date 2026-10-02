@@ -208,6 +208,52 @@ describe("deriveWorkState", () => {
     });
   });
 
+  it("does not keep an old terminal blocked task on Home forever", () => {
+    const state = deriveWorkState({
+      ...base,
+      taskRows: [{
+        label: "Desktop stream recovery durable task",
+        status: "blocked",
+        counts: { needsReview: 1 },
+        progress: {
+          terminal: true,
+          phase: "blocked",
+          message: "Indexed terminal task in global episodic memory.",
+          lastMeaningfulAt: "2026-10-01T14:00:00.000Z",
+        },
+        updatedAt: "2026-10-01T14:00:00.000Z",
+      }],
+    });
+
+    expect(state).toMatchObject({
+      state: "idle",
+      title: "OWL is ready for work",
+    });
+  });
+
+  it("still surfaces a recent terminal incident long enough to notice", () => {
+    const state = deriveWorkState({
+      ...base,
+      taskRows: [{
+        label: "Deploy package",
+        status: "failed",
+        counts: { failed: 1 },
+        progress: {
+          terminal: true,
+          message: "Package verification failed",
+          lastMeaningfulAt: "2026-10-01T15:09:30.000Z",
+        },
+        updatedAt: "2026-10-01T15:09:30.000Z",
+      }],
+    });
+
+    expect(state).toMatchObject({
+      state: "needs_attention",
+      title: "Deploy package",
+      detail: "Package verification failed",
+    });
+  });
+
   it("shows durable history reconciliation as needs attention", () => {
     const state = deriveWorkState({
       ...base,

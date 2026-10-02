@@ -2,6 +2,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+
+export function classifyTunnelDiagnostic(text) {
+  const normalized = String(text ?? "").trim();
+  if (!normalized) return "info";
+  return /\b(warn(?:ing)?|error|failed?|fatal|panic|timeout|timed out|refused|denied|unavailable)\b/i.test(
+    normalized,
+  )
+    ? "warn"
+    : "info";
+}
 import { randomUUID } from "node:crypto";
 
 function safeUnlink(file) {
@@ -166,8 +176,9 @@ export class TunnelSupervisor {
       });
     });
     child.stderr.on("data", (chunk) => {
-      this.onEvent("warn", "Tunnel diagnostic", {
-        text: chunk.toString().trim().slice(0, 1000),
+      const text = chunk.toString().trim().slice(0, 1000);
+      this.onEvent(classifyTunnelDiagnostic(text), "Tunnel diagnostic", {
+        text,
       });
     });
     child.once("error", (error) => {

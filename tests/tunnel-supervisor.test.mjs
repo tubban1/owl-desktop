@@ -2,7 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { TunnelSupervisor } from "../electron/services/tunnel-supervisor.mjs";
+import {
+  TunnelSupervisor,
+  classifyTunnelDiagnostic,
+} from "../electron/services/tunnel-supervisor.mjs";
 
 const scratch = [];
 const supervisors = [];
@@ -17,6 +20,14 @@ afterEach(async () => {
 });
 
 describe("TunnelSupervisor", () => {
+  it("does not treat every stderr diagnostic as a warning", () => {
+    expect(classifyTunnelDiagnostic("connected to control plane")).toBe("info");
+    expect(classifyTunnelDiagnostic("starting MCP transport")).toBe("info");
+    expect(classifyTunnelDiagnostic("reconnecting websocket")).toBe("info");
+    expect(classifyTunnelDiagnostic("warning: transient transport issue")).toBe("warn");
+    expect(classifyTunnelDiagnostic("connection refused")).toBe("warn");
+    expect(classifyTunnelDiagnostic("startup timeout")).toBe("warn");
+  });
   it("spawns a loopback-only tunnel and removes the ephemeral secret on stop", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-tunnel-test-"));
     scratch.push(dir);

@@ -43,6 +43,27 @@ const shortCommand = (value?: string) => {
   return normalized.length > 96 ? normalized.slice(0, 93) + "…" : normalized;
 };
 
+const TERMINAL_INCIDENT_VISIBILITY_MS = 15 * 60_000;
+
+const taskLastMeaningfulMs = (task: RuntimeRow) => {
+  const value =
+    task.progress?.lastMeaningfulAt ??
+    task.progress?.lastEvent?.at ??
+    task.updatedAt ??
+    null;
+  if (!value) return Number.NaN;
+  return Date.parse(value);
+};
+
+const terminalIncidentIsCurrent = (task: RuntimeRow, now: number) => {
+  if (task.progress?.terminal !== true) return true;
+  const changedAt = taskLastMeaningfulMs(task);
+  return (
+    Number.isFinite(changedAt) &&
+    now - changedAt <= TERMINAL_INCIDENT_VISIBILITY_MS
+  );
+};
+
 export function deriveWorkState({
   taskRows,
   runningProcesses,
@@ -77,17 +98,21 @@ export function deriveWorkState({
       : null;
   const plannerTransportMissing =
     Boolean(plannerCheckpoint) && plannerOwner?.plannerConnected !== true;
-  const waitingTask = taskRows.find((task) =>
-    task.status === "waiting_approval" ||
-    task.status === "blocked" ||
-    task.status === "paused" ||
-    Number(task.counts?.waitingApproval ?? 0) > 0,
+  const waitingTask = taskRows.find(
+    (task) =>
+      terminalIncidentIsCurrent(task, now) &&
+      (task.status === "waiting_approval" ||
+        task.status === "blocked" ||
+        task.status === "paused" ||
+        Number(task.counts?.waitingApproval ?? 0) > 0),
   );
-  const attentionTask = taskRows.find((task) =>
-    task.status === "failed" ||
-    task.status === "needs_review" ||
-    Number(task.counts?.failed ?? 0) > 0 ||
-    Number(task.counts?.needsReview ?? 0) > 0,
+  const attentionTask = taskRows.find(
+    (task) =>
+      terminalIncidentIsCurrent(task, now) &&
+      (task.status === "failed" ||
+        task.status === "needs_review" ||
+        Number(task.counts?.failed ?? 0) > 0 ||
+        Number(task.counts?.needsReview ?? 0) > 0),
   );
   const runningTask = taskRows.find((task) =>
     task.status === "running" ||
