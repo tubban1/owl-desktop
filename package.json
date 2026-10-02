@@ -7,7 +7,7 @@
   "main": "electron/main.mjs",
   "scripts": {
     "dev": "npm run dev:desktop",
-    "dev:desktop": "concurrently -k -n renderer,electron \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "dev:desktop": "concurrently -k -s first -n renderer,electron \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "dev:full": "node scripts/dev-full.mjs",
     "dev:full:watch-runtime": "OWL_RUNTIME_DEV_WATCH=true node scripts/dev-full.mjs",
     "mcp:start": "node mcp/server.mjs",
