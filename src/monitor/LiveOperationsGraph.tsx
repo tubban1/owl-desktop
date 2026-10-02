@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   ArrowRight,
   Bot,
   CheckCircle2,
@@ -29,6 +30,7 @@ import {
   type OperationsGraphNode,
   type OperationsNodeKind,
   type OperationsState,
+  type OperationsWorkstreamSummary,
 } from "./operationsGraphModel";
 
 const clock = (value?: string | null) =>
@@ -136,12 +138,15 @@ function edgeMapByGroup(
   const groupOrder = new Map(
     model.groups.map((group, index) => [group.id, index]),
   );
-  const crossings = new Map<string, OperationsState>();
+  const crossings = new Map<
+    string,
+    { state: OperationsState; label: string | null }
+  >();
 
   for (let index = 0; index < model.groups.length - 1; index += 1) {
     const left = model.groups[index]!;
     const right = model.groups[index + 1]!;
-    const states: OperationsState[] = [];
+    const crossingEdges: OperationsGraphEdge[] = [];
     for (const edge of model.edges) {
       const from = nodeById.get(edge.from);
       const to = nodeById.get(edge.to);
@@ -149,25 +154,49 @@ function edgeMapByGroup(
       const fromIndex = groupOrder.get(from.groupId) ?? -1;
       const toIndex = groupOrder.get(to.groupId) ?? -1;
       if (fromIndex <= index && toIndex >= index + 1) {
-        states.push(edge.state);
+        crossingEdges.push(edge);
       }
     }
-    const state =
-      states.sort((a, b) => STATE_WEIGHT[b] - STATE_WEIGHT[a])[0] ?? "idle";
-    crossings.set(`${left.id}->${right.id}`, state);
+    const strongest =
+      crossingEdges.sort(
+        (a, b) => STATE_WEIGHT[b.state] - STATE_WEIGHT[a.state],
+      )[0] ?? null;
+    crossings.set(left.id + "->" + right.id, {
+      state: strongest?.state ?? "idle",
+      label:
+        strongest?.label ??
+        (strongest?.relation === "authorize"
+          ? "authorize"
+          : strongest?.relation === "execute"
+            ? "execute"
+            : strongest?.relation === "result"
+              ? "result"
+              : null),
+    });
   }
   return crossings;
 }
 
-function GraphNodeCard({ node }: { node: OperationsGraphNode }) {
+function GraphNodeCard({
+  node,
+  selected,
+  onSelect,
+}: {
+  node: OperationsGraphNode;
+  selected: boolean;
+  onSelect(workstreamId: string | null): void;
+}) {
   return (
-    <div
+    <button
+      type="button"
       className={
         "dynamic-flow-node " +
         node.state +
-        (node.current ? " current" : "")
+        (node.current ? " current" : "") +
+        (selected ? " selected" : "")
       }
       title={node.evidence.join("\n")}
+      onClick={() => onSelect(node.workstreamId)}
     >
       <NodeIcon kind={node.kind} meta={node.meta} />
       <div>
@@ -175,7 +204,86 @@ function GraphNodeCard({ node }: { node: OperationsGraphNode }) {
         {node.detail && <small>{node.detail}</small>}
       </div>
       {node.current && <span className="node-current-dot" />}
-    </div>
+    </button>
+  );
+}
+
+function TaskSummaryCard({
+  summary,
+}: {
+  summary: OperationsWorkstreamSummary;
+}) {
+  return (
+    <article className={"ops-task-summary " + summary.status}>
+      <div className="ops-task-summary-head">
+        <div>
+          <span className="eyebrow">
+            {summary.status === "completed" ? "TASK COMPLETE" : "WORKSTREAM"}
+          </span>
+          <strong>{summary.goal}</strong>
+          <small>{summary.sourceLabel}</small>
+        </div>
+        <span className={"ops-summary-status " + summary.status}>
+          {summary.outcome}
+        </span>
+      </div>
+
+      <p>{summary.summaryText}</p>
+
+      <div className="ops-summary-metrics">
+        <div>
+          <span>Tool calls</span>
+          <strong>{summary.toolCallCount}</strong>
+        </div>
+        <div>
+          <span>Tasks</span>
+          <strong>
+            {summary.completedTaskCount}/{summary.taskCount}
+          </strong>
+        </div>
+        <div>
+          <span>Errors</span>
+          <strong>{summary.errorCount + summary.failedTaskCount}</strong>
+        </div>
+        <div>
+          <span>Warnings</span>
+          <strong>{summary.warningCount}</strong>
+        </div>
+        <div>
+          <span>Reconnects</span>
+          <strong>{summary.reconnectCount}</strong>
+        </div>
+        <div>
+          <span>Duration</span>
+          <strong>{duration(summary.durationMs) || "—"}</strong>
+        </div>
+      </div>
+
+      {summary.toolBreakdown.length > 0 && (
+        <div className="ops-tool-breakdown">
+          {summary.toolBreakdown.slice(0, 8).map((item) => (
+            <span
+              className={item.errors > 0 ? "attention" : ""}
+              key={item.tool}
+            >
+              <code>{item.tool}</code>
+              <b>×{item.count}</b>
+              {item.errors > 0 && <small>{item.errors} error</small>}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="ops-summary-time">
+        <span>Started {clock(summary.startedAt)}</span>
+        <ArrowRight size={11} />
+        <span>
+          {summary.completedAt
+            ? "Finished " + clock(summary.completedAt)
+            : "Still active"}
+        </span>
+      </div>
+    </article>
   );
 }
 
@@ -200,7 +308,32 @@ export function LiveOperationsGraph({
 
   const nodeById = useMemo(() => nodeMap(model), [model]);
   const crossings = useMemo(() => edgeMapByGroup(model), [model]);
-  const latest = model.latestInteraction;
+  const [selectedWorkstreamId, setSelectedWorkstreamId] = useState<string | null>(
+    null,
+  );
+  const selectedStillExists =
+    selectedWorkstreamId !== null &&
+    (model.summaries.some((item) => item.id === selectedWorkstreamId) ||
+      model.loopPaths.some(
+        (item) => item.workstreamId === selectedWorkstreamId,
+      ));
+  const focusedWorkstreamId = selectedStillExists
+    ? selectedWorkstreamId
+    : (model.loopPaths[0]?.workstreamId ?? model.summaries[0]?.id ?? null);
+  const focusedSummary =
+    model.summaries.find((item) => item.id === focusedWorkstreamId) ??
+    model.summaries[0] ??
+    null;
+  const visibleInteractions = focusedWorkstreamId
+    ? model.interactions.filter(
+        (item) =>
+          item.workstreamId === focusedWorkstreamId ||
+          item.runtimeSessionId === focusedWorkstreamId,
+      )
+    : model.interactions;
+  const latest = focusedWorkstreamId
+    ? visibleInteractions[0] ?? null
+    : model.latestInteraction;
   const running = model.runningInteractions.length > 0;
 
   return (
@@ -251,7 +384,10 @@ export function LiveOperationsGraph({
             .filter((node): node is OperationsGraphNode => Boolean(node));
           const nextGroup = model.groups[index + 1];
           const transition = nextGroup
-            ? crossings.get(`${group.id}->${nextGroup.id}`) ?? "idle"
+            ? crossings.get(group.id + "->" + nextGroup.id) ?? {
+                state: "idle" as OperationsState,
+                label: null,
+              }
             : null;
 
           return (
@@ -260,14 +396,26 @@ export function LiveOperationsGraph({
                 <span className="flow-stage-label">{group.label}</span>
                 <div className="dynamic-flow-stack">
                   {nodes.map((node) => (
-                    <GraphNodeCard node={node} key={node.id} />
+                    <GraphNodeCard
+                      node={node}
+                      key={node.id}
+                      selected={
+                        Boolean(focusedWorkstreamId) &&
+                        node.workstreamId === focusedWorkstreamId
+                      }
+                      onSelect={(workstreamId) => {
+                        if (workstreamId) setSelectedWorkstreamId(workstreamId);
+                      }}
+                    />
                   ))}
                 </div>
               </div>
-              {nextGroup && (
-                <div className={"dynamic-flow-edge " + transition}>
+              {nextGroup && transition && (
+                <div className={"dynamic-flow-edge " + transition.state}>
                   <span />
+                  {transition.label && <small>{transition.label}</small>}
                   <ArrowRight size={17} />
+                  <i className="flow-packet-dot" />
                 </div>
               )}
             </div>
@@ -280,6 +428,60 @@ export function LiveOperationsGraph({
           </div>
         )}
       </div>
+
+      {model.loopPaths.length > 0 && (
+        <div className="flow-return-zone">
+          <div className="flow-return-zone-head">
+            <span className="eyebrow">RETURN PATH</span>
+            <strong>Result → source · closed-loop delivery</strong>
+          </div>
+          <div className="flow-return-lanes">
+            {model.loopPaths.slice(0, 6).map((loop) => {
+              const selected =
+                Boolean(focusedWorkstreamId) &&
+                loop.workstreamId === focusedWorkstreamId;
+              return (
+                <button
+                  type="button"
+                  className={
+                    "flow-return-lane " +
+                    loop.state +
+                    (loop.running ? " pending-return" : "") +
+                    (selected ? " selected" : "")
+                  }
+                  key={loop.id}
+                  onClick={() => {
+                    if (loop.workstreamId) {
+                      setSelectedWorkstreamId(loop.workstreamId);
+                    }
+                  }}
+                >
+                  <div className="flow-return-source">
+                    <MessageSquare size={13} />
+                    <span>
+                      <strong>{loop.sourceLabel}</strong>
+                      <small>source</small>
+                    </span>
+                  </div>
+                  <div className="flow-return-track">
+                    <ArrowLeft size={14} />
+                    <span className="flow-return-line" />
+                    <i className="flow-return-packet" />
+                    <em>{loop.responseLabel}</em>
+                  </div>
+                  <div className="flow-return-result">
+                    <span>
+                      <strong>{loop.running ? "Executing" : "Returned"}</strong>
+                      <small>{loop.requestLabel}</small>
+                    </span>
+                    <CheckCircle2 size={13} />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="live-flow-legend">
         <span><i className="legend-dot active" /> executing / traffic</span>
@@ -334,7 +536,7 @@ export function LiveOperationsGraph({
           )}
 
           <div className="live-traffic-list">
-            {model.interactions
+            {visibleInteractions
               .slice(latest ? 1 : 0, 8)
               .map((item) => (
                 <details
@@ -371,7 +573,7 @@ export function LiveOperationsGraph({
                 </details>
               ))}
 
-            {model.interactions.length === 0 && (
+            {visibleInteractions.length === 0 && (
               <div className="live-empty">
                 Waiting for the next real MCP call.
               </div>
@@ -382,30 +584,36 @@ export function LiveOperationsGraph({
         <div className="live-context-block">
           <div className="live-block-head">
             <div>
-              <span className="eyebrow">CURRENT WORK</span>
-              <strong>Durable work & next actions</strong>
+              <span className="eyebrow">TASK SUMMARY</span>
+              <strong>What happened in this workstream</strong>
             </div>
-            <span>{model.currentWorkstreams.length} current</span>
+            <span>{model.summaries.length} tracked</span>
           </div>
 
-          <div className="current-work-list">
-            {model.currentWorkstreams.map((stream) => (
-              <div
-                className={"current-work-row " + stream.status}
-                key={stream.id}
-              >
-                <div>
-                  <strong>{stream.sourceLabel}</strong>
-                  <span>{stream.goal}</span>
-                </div>
-                <small>{stream.currentExecutor}</small>
-                <p>{stream.currentAction}</p>
-              </div>
-            ))}
+          <div className="ops-summary-list">
+            {focusedSummary && <TaskSummaryCard summary={focusedSummary} />}
 
-            {model.currentWorkstreams.length === 0 && (
+            {model.summaries
+              .filter((summary) => summary.id !== focusedSummary?.id)
+              .slice(0, 4)
+              .map((summary) => (
+                <button
+                  type="button"
+                  className={"ops-summary-picker " + summary.status}
+                  key={summary.id}
+                  onClick={() => setSelectedWorkstreamId(summary.id)}
+                >
+                  <span>
+                    <strong>{summary.sourceLabel}</strong>
+                    <small>{summary.goal}</small>
+                  </span>
+                  <b>{summary.outcome}</b>
+                </button>
+              ))}
+
+            {model.summaries.length === 0 && (
               <div className="live-empty">
-                No current durable workstream.
+                No recent workstream summary yet.
               </div>
             )}
           </div>

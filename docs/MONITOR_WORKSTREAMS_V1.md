@@ -380,3 +380,60 @@ The live graph contains current facts, not indefinite history.
 A source/workstream remains visible when it is connected, owns active durable Runtime work, or was updated inside the live relevance window. The relevance window is derived from the configured planner progress cadence rather than being a renderer constant.
 
 Old completed/failed work remains Runtime/audit history but does not continue to occupy the live topology.
+
+## Closed-loop live graph
+
+The Monitor live graph is a closed operational loop, not a one-way architecture diagram.
+
+A real observed MCP interaction is projected as:
+
+Source
+  -> Transport
+  -> Authorization
+  -> Runtime
+  -> Tool / Task / Process
+  -> Result
+  -> Source
+
+The forward path shows request / dispatch / authorization / execution direction.
+The return rail shows result delivery back to the originating logical workstream.
+While execution is still running, the return rail remains in a pending-return state and MUST NOT imply that a result has already been delivered.
+
+The graph remains topology-driven:
+- groups/nodes/edges continue to come from the operations graph model;
+- future Worker, Cloud, Provider or target nodes can still extend the topology;
+- the closed-loop return view is derived from real return relationships and MCP interaction evidence.
+
+The graph shows concise communication labels only. Full request/response payload previews remain in the Real Traffic list below it.
+
+## Workstream completion summary
+
+Monitor derives a workstream summary from real MCP interactions, workstream progress and Runtime tasks.
+
+A summary includes:
+- source / logical workstream;
+- goal and final outcome;
+- tool-call count;
+- tool-call breakdown by tool;
+- interaction errors;
+- Runtime task failures / needs-review outcomes;
+- warning count;
+- progress update count;
+- reconnect / reclaim / supersede evidence when attributable to that workstream;
+- task count and completed-task count;
+- observed duration.
+
+The UI does not fabricate a narrative summary. It uses the recorded workstream summary/progress text when available and otherwise reports the current/final observed action.
+
+Completed workstreams remain visible for the live relevance window so the user can see what just finished and how it finished.
+
+## Sidebar information hierarchy
+
+Primary navigation flows from top to bottom.
+
+The fixed footer is identity-first:
+1. OWL LAB cloud account and entitlement state;
+2. current device identity;
+3. cloud connectivity / Desktop version.
+
+This Mac is therefore device context, not the primary identity of the product session.

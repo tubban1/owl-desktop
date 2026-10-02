@@ -87,11 +87,53 @@ export type OperationsAssurance = {
   detail: string;
 };
 
+export type OperationsLoopPath = {
+  id: string;
+  workstreamId: string | null;
+  sourceNodeId: string;
+  sourceLabel: string;
+  resultNodeId: string;
+  requestLabel: string;
+  responseLabel: string;
+  state: OperationsState;
+  running: boolean;
+  observedAt: string | null;
+};
+
+export type OperationsToolBreakdown = {
+  tool: string;
+  count: number;
+  errors: number;
+};
+
+export type OperationsWorkstreamSummary = {
+  id: string;
+  sourceLabel: string;
+  goal: string;
+  status: "running" | "completed" | "attention" | "waiting" | "idle";
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  toolCallCount: number;
+  toolBreakdown: OperationsToolBreakdown[];
+  progressCount: number;
+  errorCount: number;
+  warningCount: number;
+  reconnectCount: number;
+  taskCount: number;
+  completedTaskCount: number;
+  failedTaskCount: number;
+  outcome: string;
+  summaryText: string;
+};
+
 export type OperationsGraphModel = {
   generatedAt: string;
   groups: OperationsGraphGroup[];
   nodes: OperationsGraphNode[];
   edges: OperationsGraphEdge[];
+  loopPaths: OperationsLoopPath[];
+  summaries: OperationsWorkstreamSummary[];
   assurances: OperationsAssurance[];
   interactions: McpInteraction[];
   currentWorkstreams: MonitorWorkstream[];
@@ -321,6 +363,169 @@ function buildPolicy(snapshot: RuntimeSnapshot | null): OperationsGraphPolicy {
   };
 }
 
+function minTimestamp(values: Array<string | null | undefined>): string | null {
+  const valid = values
+    .map((value) => ({ value, at: timestamp(value) }))
+    .filter((item) => item.value && item.at > 0)
+    .sort((a, b) => a.at - b.at);
+  return valid[0]?.value ?? null;
+}
+
+function maxTimestamp(values: Array<string | null | undefined>): string | null {
+  const valid = values
+    .map((value) => ({ value, at: timestamp(value) }))
+    .filter((item) => item.value && item.at > 0)
+    .sort((a, b) => b.at - a.at);
+  return valid[0]?.value ?? null;
+}
+
+function buildWorkstreamSummaries({
+  streams,
+  interactions,
+  activity,
+}: {
+  streams: MonitorWorkstream[];
+  interactions: McpInteraction[];
+  activity: ActivityEntry[];
+}): OperationsWorkstreamSummary[] {
+  return streams.map((stream) => {
+    const streamInteractions = interactions.filter(
+      (item) =>
+        item.workstreamId === stream.ownerId ||
+        item.runtimeSessionId === stream.ownerId,
+    );
+    const toolCounts = new Map<string, OperationsToolBreakdown>();
+    for (const item of streamInteractions) {
+      const current = toolCounts.get(item.tool) ?? {
+        tool: item.tool,
+        count: 0,
+        errors: 0,
+      };
+      current.count += 1;
+      if (item.status === "error") current.errors += 1;
+      toolCounts.set(item.tool, current);
+    }
+
+    const taskFailed = stream.tasks.filter((task) =>
+      ["failed", "blocked", "needs_review"].includes(task.status),
+    ).length;
+    const taskCompleted = stream.tasks.filter((task) =>
+      ["completed", "cancelled"].includes(task.status),
+    ).length;
+    const taskActive = stream.tasks.some((task) => isActiveTask(task.status));
+    const hasErrors =
+      taskFailed > 0 ||
+      streamInteractions.some((item) => item.status === "error");
+
+    let status: OperationsWorkstreamSummary["status"] = "idle";
+    if (stream.status === "attention" || hasErrors) status = "attention";
+    else if (stream.status === "working" || taskActive) status = "running";
+    else if (stream.status === "waiting") status = "waiting";
+    else if (
+      stream.tasks.length > 0 &&
+      stream.tasks.every((task) =>
+        ["completed", "cancelled"].includes(task.status),
+      )
+    ) {
+      status = "completed";
+    }
+
+    const relatedActivity = activity.filter((entry) => {
+      const meta = entry.meta ?? {};
+      return (
+        meta.workstreamId === stream.ownerId ||
+        meta.runtimeSessionId === stream.ownerId
+      );
+    });
+    const warningCount = relatedActivity.filter(
+      (entry) => entry.level === "warn",
+    ).length;
+    const reconnectCount = relatedActivity.filter((entry) =>
+      /reconnect|reclaim|supersed|transport session opened/i.test(
+        entry.message ?? "",
+      ),
+    ).length;
+
+    const startedAt = minTimestamp([
+      ...streamInteractions.map(
+        (item) => item.startedAt ?? item.completedAt,
+      ),
+      ...stream.messages.map((message) => message.at),
+      stream.updatedAt,
+    ]);
+    const lastObservedAt = maxTimestamp([
+      ...streamInteractions.map(
+        (item) => item.completedAt ?? item.startedAt,
+      ),
+      ...stream.messages.map((message) => message.at),
+      ...stream.tasks.map((task) => task.updatedAt),
+      stream.updatedAt,
+    ]);
+    const completedAt =
+      status === "completed" || status === "attention"
+        ? lastObservedAt
+        : null;
+    const durationMs =
+      startedAt && completedAt
+        ? Math.max(0, timestamp(completedAt) - timestamp(startedAt))
+        : null;
+    const progressCount = Math.max(
+      stream.messages.filter((message) => message.kind === "progress").length,
+      streamInteractions.filter((item) => item.tool === "workstream_progress")
+        .length,
+    );
+    const errorCount = streamInteractions.filter(
+      (item) => item.status === "error",
+    ).length;
+
+    const outcome =
+      status === "completed"
+        ? "Completed"
+        : status === "attention"
+          ? taskFailed > 0
+            ? taskFailed + " task" + (taskFailed === 1 ? "" : "s") + " need attention"
+            : errorCount + " interaction error" + (errorCount === 1 ? "" : "s")
+          : status === "running"
+            ? "Executing"
+            : status === "waiting"
+              ? "Waiting"
+              : "Idle";
+
+    const lastProgress = stream.messages.find(
+      (message) => message.kind === "progress",
+    );
+    const summaryText =
+      stream.summary ??
+      lastProgress?.summary ??
+      (status === "completed"
+        ? stream.goal + " completed."
+        : stream.currentAction || stream.goal);
+
+    return {
+      id: stream.ownerId,
+      sourceLabel: stream.sourceLabel,
+      goal: stream.goal,
+      status,
+      startedAt,
+      completedAt,
+      durationMs,
+      toolCallCount: streamInteractions.length,
+      toolBreakdown: [...toolCounts.values()].sort(
+        (a, b) => b.count - a.count || a.tool.localeCompare(b.tool),
+      ),
+      progressCount,
+      errorCount,
+      warningCount,
+      reconnectCount,
+      taskCount: stream.tasks.length,
+      completedTaskCount: taskCompleted,
+      failedTaskCount: taskFailed,
+      outcome,
+      summaryText,
+    };
+  });
+}
+
 export function buildOperationsGraphModel({
   snapshot,
   activity,
@@ -338,6 +543,7 @@ export function buildOperationsGraphModel({
     activity,
     policy.maxInteractionHistory,
   );
+  const summaryInteractions = buildMcpInteractionFeed(activity, 200);
   const recentInteractions = interactions.filter((interaction) => {
     if (interaction.status === "running") return true;
     const at = timestamp(interaction.completedAt ?? interaction.startedAt);
@@ -1245,6 +1451,52 @@ export function buildOperationsGraphModel({
     .flatMap((stream) => stream.nextActions)
     .filter((value, index, values) => values.indexOf(value) === index);
 
+  const loopPaths: OperationsLoopPath[] = [...latestBySource.entries()].map(
+    ([identity, interaction]) => ({
+      id: "loop:" + identity,
+      workstreamId: interaction.workstreamId,
+      sourceNodeId: "source:" + identity,
+      sourceLabel:
+        nodes.get("source:" + identity)?.label ?? sourceLabel(interaction),
+      resultNodeId: "result:" + identity,
+      requestLabel:
+        interaction.tool + " · " + summarizeInteraction(interaction),
+      responseLabel:
+        interaction.status === "running"
+          ? "Awaiting result"
+          : interaction.status === "error"
+            ? interaction.errorCode ?? "Error returned"
+            : interaction.durationMs !== null
+              ? "Result · " + interaction.durationMs + " ms"
+              : "Result returned",
+      state: stateFromInteraction(interaction),
+      running: interaction.status === "running",
+      observedAt: interaction.completedAt ?? interaction.startedAt,
+    }),
+  );
+
+  const summaries = buildWorkstreamSummaries({
+    streams: currentWorkstreams,
+    interactions: summaryInteractions,
+    activity,
+  }).sort((a, b) => {
+    const rank = (status: OperationsWorkstreamSummary["status"]) =>
+      status === "running"
+        ? 5
+        : status === "attention"
+          ? 4
+          : status === "waiting"
+            ? 3
+            : status === "completed"
+              ? 2
+              : 1;
+    return (
+      rank(b.status) - rank(a.status) ||
+      timestamp(b.completedAt ?? b.startedAt) -
+        timestamp(a.completedAt ?? a.startedAt)
+    );
+  });
+
   const orderedGroups = [...groups.values()]
     .filter((group) => group.nodeIds.some((id) => nodes.has(id)))
     .sort((a, b) => a.order - b.order);
@@ -1254,6 +1506,8 @@ export function buildOperationsGraphModel({
     groups: orderedGroups,
     nodes: [...nodes.values()],
     edges: [...edges.values()],
+    loopPaths,
+    summaries,
     assurances,
     interactions: recentInteractions,
     currentWorkstreams,

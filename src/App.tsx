@@ -474,6 +474,32 @@ export default function App() {
     [processRows],
   );
 
+  const sidebarAccountLabel = useMemo(() => {
+    const account = cloudAccount?.account ?? {};
+    for (const key of [
+      "email",
+      "displayName",
+      "name",
+      "username",
+      "userName",
+      "sub",
+    ]) {
+      const value = account[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return cloudAccount?.status === "ready" ? "OWL LAB account" : "Not signed in";
+  }, [cloudAccount?.account, cloudAccount?.status]);
+
+  const sidebarAccountMeta =
+    cloudAccount?.status === "ready"
+      ? [
+          cloudAccount.entitlement?.plan ?? null,
+          cloudAccount.entitlement?.status?.replaceAll("_", " ") ?? null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : cloudAccount?.status?.replaceAll("_", " ") ?? "signed out";
+
   const workState = useMemo(() => deriveWorkState({
     taskRows,
     runningProcesses,
@@ -526,8 +552,34 @@ export default function App() {
         </details>
       </nav>
       <div className="sidebar-bottom">
-        <div className="device-card"><div className="device-dot" /><div><strong>This Mac</strong><span>{env ? env.platform + " · " + env.arch : "Loading…"}</span></div></div>
-        <div className="build-meta">OWL LAB Desktop {env?.appVersion ?? "0.1.0"}</div>
+        <button
+          type="button"
+          className="sidebar-account-card"
+          onClick={() => setPage("accounts")}
+        >
+          <span className={"sidebar-account-dot " + (accountConnected ? "online" : "")} />
+          <span className="sidebar-account-copy">
+            <strong title={sidebarAccountLabel}>{sidebarAccountLabel}</strong>
+            <small>{sidebarAccountMeta || "Account status unavailable"}</small>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          className="sidebar-device-card"
+          onClick={() => setPage("devices")}
+        >
+          <span className="device-dot" />
+          <span>
+            <strong>This Mac</strong>
+            <small>{env ? env.platform + " · " + env.arch : "Loading…"}</small>
+          </span>
+        </button>
+
+        <div className="sidebar-footer-meta">
+          <span>{cloudOnline ? "Cloud connected" : "Cloud offline"}</span>
+          <span>Desktop {env?.appVersion ?? "0.1.0"}</span>
+        </div>
       </div>
     </aside>
 

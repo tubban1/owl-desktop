@@ -218,6 +218,18 @@ describe("buildOperationsGraphModel", () => {
         expect.objectContaining({ relation: "return" }),
       ]),
     );
+    expect(model.loopPaths).toEqual([
+      expect.objectContaining({
+        id: "loop:owl-workstream:a",
+        sourceNodeId: "source:owl-workstream:a",
+        resultNodeId: "result:owl-workstream:a",
+        sourceLabel: "Chat A",
+        requestLabel: expect.stringContaining("read_file"),
+        responseLabel: expect.stringContaining("Result"),
+        state: "healthy",
+        running: false,
+      }),
+    ]);
   });
 
   it("cuts the path at authorization when Runtime is locked", () => {
@@ -465,6 +477,106 @@ describe("buildOperationsGraphModel", () => {
         from: "runtime:local",
         to: "target:sandbox-a",
         state: "active",
+      }),
+    );
+  });
+
+  it("summarizes a completed workstream from real interactions and tasks", () => {
+    const board = {
+      ...emptyBoard,
+      streams: [
+        {
+          id: "owl-workstream:a",
+          ownerId: "owl-workstream:a",
+          sourceKind: "ChatGPT",
+          sourceLabel: "Chat A",
+          connected: false,
+          transportCount: 0,
+          status: "disconnected",
+          isCurrent: false,
+          goal: "Inspect package and finish",
+          phase: "Completed",
+          summary: "Package inspected and task completed.",
+          updatedAt: "2026-10-02T06:29:59.000Z",
+          orchestrationId: null,
+          currentExecutor: "OWL Runtime",
+          currentAction: "Completed",
+          tasks: [
+            {
+              id: "task_1",
+              label: "Inspection",
+              status: "completed",
+              progressPercent: 100,
+              current: "Done",
+              updatedAt: "2026-10-02T06:29:59.000Z",
+            },
+          ],
+          messages: [
+            {
+              id: "progress_1",
+              at: "2026-10-02T06:29:58.500Z",
+              from: "Chat A",
+              to: "User",
+              kind: "progress",
+              summary: "Inspection complete",
+              tone: "healthy",
+            },
+          ],
+          nextActions: [],
+          progressPolicy: {
+            intervalMs: 15000,
+            maxToolSteps: 3,
+            checkpointAgeMs: 0,
+            lastProgressAt: "2026-10-02T06:29:58.500Z",
+            toolStepsSinceProgress: 0,
+            updateRecommended: false,
+          },
+        },
+      ],
+    } as any;
+
+    const activity = [
+      ...interactionActivity(),
+      {
+        id: "warning_1",
+        at: "2026-10-02T06:29:58.700Z",
+        level: "warn",
+        source: "mcp",
+        message: "Transient warning",
+        meta: {
+          workstreamId: "owl-workstream:a",
+          runtimeSessionId: "owl-workstream:a",
+        },
+      },
+    ] as any;
+
+    const model = buildOperationsGraphModel({
+      snapshot: baseSnapshot(),
+      activity,
+      board,
+      now,
+    });
+
+    expect(model.summaries).toContainEqual(
+      expect.objectContaining({
+        id: "owl-workstream:a",
+        status: "completed",
+        outcome: "Completed",
+        toolCallCount: 1,
+        progressCount: 1,
+        errorCount: 0,
+        warningCount: 1,
+        taskCount: 1,
+        completedTaskCount: 1,
+        failedTaskCount: 0,
+        summaryText: "Package inspected and task completed.",
+        toolBreakdown: [
+          expect.objectContaining({
+            tool: "read_file",
+            count: 1,
+            errors: 0,
+          }),
+        ],
       }),
     );
   });
