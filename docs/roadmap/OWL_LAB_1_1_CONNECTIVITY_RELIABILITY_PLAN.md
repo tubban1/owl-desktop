@@ -219,13 +219,13 @@ gate.
 
 Still pending before Reliability can be declared fully closed:
 
-- a real destructive Connection Host/Tunnel restart using the active ChatGPT
-  path and prepared Planner Handoff;
-- confirmation that the restarted live Tunnel is the new build exposing the
-  health-url/watchdog evidence in Monitor;
 - a longer packaged-runtime behavioral soak, beyond structural packaging;
 - final signed/notarized distribution gate when release credentials are
   available.
+
+The active-ChatGPT destructive Connection Host/Tunnel restart and live
+health-url/watchdog acceptance were completed on 2026-10-02; see the live
+acceptance evidence below.
 
 ## Already strong — do not regress
 
@@ -317,17 +317,17 @@ Completed:
   - a stale live process is terminated and restarted instead of remaining green;
   - recovery is single-flight.
 
-- **P0.5 Connection Host fault-domain isolation — automated isolation gate complete**
+- **P0.5 Connection Host fault-domain isolation — automated + live gate complete**
   - dev:full now uses a dedicated child supervisor and restarts Connection Host
     independently after process exit or spawn error;
   - fault injection proves a Host exit launches a replacement without sending
     any signal to a healthy Runtime child;
   - spawn error + exit is handled once rather than triggering duplicate recovery;
   - coordinated shutdown cancels queued restarts;
-  - a real destructive Host-restart dogfood is still intentionally pending
-    because killing the currently controlling Connection Host would sever the
-    active Jarvis session. That final acceptance test must run through an
-    isolated harness or a prepared handoff.
+  - a prepared Planner Handoff was consumed before the live destructive test,
+    so planner identity was recovered explicitly rather than guessed;
+  - the real Host restart preserved the Runtime PID and an active durable managed
+    process while replacing both Connection Host and Tunnel.
 
 - **P0.6 bounded recovery**
   - Tunnel recovery has one in-flight recovery promise;
@@ -432,3 +432,74 @@ watchdog.
 Regression coverage deliberately moves `Date.now()` six hours backward while
 monotonic evidence ages beyond the stale threshold and proves recovery still
 fires.
+
+### Live destructive acceptance — 2026-10-02
+
+The prepared Planner Handoff
+`handoff_murcbj4t_ba7336bac91f` was resumed successfully before the destructive
+test. The resumed workstream remained
+`owl-owner:7ae5f727b5eedda47220e6a3df64a6d5`; no replacement Runtime Task was
+created merely because the MCP transport changed.
+
+The first destructive Host restart exposed one real gap: Connection Host
+supervision restarted the host while Runtime survived, but Tunnel desired state
+and its API credential existed only in the old Host lifetime. The replacement
+Host therefore came back without a Tunnel.
+
+The fix keeps the existing secret boundary intact:
+
+- `dev:full` queues Tunnel recovery after every Connection Host launch;
+- recovery runs through the real OWL Desktop Electron application identity in
+  `OWL_TUNNEL_RECOVERY_ONLY=true` mode;
+- the recovery-only process opens no Desktop window and does not initialize the
+  normal Cloud/Runtime/UI bridges;
+- the Tunnel API key is decrypted only from the existing OS-backed
+  `safeStorage` vault and remains in memory;
+- the key is handed only to the loopback Connection Host control RPC;
+- the Tunnel child still receives an ephemeral 0600 credential file;
+- no plaintext recovery credential or desired-state secret is persisted.
+
+Final live evidence:
+
+    before Host kill:
+      Runtime PID:          93674
+      Connection Host PID:  93839
+      Tunnel PID:           94182
+      durable process PID:  97731
+
+    after Host kill:
+      Runtime PID:          93674   (unchanged)
+      Connection Host PID:  1040    (replaced)
+      Tunnel PID:           1046    (replaced automatically)
+      durable process PID:  97731   (unchanged)
+
+The replacement Tunnel command contained a fresh `--health.url-file`.
+After one watchdog interval its health endpoint reported:
+
+    /readyz:                         HTTP 200
+    health.live:                     true
+    health.ready:                    true
+    control-plane.status:            ok
+    control-plane.state:             polling
+    control-plane.consecutive_failures: 0
+    control-plane.last_success:      2026-10-02T20:02:51.597604Z
+
+The same ChatGPT conversation then reconnected through the replacement Tunnel,
+successfully called OWL Runtime again, and read the same durable process record.
+That process later exited normally with code 0 and preserved both
+`FINAL_SURVIVOR_START` and `FINAL_SURVIVOR_DONE` in persistent stdout.
+
+Post-fix gate:
+
+    full Desktop gate:          52/52 files, 244/244 tests PASS
+    Monitor model coverage:     PASS
+    Operations graph coverage:  PASS
+    Tunnel availability:        PASS
+    TypeScript + Vite build:    PASS
+    git diff --check:           PASS
+    arm64 packaged smoke:       PASS
+    packaged recovery module:   present in app.asar
+
+This closes the active-ChatGPT Connection Host/Tunnel destructive restart gate.
+The remaining Reliability items are packaged-runtime behavioral soak and the
+signed/notarized distribution gate.

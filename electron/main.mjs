@@ -32,6 +32,7 @@ import { assertRuntimeCompatibility } from "./services/compatibility-v1.mjs";
 import { AgentInboxStore } from "./services/agent-inbox-store.mjs";
 import { RuntimeAgentRequestEventConsumer } from "./services/runtime-agent-request-consumer.mjs";
 import { RuntimeAgentRequestEventBridge } from "./services/runtime-agent-request-event-bridge.mjs";
+import { createTunnelRecoveryPlan } from "./services/tunnel-recovery-plan.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let storageLayout;
@@ -43,6 +44,8 @@ const externalConnectionHostToken =
   process.env.OWL_CONNECTION_HOST_CONTROL_TOKEN?.trim() || "";
 const externalConnectionHostEnabled =
   Boolean(externalConnectionHostUrl && externalConnectionHostToken);
+const tunnelRecoveryOnly =
+  process.env.OWL_TUNNEL_RECOVERY_ONLY === "true";
 const desktopCapabilityBridgePort = Number(
   process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_PORT || "8792",
 );
@@ -1723,8 +1726,62 @@ function registerIpc() {
   });
 }
 
-const hasLock = app.requestSingleInstanceLock();
-if (!hasLock) {
+async function runTunnelRecoveryOnly() {
+  if (!externalConnectionHostEnabled) {
+    throw new Error(
+      "Tunnel recovery-only mode requires an external Connection Host.",
+    );
+  }
+
+  store = new DesktopStore();
+  const settings = store.getSettings();
+  const plan = createTunnelRecoveryPlan({
+    settings,
+    apiKey: tunnelApiKey(),
+    binaryPath:
+      process.env.OWL_TUNNEL_BINARY?.trim() || effectiveTunnelBinary(settings),
+    mcpUrl:
+      process.env.OWL_MCP_URL?.trim() ||
+      `http://127.0.0.1:${settings.mcpPort}/mcp`,
+  });
+
+  if (plan.action === "skip") {
+    console.log(`Tunnel recovery skipped: ${plan.reason}.`);
+    return plan;
+  }
+
+  const client = new ConnectionHostClient({
+    baseUrl: externalConnectionHostUrl,
+    token: externalConnectionHostToken,
+  });
+  const status = await client.startTunnel(plan.config);
+  console.log(
+    `Tunnel recovery applied: ${status?.state ?? "unknown"}${
+      status?.pid ? ` · PID ${status.pid}` : ""
+    }.`,
+  );
+  return status;
+}
+
+const hasLock = tunnelRecoveryOnly ? true : app.requestSingleInstanceLock();
+
+if (tunnelRecoveryOnly) {
+  storageLayout = configureOwlDesktopStorage(app);
+  app
+    .whenReady()
+    .then(async () => {
+      await runTunnelRecoveryOnly();
+      app.exit(0);
+    })
+    .catch((error) => {
+      console.error(
+        `Tunnel recovery failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      app.exit(1);
+    });
+} else if (!hasLock) {
   app.quit();
 } else {
   storageLayout = configureOwlDesktopStorage(app);

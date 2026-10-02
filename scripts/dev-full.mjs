@@ -398,6 +398,77 @@ const tunnelBinary = path.join(
   "tunnel-client-runtime",
 );
 
+const electronPackageRoot = path.join(desktopRoot, "node_modules", "electron");
+const electronPathFile = path.join(electronPackageRoot, "path.txt");
+const electronBinary = fs.existsSync(electronPathFile)
+  ? path.resolve(
+      electronPackageRoot,
+      "dist",
+      fs.readFileSync(electronPathFile, "utf8").trim(),
+    )
+  : null;
+
+let connectionHostRecoverySequence = Promise.resolve();
+
+function queueConnectionHostTunnelRecovery() {
+  connectionHostRecoverySequence = connectionHostRecoverySequence
+    .catch(() => undefined)
+    .then(async () => {
+      await waitFor(
+        `${connectionHostUrl}/health`,
+        "Connection Host recovery",
+        30_000,
+        { authorization: `Bearer ${connectionHostControlToken}` },
+      );
+
+      if (!electronBinary || !fs.existsSync(electronBinary)) {
+        console.warn(
+          "[dev:full] Tunnel recovery helper skipped: Electron binary is unavailable.",
+        );
+        return;
+      }
+      const recovered = spawnSync(
+        electronBinary,
+        [desktopRoot],
+        {
+          cwd: desktopRoot,
+          env: {
+            ...process.env,
+            PATH: devPath,
+            OWL_CONNECTION_HOST_URL: connectionHostUrl,
+            OWL_CONNECTION_HOST_CONTROL_TOKEN: connectionHostControlToken,
+            OWL_TUNNEL_RECOVERY_ONLY: "true",
+            OWL_TUNNEL_BINARY: tunnelBinary,
+            OWL_MCP_URL: `http://127.0.0.1:${mcpPort}/mcp`,
+          },
+          encoding: "utf8",
+          timeout: 20_000,
+        },
+      );
+
+      const stdout = recovered.stdout?.trim();
+      const stderr = recovered.stderr?.trim();
+      if (recovered.status === 0) {
+        if (stdout) console.log(`[dev:full] ${stdout}`);
+        return;
+      }
+
+      console.warn(
+        `[dev:full] Tunnel recovery helper failed (status=${recovered.status ?? "unknown"}, signal=${recovered.signal ?? "none"}).`,
+      );
+      if (stderr) console.warn(`[dev:full] ${stderr}`);
+    })
+    .catch((error) => {
+      console.warn(
+        `[dev:full] Tunnel recovery after Connection Host launch failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+
+  return connectionHostRecoverySequence;
+}
+
 if (!fs.existsSync(tunnelBinary)) {
   console.log("[dev:full] vendored OWL Tunnel missing; preparing component...");
   const prepared = spawnSync(
@@ -494,7 +565,13 @@ try {
           ? desktopUserSettings.sessionId
           : "",
     },
-    { restartOnExit: true, restartDelayMs: 1200 },
+    {
+      restartOnExit: true,
+      restartDelayMs: 1200,
+      onLaunch() {
+        void queueConnectionHostTunnelRecovery();
+      },
+    },
   );
   await waitFor(
     `${connectionHostUrl}/health`,
