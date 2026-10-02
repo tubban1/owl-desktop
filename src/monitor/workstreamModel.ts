@@ -1,6 +1,7 @@
 import type {
   AgentRequest,
   CloudBridgeCommandRecord,
+  ConversationContinuityStatus,
   PlannerContinuationOwner,
   RuntimeSnapshot,
 } from "../types";
@@ -114,6 +115,14 @@ export type WorkstreamTask = {
   progressPercent: number | null;
   current: string | null;
   updatedAt: string | null;
+  actionCount?: number;
+  succeededActions?: number;
+  failedActions?: number;
+  needsReviewActions?: number;
+  actions?: Array<{
+    action: string;
+    state: string;
+  }>;
 };
 
 export type MonitorWorkstream = {
@@ -130,11 +139,22 @@ export type MonitorWorkstream = {
   summary: string | null;
   updatedAt: string | null;
   orchestrationId: string | null;
+  latestHandoffId: string | null;
+  continuity: ConversationContinuityStatus | null;
   currentExecutor: string;
   currentAction: string;
   tasks: WorkstreamTask[];
   messages: WorkstreamMessage[];
   nextActions: string[];
+  toolStats: {
+    totalToolSteps: number;
+    recentTools: Array<{
+      at: string | null;
+      tool: string;
+      outcome: "success" | "error";
+      durationMs: number;
+    }>;
+  };
   progressPolicy: {
     intervalMs: number;
     maxToolSteps: number;
@@ -321,6 +341,36 @@ export function buildWorkstreamBoard({
               : null,
           updatedAt:
             task.updatedAt ?? task.progress?.lastMeaningfulAt ?? null,
+          actionCount: Math.max(
+            0,
+            Number(task.counts?.total ?? task.progress?.counts?.total ?? 0),
+          ),
+          succeededActions: Math.max(
+            0,
+            Number(
+              task.counts?.succeeded ??
+                task.progress?.counts?.succeeded ??
+                0,
+            ),
+          ),
+          failedActions: Math.max(
+            0,
+            Number(task.counts?.failed ?? task.progress?.counts?.failed ?? 0),
+          ),
+          needsReviewActions: Math.max(
+            0,
+            Number(
+              task.counts?.needsReview ??
+                task.progress?.counts?.needsReview ??
+                0,
+            ),
+          ),
+          actions: Array.isArray(task.steps)
+            ? task.steps.slice(0, 100).map((step: any) => ({
+                action: String(step.action ?? step.id ?? "unknown"),
+                state: String(step.state ?? "unknown"),
+              }))
+            : [],
         }));
 
       const taskIds = new Set(ownerTasks.map((task) => task.id));
@@ -537,6 +587,8 @@ export function buildWorkstreamBoard({
           owner.updatedAt ??
           null,
         orchestrationId: checkpoint?.orchestrationId ?? null,
+        latestHandoffId: owner.latestHandoffId ?? null,
+        continuity: owner.continuity ?? null,
         currentExecutor,
         currentAction,
         tasks: ownerTasks,
@@ -545,6 +597,17 @@ export function buildWorkstreamBoard({
           workstream?.progressEvents?.at(-1)?.nextActions?.slice(0, 6) ??
           checkpoint?.nextActions?.slice(0, 6) ??
           [],
+        toolStats: {
+          totalToolSteps: Number(workstream?.totalToolSteps ?? 0),
+          recentTools: Array.isArray(workstream?.recentTools)
+            ? workstream.recentTools.slice(-24).map((item: any) => ({
+                at: typeof item.at === "string" ? item.at : null,
+                tool: String(item.tool ?? "unknown"),
+                outcome: item.outcome === "error" ? "error" : "success",
+                durationMs: Math.max(0, Number(item.durationMs ?? 0)),
+              }))
+            : [],
+        },
         progressPolicy: {
           intervalMs: progressIntervalMs,
           maxToolSteps,
@@ -596,6 +659,8 @@ export function buildWorkstreamBoard({
         .sort()
         .at(-1) ?? null,
       orchestrationId: null,
+      latestHandoffId: null,
+      continuity: null,
       currentExecutor: "Agent Inbox",
       currentAction: "Waiting for claim",
       tasks: [],
@@ -618,6 +683,7 @@ export function buildWorkstreamBoard({
           : ("waiting" as const),
       })),
       nextActions: ["Claim a relevant request when an agent is available"],
+      toolStats: { totalToolSteps: 0, recentTools: [] },
       progressPolicy: {
         intervalMs: progressIntervalMs,
         maxToolSteps,
@@ -665,6 +731,8 @@ export function buildWorkstreamBoard({
       summary: null,
       updatedAt: command.updatedAt,
       orchestrationId: null,
+      latestHandoffId: null,
+      continuity: null,
       currentExecutor: "Desktop",
       currentAction:
         command.status === "uncertain"
@@ -690,6 +758,7 @@ export function buildWorkstreamBoard({
           ? "Reconcile uncertain command before replay"
           : "Wait for Runtime acceptance",
       ],
+      toolStats: { totalToolSteps: 0, recentTools: [] },
       progressPolicy: {
         intervalMs: progressIntervalMs,
         maxToolSteps,

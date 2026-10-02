@@ -71,11 +71,14 @@ try {
   }
   if (
     !instructions?.includes("task_submit") ||
-    !instructions?.includes("task_start") ||
+    !instructions?.includes("submission_id") ||
+    !instructions?.includes("orchestration_snapshot") ||
     !instructions?.includes("task_status") ||
-    !instructions?.includes("task_list")
+    !instructions?.includes("reconnect")
   ) {
-    throw new Error("OWL MCP server instructions do not describe durable long-task recovery.");
+    throw new Error(
+      "OWL MCP server instructions do not describe durable submission and reconnect recovery.",
+    );
   }
 
   const info = await first.client.callTool({

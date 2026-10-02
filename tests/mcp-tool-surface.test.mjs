@@ -104,6 +104,11 @@ describe("OWL MCP compatibility surface", () => {
       "planner_checkpoint",
       "planner_checkpoint_status",
       "planner_checkpoint_complete",
+      "conversation_continuity_status",
+      "conversation_handoff_prepare",
+      "conversation_handoff_latest",
+      "conversation_handoff_get",
+      "conversation_handoff_consume",
       "orchestration_snapshot",
       "task_list",
       "task_start",
@@ -133,5 +138,16 @@ describe("OWL MCP compatibility surface", () => {
 
     const missing = required.filter((name) => !names.has(name));
     expect(missing).toEqual([]);
+
+    const browserOpen = listed.tools.find((tool) => tool.name === "browser_open");
+    expect(browserOpen?.description).toContain("last-resort interaction path");
+
+    const workstreamProgress = listed.tools.find(
+      (tool) => tool.name === "workstream_progress",
+    );
+    const progressProperties =
+      workstreamProgress?.inputSchema?.properties ?? {};
+    expect(progressProperties).toHaveProperty("progress_boundary_id");
+    expect(progressProperties).toHaveProperty("user_visible_progress");
   });
 });

@@ -2,7 +2,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-const mcpUrl = new URL(process.env.OWL_MCP_URL || "http://127.0.0.1:18790/mcp");
+const mcpUrl = new URL(process.env.OWL_MCP_URL || "http://127.0.0.1:8790/mcp");
 const repo = process.env.OWL_E2E_REPO || process.cwd();
 const owner = process.env.OWL_E2E_OWNER || "owl-desktop:stream-recovery-e2e";
 

@@ -116,6 +116,11 @@ export type OperationsWorkstreamSummary = {
   durationMs: number | null;
   toolCallCount: number;
   toolBreakdown: OperationsToolBreakdown[];
+  runtimeActionCount: number;
+  runtimeActionSucceeded: number;
+  runtimeActionFailed: number;
+  runtimeActionNeedsReview: number;
+  runtimeActionBreakdown: OperationsToolBreakdown[];
   progressCount: number;
   errorCount: number;
   warningCount: number;
@@ -123,6 +128,8 @@ export type OperationsWorkstreamSummary = {
   taskCount: number;
   completedTaskCount: number;
   failedTaskCount: number;
+  taskErrorCount: number;
+  taskNeedsReviewCount: number;
   outcome: string;
   summaryText: string;
 };
@@ -274,7 +281,30 @@ function sourceLabel(interaction: McpInteraction): string {
 function stateFromInteraction(interaction: McpInteraction): OperationsState {
   if (interaction.status === "running") return "active";
   if (interaction.status === "error") return "attention";
+  if (interaction.status === "progress") return "waiting";
   return "healthy";
+}
+
+type InteractionRouteKind =
+  | "runtime-gated"
+  | "runtime-bypass"
+  | "host-local"
+  | "desktop-control"
+  | "remote-control";
+
+function interactionRouteKind(tool: string): InteractionRouteKind {
+  if (tool === "runtime_info") return "runtime-bypass";
+  if (
+    tool.startsWith("workstream_") ||
+    tool.startsWith("planner_checkpoint")
+  ) {
+    return "host-local";
+  }
+  if (tool.startsWith("agent_requests_")) return "desktop-control";
+  if (tool.startsWith("device_") || tool.startsWith("remote_task_")) {
+    return "remote-control";
+  }
+  return "runtime-gated";
 }
 
 function stateFromWorkstream(stream: MonitorWorkstream): OperationsState {
@@ -294,6 +324,10 @@ function isActiveTask(status: string) {
     "paused",
     "needs_review",
   ].includes(status);
+}
+
+function isExecutingTask(status: string) {
+  return status === "running";
 }
 
 function relevantWorkstream(
@@ -394,28 +428,72 @@ function buildWorkstreamSummaries({
         item.workstreamId === stream.ownerId ||
         item.runtimeSessionId === stream.ownerId,
     );
+    const substantiveInteractions = streamInteractions.filter(
+      (item) => item.status !== "progress",
+    );
     const toolCounts = new Map<string, OperationsToolBreakdown>();
-    for (const item of streamInteractions) {
+    const toolEvidence =
+      substantiveInteractions.length > 0
+        ? substantiveInteractions.map((item) => ({
+            tool: item.tool,
+            outcome: item.status === "error" ? "error" : "success",
+          }))
+        : (stream.toolStats?.recentTools ?? []);
+    for (const item of toolEvidence) {
       const current = toolCounts.get(item.tool) ?? {
         tool: item.tool,
         count: 0,
         errors: 0,
       };
       current.count += 1;
-      if (item.status === "error") current.errors += 1;
+      if (item.outcome === "error") current.errors += 1;
       toolCounts.set(item.tool, current);
     }
 
-    const taskFailed = stream.tasks.filter((task) =>
-      ["failed", "blocked", "needs_review"].includes(task.status),
+    const runtimeActionCounts = new Map<string, OperationsToolBreakdown>();
+    for (const task of stream.tasks) {
+      for (const action of task.actions ?? []) {
+        const current = runtimeActionCounts.get(action.action) ?? {
+          tool: action.action,
+          count: 0,
+          errors: 0,
+        };
+        current.count += 1;
+        if (["failed", "blocked"].includes(action.state)) current.errors += 1;
+        runtimeActionCounts.set(action.action, current);
+      }
+    }
+    const runtimeActionCount = stream.tasks.reduce(
+      (sum, task) => sum + (task.actionCount ?? 0),
+      0,
+    );
+    const runtimeActionSucceeded = stream.tasks.reduce(
+      (sum, task) => sum + (task.succeededActions ?? 0),
+      0,
+    );
+    const runtimeActionFailed = stream.tasks.reduce(
+      (sum, task) => sum + (task.failedActions ?? 0),
+      0,
+    );
+    const runtimeActionNeedsReview = stream.tasks.reduce(
+      (sum, task) => sum + (task.needsReviewActions ?? 0),
+      0,
+    );
+
+    const taskErrorCount = stream.tasks.filter((task) =>
+      ["failed", "blocked"].includes(task.status),
     ).length;
+    const taskNeedsReviewCount = stream.tasks.filter(
+      (task) => task.status === "needs_review",
+    ).length;
+    const taskFailed = taskErrorCount + taskNeedsReviewCount;
     const taskCompleted = stream.tasks.filter((task) =>
       ["completed", "cancelled"].includes(task.status),
     ).length;
     const taskActive = stream.tasks.some((task) => isActiveTask(task.status));
     const hasErrors =
       taskFailed > 0 ||
-      streamInteractions.some((item) => item.status === "error");
+      substantiveInteractions.some((item) => item.status === "error");
 
     let status: OperationsWorkstreamSummary["status"] = "idle";
     if (stream.status === "attention" || hasErrors) status = "attention";
@@ -471,12 +549,18 @@ function buildWorkstreamSummaries({
         : null;
     const progressCount = Math.max(
       stream.messages.filter((message) => message.kind === "progress").length,
-      streamInteractions.filter((item) => item.tool === "workstream_progress")
-        .length,
+      streamInteractions.filter(
+        (item) =>
+          item.tool === "workstream_progress" ||
+          item.status === "progress",
+      ).length,
     );
-    const errorCount = streamInteractions.filter(
-      (item) => item.status === "error",
-    ).length;
+    const errorCount =
+      substantiveInteractions.length > 0
+        ? substantiveInteractions.filter((item) => item.status === "error").length
+        : (stream.toolStats?.recentTools ?? []).filter(
+            (item) => item.outcome === "error",
+          ).length;
 
     const outcome =
       status === "completed"
@@ -509,8 +593,18 @@ function buildWorkstreamSummaries({
       startedAt,
       completedAt,
       durationMs,
-      toolCallCount: streamInteractions.length,
+      toolCallCount: Math.max(
+        substantiveInteractions.length,
+        stream.toolStats?.totalToolSteps ?? 0,
+      ),
       toolBreakdown: [...toolCounts.values()].sort(
+        (a, b) => b.count - a.count || a.tool.localeCompare(b.tool),
+      ),
+      runtimeActionCount,
+      runtimeActionSucceeded,
+      runtimeActionFailed,
+      runtimeActionNeedsReview,
+      runtimeActionBreakdown: [...runtimeActionCounts.values()].sort(
         (a, b) => b.count - a.count || a.tool.localeCompare(b.tool),
       ),
       progressCount,
@@ -520,6 +614,8 @@ function buildWorkstreamSummaries({
       taskCount: stream.tasks.length,
       completedTaskCount: taskCompleted,
       failedTaskCount: taskFailed,
+      taskErrorCount,
+      taskNeedsReviewCount,
       outcome,
       summaryText,
     };
@@ -553,6 +649,15 @@ export function buildOperationsGraphModel({
   const runningInteractions = recentInteractions.filter(
     (interaction) => interaction.status === "running",
   );
+  const routeKinds = new Set(
+    recentInteractions.map((interaction) =>
+      interactionRouteKind(interaction.tool),
+    ),
+  );
+  const desktopControlVisible =
+    routeKinds.has("desktop-control") || routeKinds.has("remote-control");
+  const remoteControlVisible = routeKinds.has("remote-control");
+  const runtimeGateNeeded = routeKinds.has("runtime-gated");
   const currentWorkstreams = board.streams.filter((stream) =>
     relevantWorkstream(stream, now, policy.recentWindowMs),
   );
@@ -739,8 +844,9 @@ export function buildOperationsGraphModel({
   }
 
   // Source nodes are derived only from real recent traffic, connected sessions,
-  // current durable work, or active Cloud commands.
-  for (const interaction of recentInteractions) {
+  // current durable work, or active Cloud commands. Apply oldest first so the
+  // newest observation wins when a source node is merged repeatedly.
+  for (const interaction of [...recentInteractions].reverse()) {
     const identity = sourceIdentity(interaction);
     addNode(
       {
@@ -772,11 +878,17 @@ export function buildOperationsGraphModel({
         kind: "source",
         label: stream.sourceLabel,
         detail: stream.goal,
-        state: stateFromWorkstream(stream),
+        state:
+          runningInteractions.some(
+            (interaction) => sourceIdentity(interaction) === stream.ownerId,
+          )
+            ? "active"
+            : stateFromWorkstream(stream),
         current:
-          stream.status === "working" ||
-          stream.status === "waiting" ||
-          stream.connected,
+          stream.tasks.some((task) => isExecutingTask(task.status)) ||
+          runningInteractions.some(
+            (interaction) => sourceIdentity(interaction) === stream.ownerId,
+          ),
         observedAt: stream.updatedAt,
         workstreamId: stream.ownerId,
         evidence: [`workstream:${stream.id}`],
@@ -886,7 +998,43 @@ export function buildOperationsGraphModel({
     }
   }
 
-  if (activeCloudCommands.length > 0) {
+  if (desktopControlVisible) {
+    const desktopInteractions = recentInteractions.filter((interaction) => {
+      const route = interactionRouteKind(interaction.tool);
+      return route === "desktop-control" || route === "remote-control";
+    });
+    addNode(
+      {
+        id: "transport:desktop-capability",
+        groupId: "coordination",
+        kind: "transport",
+        label: "Desktop Capability Bridge",
+        detail: "localhost control plane",
+        state: desktopInteractions.some(
+          (interaction) => interaction.status === "running",
+        )
+          ? "active"
+          : "healthy",
+        current: desktopInteractions.some(
+          (interaction) => interaction.status === "running",
+        ),
+        observedAt:
+          desktopInteractions[0]?.completedAt ??
+          desktopInteractions[0]?.startedAt ??
+          snapshot?.checkedAt ??
+          null,
+        workstreamId: null,
+        evidence: desktopInteractions.map((interaction) => interaction.id),
+      },
+      "Coordination",
+      25,
+    );
+  }
+
+  if (activeCloudCommands.length > 0 || remoteControlVisible) {
+    const remoteInteractions = recentInteractions.filter(
+      (interaction) => interactionRouteKind(interaction.tool) === "remote-control",
+    );
     addNode(
       {
         id: "transport:cloud-bridge",
@@ -896,19 +1044,33 @@ export function buildOperationsGraphModel({
         detail: snapshot?.cloud.status ?? "unknown",
         state:
           snapshot?.cloud.status === "connected"
-            ? "active"
+            ? activeCloudCommands.length > 0 ||
+              remoteInteractions.some(
+                (interaction) => interaction.status === "running",
+              )
+              ? "active"
+              : "healthy"
             : snapshot?.cloud.status === "degraded"
               ? "attention"
               : "waiting",
-        current: true,
+        current:
+          activeCloudCommands.length > 0 ||
+          remoteInteractions.some(
+            (interaction) => interaction.status === "running",
+          ),
         observedAt:
+          remoteInteractions[0]?.completedAt ??
+          remoteInteractions[0]?.startedAt ??
           snapshot?.cloud.lastCloudContactAt ??
           snapshot?.cloud.lastPollAt ??
           null,
         workstreamId: null,
-        evidence: activeCloudCommands.map(
-          (command) => `cloud-command:${command.commandId}`,
-        ),
+        evidence: [
+          ...activeCloudCommands.map(
+            (command) => `cloud-command:${command.commandId}`,
+          ),
+          ...remoteInteractions.map((interaction) => interaction.id),
+        ],
       },
       "Ingress",
       20,
@@ -965,7 +1127,20 @@ export function buildOperationsGraphModel({
     }
   }
 
-  if (access) {
+  const durableRuntimeVisible = currentWorkstreams.some((stream) =>
+    stream.tasks.some((task) => isActiveTask(task.status)),
+  );
+  const runtimeVisible =
+    routeKinds.has("runtime-gated") ||
+    routeKinds.has("runtime-bypass") ||
+    durableRuntimeVisible ||
+    activeCloudCommands.length > 0;
+  const runtimeAccessVisible =
+    runtimeGateNeeded ||
+    durableRuntimeVisible ||
+    activeCloudCommands.length > 0;
+
+  if (access && runtimeAccessVisible) {
     const leaseSource =
       access.grant?.source === "cloud-signed-lease"
         ? "Cloud-signed lease"
@@ -1008,7 +1183,7 @@ export function buildOperationsGraphModel({
     );
   }
 
-  if (snapshot?.mode === "live" || snapshot?.info) {
+  if (runtimeVisible && (snapshot?.mode === "live" || snapshot?.info)) {
     addNode(
       {
         id: "runtime:local",
@@ -1041,7 +1216,8 @@ export function buildOperationsGraphModel({
     if (!latestBySource.has(identity)) latestBySource.set(identity, interaction);
   }
 
-  for (const [identity, interaction] of latestBySource) {
+  for (const interaction of [...recentInteractions.slice(0, 12)].reverse()) {
+    const identity = sourceIdentity(interaction);
     const edgeState = stateFromInteraction(interaction);
     if (mcpNeeded) {
       addEdge({
@@ -1056,30 +1232,96 @@ export function buildOperationsGraphModel({
       });
     }
 
-    if (access) {
-      addEdge({
-        id: `edge:mcp:gate:${identity}`,
-        from: "transport:mcp",
-        to: "gate:runtime-access",
-        state: accessLocked ? "locked" : edgeState,
-        relation: "authorize",
-        label: null,
-        observed: true,
-        workstreamId: interaction.workstreamId,
-      });
-    }
+    const route = interactionRouteKind(interaction.tool);
+    let executionFrom = "transport:mcp";
+    let executionRelation: OperationsGraphEdge["relation"] = "execute";
+    let executionObserved = route === "host-local";
 
-    if (accessReady || !access) {
-      addEdge({
-        id: `edge:gate:runtime:${identity}`,
-        from: access ? "gate:runtime-access" : "transport:mcp",
-        to: "runtime:local",
-        state: edgeState,
-        relation: "execute",
-        label: null,
-        observed: interaction.status !== "error" || accessReady,
-        workstreamId: interaction.workstreamId,
-      });
+    if (route === "runtime-gated") {
+      if (access && nodes.has("gate:runtime-access")) {
+        addEdge({
+          id: `edge:mcp:gate:${identity}`,
+          from: "transport:mcp",
+          to: "gate:runtime-access",
+          state: accessLocked ? "locked" : edgeState,
+          relation: "authorize",
+          label: "lease gate",
+          observed: false,
+          workstreamId: interaction.workstreamId,
+        });
+        executionFrom = "gate:runtime-access";
+      }
+
+      if (!accessLocked && nodes.has("runtime:local")) {
+        addEdge({
+          id: `edge:gate:runtime:${identity}`,
+          from: executionFrom,
+          to: "runtime:local",
+          state: edgeState,
+          relation: "execute",
+          label: "runtime API",
+          observed: false,
+          workstreamId: interaction.workstreamId,
+        });
+        executionFrom = "runtime:local";
+      }
+    } else if (route === "runtime-bypass") {
+      if (nodes.has("runtime:local")) {
+        addEdge({
+          id: `edge:mcp:runtime:${identity}`,
+          from: "transport:mcp",
+          to: "runtime:local",
+          state: edgeState,
+          relation: "execute",
+          label: "public runtime API",
+          observed: false,
+          workstreamId: interaction.workstreamId,
+        });
+        executionFrom = "runtime:local";
+      }
+    } else if (route === "desktop-control") {
+      if (nodes.has("transport:desktop-capability")) {
+        addEdge({
+          id: `edge:mcp:desktop:${identity}`,
+          from: "transport:mcp",
+          to: "transport:desktop-capability",
+          state: edgeState,
+          relation: "coordination",
+          label: "localhost RPC",
+          observed: false,
+          workstreamId: interaction.workstreamId,
+        });
+        executionFrom = "transport:desktop-capability";
+        executionRelation = "coordination";
+      }
+    } else if (route === "remote-control") {
+      if (nodes.has("transport:desktop-capability")) {
+        addEdge({
+          id: `edge:mcp:desktop:${identity}`,
+          from: "transport:mcp",
+          to: "transport:desktop-capability",
+          state: edgeState,
+          relation: "coordination",
+          label: "localhost RPC",
+          observed: false,
+          workstreamId: interaction.workstreamId,
+        });
+        executionFrom = "transport:desktop-capability";
+      }
+      if (nodes.has("transport:cloud-bridge")) {
+        addEdge({
+          id: `edge:desktop:cloud:${identity}`,
+          from: executionFrom,
+          to: "transport:cloud-bridge",
+          state: edgeState,
+          relation: "dispatch",
+          label: "cloud control",
+          observed: false,
+          workstreamId: interaction.workstreamId,
+        });
+        executionFrom = "transport:cloud-bridge";
+        executionRelation = "dispatch";
+      }
     }
 
     const toolNodeId = `tool:${interaction.id}`;
@@ -1100,31 +1342,34 @@ export function buildOperationsGraphModel({
       50,
     );
 
-    if (!accessLocked && nodes.has("runtime:local")) {
-      addEdge({
-        id: `edge:runtime:${toolNodeId}`,
-        from: "runtime:local",
-        to: toolNodeId,
-        state: edgeState,
-        relation: "execute",
-        label: null,
-        observed: true,
-        workstreamId: interaction.workstreamId,
-      });
-    } else if (accessLocked && access) {
+    if (route === "runtime-gated" && accessLocked && access) {
       addEdge({
         id: `edge:gate:${toolNodeId}`,
         from: "gate:runtime-access",
         to: toolNodeId,
         state: "locked",
-        relation: "execute",
+        relation: "authorize",
         label: "denied",
-        observed: true,
+        observed: false,
+        workstreamId: interaction.workstreamId,
+      });
+    } else {
+      addEdge({
+        id: `edge:route:${toolNodeId}`,
+        from: executionFrom,
+        to: toolNodeId,
+        state: edgeState,
+        relation: executionRelation,
+        label:
+          route === "host-local"
+            ? "handled in Connection Host"
+            : null,
+        observed: executionObserved,
         workstreamId: interaction.workstreamId,
       });
     }
 
-    const resultNodeId = `result:${identity}`;
+    const resultNodeId = `result:${interaction.id}`;
     addNode(
       {
         id: resultNodeId,
@@ -1135,7 +1380,9 @@ export function buildOperationsGraphModel({
             ? "Running"
             : interaction.status === "success"
               ? "Success"
-              : "Error",
+              : interaction.status === "progress"
+                ? "Progress checkpoint"
+                : "Error",
         detail:
           interaction.status === "running"
             ? interaction.tool
@@ -1160,7 +1407,7 @@ export function buildOperationsGraphModel({
       workstreamId: interaction.workstreamId,
     });
     addEdge({
-      id: `edge:return:${identity}`,
+      id: `edge:return:${interaction.id}`,
       from: resultNodeId,
       to: `source:${identity}`,
       state: edgeState,
@@ -1190,7 +1437,7 @@ export function buildOperationsGraphModel({
               : ["blocked", "needs_review"].includes(task.status)
                 ? "attention"
                 : "waiting",
-          current: true,
+          current: isExecutingTask(task.status),
           observedAt: task.updatedAt,
           workstreamId: stream.ownerId,
           evidence: [`task:${task.id}`],
@@ -1204,7 +1451,12 @@ export function buildOperationsGraphModel({
             id: `edge:durable:${stream.ownerId}:runtime`,
             from: sourceNodeId,
             to: "runtime:local",
-            state: "active",
+            state:
+              task.status === "running"
+                ? "active"
+                : ["blocked", "needs_review"].includes(task.status)
+                  ? "attention"
+                  : "waiting",
             relation: "durable",
             label: "survives disconnect",
             observed: true,
@@ -1215,7 +1467,12 @@ export function buildOperationsGraphModel({
           id: `edge:runtime:task:${task.id}`,
           from: "runtime:local",
           to: taskNodeId,
-          state: task.status === "running" ? "active" : "waiting",
+          state:
+            task.status === "running"
+              ? "active"
+              : ["blocked", "needs_review"].includes(task.status)
+                ? "attention"
+                : "waiting",
           relation: "execute",
           label: null,
           observed: true,
@@ -1360,7 +1617,12 @@ export function buildOperationsGraphModel({
   }
 
   const currentDurable = currentWorkstreams.filter((stream) =>
-    stream.tasks.some((task) => isActiveTask(task.status)),
+    stream.tasks.some((task) => isExecutingTask(task.status)),
+  );
+  const retainedDurable = currentWorkstreams.filter(
+    (stream) =>
+      !stream.tasks.some((task) => isExecutingTask(task.status)) &&
+      stream.tasks.some((task) => isActiveTask(task.status)),
   );
   const recoverable = currentWorkstreams.filter(
     (stream) => !stream.connected && stream.isCurrent,
@@ -1379,22 +1641,28 @@ export function buildOperationsGraphModel({
       label: "PERSISTENT",
       state: !runtimeLive
         ? "offline"
-        : currentDurable.length > 0 || recoverable.length > 0
+        : currentDurable.length > 0
           ? "active"
-          : "healthy",
+          : retainedDurable.length > 0 || recoverable.length > 0
+            ? "waiting"
+            : "healthy",
       value: !runtimeLive
         ? "Offline"
         : currentDurable.length > 0
           ? "Active"
-          : recoverable.length > 0
-            ? "Recoverable"
-            : "Ready",
+          : retainedDurable.length > 0
+            ? "Retained"
+            : recoverable.length > 0
+              ? "Recoverable"
+              : "Ready",
       detail:
         currentDurable.length > 0
           ? `${currentDurable.length} durable workstream${currentDurable.length === 1 ? "" : "s"} executing`
-          : recoverable.length > 0
-            ? `${recoverable.length} workstream${recoverable.length === 1 ? "" : "s"} survives source disconnect`
-            : "No durable execution currently running",
+          : retainedDurable.length > 0
+            ? `${retainedDurable.length} durable workstream${retainedDurable.length === 1 ? "" : "s"} retained / waiting`
+            : recoverable.length > 0
+              ? `${recoverable.length} workstream${recoverable.length === 1 ? "" : "s"} survives source disconnect`
+              : "No durable execution currently running",
     },
     {
       id: "observable",
@@ -1458,7 +1726,7 @@ export function buildOperationsGraphModel({
       sourceNodeId: "source:" + identity,
       sourceLabel:
         nodes.get("source:" + identity)?.label ?? sourceLabel(interaction),
-      resultNodeId: "result:" + identity,
+      resultNodeId: "result:" + interaction.id,
       requestLabel:
         interaction.tool + " · " + summarizeInteraction(interaction),
       responseLabel:
@@ -1466,9 +1734,11 @@ export function buildOperationsGraphModel({
           ? "Awaiting result"
           : interaction.status === "error"
             ? interaction.errorCode ?? "Error returned"
-            : interaction.durationMs !== null
-              ? "Result · " + interaction.durationMs + " ms"
-              : "Result returned",
+            : interaction.status === "progress"
+              ? "Progress checkpoint"
+              : interaction.durationMs !== null
+                ? "Result · " + interaction.durationMs + " ms"
+                : "Result returned",
       state: stateFromInteraction(interaction),
       running: interaction.status === "running",
       observedAt: interaction.completedAt ?? interaction.startedAt,

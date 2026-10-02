@@ -83,6 +83,8 @@ const runtime = spawn("npm", ["run", "start:source"], {
     ALLOW_SHELL: "false",
     ALLOW_GIT_PUSH: "false",
     OWL_APPROVAL_MODE: "compat",
+    OWL_RUNTIME_ACCESS_MODE: "compat",
+    OWL_RUNTIME_REQUIRE_SIGNED_LEASE: "false",
     TASK_STAGING_EXPOSE_TO_FS: "true",
   },
   stdio: ["ignore", "pipe", "pipe"],

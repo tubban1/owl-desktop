@@ -260,12 +260,20 @@ try {
     orchestration_label: "Multi-device product-live",
   };
 
-  const submitted = parseTool(
-    await client.callTool({
-      name: "remote_task_submit",
-      arguments: submitArgs,
-    }),
-  );
+  const submitResult = await client.callTool({
+    name: "remote_task_submit",
+    arguments: submitArgs,
+  });
+  if (submitResult.isError) {
+    throw new Error(
+      "remote_task_submit failed: " +
+        (submitResult.content ?? [])
+          .filter((part: any) => part.type === "text")
+          .map((part: any) => part.text)
+          .join("\n"),
+    );
+  }
+  const submitted = parseTool(submitResult);
   assert.equal(submitted.accepted, true);
   assert.equal(submitted.idempotent, false);
   assert.ok(submitted.commandId);

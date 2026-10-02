@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Clock3,
   Cloud,
+  Copy,
   Cpu,
   GitBranch,
   Inbox,
@@ -54,6 +55,151 @@ const formatDuration = (value?: number | null) => {
   const seconds = Math.round((value % 60_000) / 1000);
   return String(minutes) + "m " + String(seconds) + "s";
 };
+
+const formatCompactNumber = (value: number) => {
+  const bounded = Math.max(0, value);
+  if (bounded >= 1_000_000) {
+    const scaled = bounded / 1_000_000;
+    return scaled.toFixed(scaled < 10 ? 1 : 0).replace(/\.0$/, "") + "M";
+  }
+  if (bounded >= 1_000) {
+    const scaled = bounded / 1_000;
+    return scaled.toFixed(scaled < 10 ? 1 : 0).replace(/\.0$/, "") + "K";
+  }
+  return String(Math.round(bounded));
+};
+
+function ConversationContinuityCard({
+  board,
+  continuation,
+}: {
+  board: WorkstreamBoard;
+  continuation: RuntimeSnapshot["mcp"]["continuation"];
+}) {
+  const [copied, setCopied] = useState(false);
+  const candidates = board.streams
+    .filter((stream) => Boolean(stream.continuity))
+    .sort((left, right) => {
+      const leftPriority =
+        (left.sourceKind === "ChatGPT" ? 10_000 : 0) +
+        (left.isCurrent ? 1_000 : 0) +
+        Number(left.continuity?.score ?? 0);
+      const rightPriority =
+        (right.sourceKind === "ChatGPT" ? 10_000 : 0) +
+        (right.isCurrent ? 1_000 : 0) +
+        Number(right.continuity?.score ?? 0);
+      return rightPriority - leftPriority;
+    });
+  const stream = candidates[0];
+  const continuity = stream?.continuity ?? null;
+  if (!stream || !continuity) return null;
+
+  const latestHandoff =
+    continuation?.latestReadyHandoff?.sourceWorkstreamId === stream.ownerId
+      ? continuation.latestReadyHandoff
+      : null;
+  const risk = continuity.risk.toUpperCase();
+  const duplicatePercent = Math.round(continuity.duplicateRatio * 100);
+  const resumePrompt = latestHandoff
+    ? [
+        "Continue OWL LAB using Planner Handoff " + latestHandoff.id + ".",
+        "Resume workstream " + latestHandoff.sourceWorkstreamId + ".",
+        "Inspect existing Runtime Task state before doing replacement work.",
+        "Do not create replacement tasks merely because the ChatGPT conversation changed.",
+      ].join(" ")
+    : "";
+
+  const copyResumePrompt = async () => {
+    if (!resumePrompt) return;
+    try {
+      await navigator.clipboard.writeText(resumePrompt);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <section className={"panel continuity-card risk-" + continuity.risk}>
+      <div className="continuity-head">
+        <div>
+          <span className="eyebrow">CONVERSATION CONTINUITY</span>
+          <div className="continuity-title-row">
+            <h3>{stream.sourceLabel}</h3>
+            <span className={"continuity-risk risk-" + continuity.risk}>
+              {risk}
+            </span>
+          </div>
+          <p>
+            OWL-observed MCP traffic only — not OpenAI&apos;s actual context
+            window.
+          </p>
+        </div>
+        <div className={"continuity-state " + continuity.state}>
+          <ShieldCheck size={16} />
+          <span>{continuity.state.replaceAll("_", " ")}</span>
+        </div>
+      </div>
+
+      <div className="continuity-metrics">
+        <div>
+          <span>Observed context</span>
+          <strong>~{formatCompactNumber(continuity.observedTokenEquivalent)}</strong>
+          <small>token-equivalent heuristic</small>
+        </div>
+        <div>
+          <span>Growth</span>
+          <strong>
+            +{formatCompactNumber(continuity.recentGrowthTokenEquivalent)}
+          </strong>
+          <small>last {continuity.windowMinutes} min</small>
+        </div>
+        <div>
+          <span>Repeated payload</span>
+          <strong>{duplicatePercent}%</strong>
+          <small>exact sanitized payload hashes</small>
+        </div>
+        <div>
+          <span>OWL calls</span>
+          <strong>{continuity.toolCallCount}</strong>
+          <small>{formatDuration(continuity.sessionAgeMs)} workstream age</small>
+        </div>
+      </div>
+
+      <div className="continuity-foot">
+        <div className="continuity-handoff-copy">
+          <strong>
+            {continuity.handoffReady
+              ? "Handoff snapshot ready"
+              : continuity.risk === "high" || continuity.risk === "critical"
+                ? "Handoff recommended"
+                : "Continuity protected"}
+          </strong>
+          <span>
+            {latestHandoff
+              ? latestHandoff.id
+              : continuity.risk === "high" || continuity.risk === "critical"
+                ? continuity.reasons[0]?.detail ??
+                  "A durable Planner Handoff is being prepared."
+                : continuity.risk === "medium"
+                  ? "Growing, but no handoff is required yet. OWL will prepare one automatically at HIGH."
+                  : "No handoff needed. OWL will snapshot automatically before recommending a new Chat."}
+          </span>
+        </div>
+        {latestHandoff && (
+          <button
+            className="secondary continuity-copy-button"
+            onClick={() => void copyResumePrompt()}
+          >
+            <Copy size={14} />
+            {copied ? "Copied" : "Copy Resume Prompt"}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
 
 function StatusBadge({
   status,
@@ -1035,6 +1181,11 @@ export function MonitorPage({
         onApprove={onApproveApproval}
         onDeny={onDenyApproval}
         compact
+      />
+
+      <ConversationContinuityCard
+        board={workstreamBoard}
+        continuation={snapshot?.mcp.continuation}
       />
 
       <LiveOperationsGraph

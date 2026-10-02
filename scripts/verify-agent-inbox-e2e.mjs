@@ -61,7 +61,7 @@ const seeded = inbox.create({
 const server = await startOwlMcpHttpServer({
   port: 0,
   runtimeBaseUrl:
-    process.env.OWL_RUNTIME_URL?.trim() || "http://127.0.0.1:8788",
+    process.env.OWL_RUNTIME_URL?.trim() || "http://127.0.0.1:18788",
   runtimeToken: process.env.OWL_RUNTIME_API_TOKEN?.trim() || undefined,
   agentInbox: inbox,
 });

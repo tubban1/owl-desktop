@@ -6,7 +6,7 @@ import { CloudBridgeStore } from "../electron/services/cloud-bridge-store.mjs";
 import { RuntimeHttpClient } from "../electron/runtime-http-client.mjs";
 
 const runtimeBaseUrl =
-  process.env.OWL_RUNTIME_URL?.trim() || "http://127.0.0.1:8788";
+  process.env.OWL_RUNTIME_URL?.trim() || "http://127.0.0.1:18788";
 const repo =
   process.env.OWL_E2E_REPO?.trim() || process.cwd();
 

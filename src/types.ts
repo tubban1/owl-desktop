@@ -387,6 +387,9 @@ export type PlannerCheckpoint = {
   } | null;
   orchestrationId: string | null;
   taskIds: string[];
+  decisions?: string[];
+  constraints?: string[];
+  doNotRepeat?: string[];
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -436,6 +439,67 @@ export type PlannerWorkstream = {
   recentTools: WorkstreamToolEvent[];
 };
 
+export type ConversationContinuityStatus = {
+  modelVersion: 1;
+  basis: "owl_observed_mcp_traffic";
+  risk: "low" | "medium" | "high" | "critical";
+  state: "healthy" | "growing" | "handoff_recommended" | "handoff_ready";
+  score: number;
+  handoffReady: boolean;
+  handoffId?: string | null;
+  observedChars: number;
+  observedTokenEquivalent: number;
+  tokenEquivalentHeuristic: string;
+  recentGrowthChars: number;
+  recentGrowthTokenEquivalent: number;
+  windowMinutes: number;
+  duplicateChars: number;
+  duplicateRatio: number;
+  toolCallCount: number;
+  sessionAgeMs: number;
+  checkpointAgeMs: number | null;
+  activeTaskCount: number;
+  reasons: Array<{
+    code: string;
+    points: number;
+    detail: string;
+  }>;
+};
+
+export type PlannerHandoff = {
+  schemaVersion: 1;
+  id: string;
+  status: "ready" | "consumed";
+  project: string | null;
+  reason: string;
+  continuityRisk: "low" | "medium" | "high" | "critical" | null;
+  sourceOwnerId: string;
+  sourceWorkstreamId: string;
+  sourceCheckpointRevision: number | null;
+  capsule: {
+    goal: string;
+    phase: string | null;
+    summary: string | null;
+    completed: string[];
+    nextActions: string[];
+    decisions: string[];
+    constraints: string[];
+    doNotRepeat: string[];
+    workspace: PlannerCheckpoint["workspace"];
+    orchestrationId: string | null;
+    taskIds: string[];
+  };
+  evidenceRefs: Array<{
+    kind: string;
+    id: string;
+    label?: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+  consumedAt: string | null;
+  consumedByOwnerId: string | null;
+};
+
 export type PlannerContinuationOwner = {
   ownerId: string;
   clientKind: "chatgpt" | "worker" | "cloud" | "desktop" | "agent" | "mcp" | null;
@@ -447,12 +511,16 @@ export type PlannerContinuationOwner = {
   lastDisconnectedAt: string | null;
   checkpoint: PlannerCheckpoint | null;
   workstream?: PlannerWorkstream | null;
+  latestHandoffId?: string | null;
+  continuity?: ConversationContinuityStatus | null;
   updatedAt: string | null;
 };
 
 export type PlannerContinuationSummary = {
   activeCheckpointCount: number;
   connectedOwnerCount: number;
+  readyHandoffCount?: number;
+  latestReadyHandoff?: PlannerHandoff | null;
   latestActive: PlannerContinuationOwner | null;
   owners?: PlannerContinuationOwner[];
   progressPolicy?: {

@@ -162,7 +162,7 @@ describe("PlannerContinuationStore", () => {
     expect(summary.latestActive.checkpoint.goal).toBe("Active");
     expect(summary.owners).toHaveLength(2);
     expect(summary.progressPolicy).toEqual({
-      recommendedUpdateIntervalMs: 15000,
+      recommendedUpdateIntervalMs: 10000,
       recommendedMaxToolStepsWithoutUpdate: 3,
     });
   });

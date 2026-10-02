@@ -45,7 +45,15 @@ const clock = (value?: string | null) =>
 const duration = (value?: number | null) => {
   if (typeof value !== "number") return "";
   if (value < 1000) return `${Math.round(value)} ms`;
-  return `${(value / 1000).toFixed(1)} s`;
+  if (value < 60_000) return `${(value / 1000).toFixed(1)} s`;
+  if (value < 3_600_000) {
+    const minutes = Math.floor(value / 60_000);
+    const seconds = Math.floor((value % 60_000) / 1000);
+    return `${minutes}m ${seconds}s`;
+  }
+  const hours = Math.floor(value / 3_600_000);
+  const minutes = Math.floor((value % 3_600_000) / 60_000);
+  return `${hours}h ${minutes}m`;
 };
 
 function NodeIcon({
@@ -208,6 +216,110 @@ function GraphNodeCard({
   );
 }
 
+type NetworkPoint = {
+  node: OperationsGraphNode;
+  x: number;
+  y: number;
+};
+
+type NetworkEdgePath = {
+  edge: OperationsGraphEdge;
+  path: string;
+  labelX: number;
+  labelY: number;
+};
+
+function compactNetworkText(value: string | null | undefined, length = 28) {
+  if (!value) return "";
+  return value.length <= length ? value : value.slice(0, length - 1) + "…";
+}
+
+function buildNetworkLayout(
+  model: ReturnType<typeof buildOperationsGraphModel>,
+) {
+  const groups = model.groups;
+  const maxNodes = Math.max(
+    1,
+    ...groups.map((group) => group.nodeIds.length),
+  );
+  const width = Math.max(880, groups.length * 150);
+  const height = Math.max(330, Math.min(610, 150 + maxNodes * 72));
+  const left = 64;
+  const right = 84;
+  const top = 78;
+  const bottom = 72;
+  const xStep =
+    groups.length > 1
+      ? (width - left - right) / (groups.length - 1)
+      : 0;
+  const points = new Map<string, NetworkPoint>();
+  const groupLabels: Array<{ id: string; label: string; x: number }> = [];
+
+  groups.forEach((group, groupIndex) => {
+    const x = left + groupIndex * xStep;
+    groupLabels.push({ id: group.id, label: group.label, x });
+    const nodeIds = group.nodeIds.filter((id) =>
+      model.nodes.some((node) => node.id === id),
+    );
+    nodeIds.forEach((id, nodeIndex) => {
+      const node = model.nodes.find((candidate) => candidate.id === id);
+      if (!node) return;
+      const y =
+        nodeIds.length === 1
+          ? (top + height - bottom) / 2
+          : top +
+            (nodeIndex * (height - top - bottom)) /
+              Math.max(1, nodeIds.length - 1);
+      points.set(id, { node, x, y });
+    });
+  });
+
+  const edges: NetworkEdgePath[] = [];
+  model.edges.forEach((edge, index) => {
+    const from = points.get(edge.from);
+    const to = points.get(edge.to);
+    if (!from || !to) return;
+
+    const backwards = to.x <= from.x || edge.relation === "return";
+    let path: string;
+    let labelX: number;
+    let labelY: number;
+
+    if (backwards) {
+      const laneY = Math.min(
+        height - 28,
+        Math.max(from.y, to.y) + 78 + (index % 3) * 14,
+      );
+      path =
+        "M " + from.x + " " + from.y +
+        " C " + (from.x + 72) + " " + laneY +
+        ", " + (to.x - 72) + " " + laneY +
+        ", " + to.x + " " + to.y;
+      labelX = (from.x + to.x) / 2;
+      labelY = laneY - 7;
+    } else {
+      const dx = to.x - from.x;
+      const bend = Math.max(48, dx * 0.42);
+      path =
+        "M " + from.x + " " + from.y +
+        " C " + (from.x + bend) + " " + from.y +
+        ", " + (to.x - bend) + " " + to.y +
+        ", " + to.x + " " + to.y;
+      labelX = (from.x + to.x) / 2;
+      labelY = (from.y + to.y) / 2 - 8;
+    }
+
+    edges.push({ edge, path, labelX, labelY });
+  });
+
+  return {
+    width,
+    height,
+    points: [...points.values()],
+    edges,
+    groupLabels,
+  };
+}
 function TaskSummaryCard({
   summary,
 }: {
@@ -232,8 +344,12 @@ function TaskSummaryCard({
 
       <div className="ops-summary-metrics">
         <div>
-          <span>Tool calls</span>
+          <span>MCP calls</span>
           <strong>{summary.toolCallCount}</strong>
+        </div>
+        <div>
+          <span>Runtime actions</span>
+          <strong>{summary.runtimeActionCount}</strong>
         </div>
         <div>
           <span>Tasks</span>
@@ -243,7 +359,19 @@ function TaskSummaryCard({
         </div>
         <div>
           <span>Errors</span>
-          <strong>{summary.errorCount + summary.failedTaskCount}</strong>
+          <strong>
+            {summary.errorCount +
+              Math.max(summary.runtimeActionFailed, summary.taskErrorCount)}
+          </strong>
+        </div>
+        <div>
+          <span>Needs review</span>
+          <strong>
+            {Math.max(
+              summary.runtimeActionNeedsReview,
+              summary.taskNeedsReviewCount,
+            )}
+          </strong>
         </div>
         <div>
           <span>Warnings</span>
@@ -260,7 +388,9 @@ function TaskSummaryCard({
       </div>
 
       {summary.toolBreakdown.length > 0 && (
-        <div className="ops-tool-breakdown">
+        <>
+          <span className="ops-breakdown-label">MCP</span>
+          <div className="ops-tool-breakdown">
           {summary.toolBreakdown.slice(0, 8).map((item) => (
             <span
               className={item.errors > 0 ? "attention" : ""}
@@ -271,7 +401,26 @@ function TaskSummaryCard({
               {item.errors > 0 && <small>{item.errors} error</small>}
             </span>
           ))}
-        </div>
+          </div>
+        </>
+      )}
+
+      {summary.runtimeActionBreakdown.length > 0 && (
+        <>
+          <span className="ops-breakdown-label">RUNTIME</span>
+          <div className="ops-tool-breakdown">
+            {summary.runtimeActionBreakdown.slice(0, 8).map((item) => (
+              <span
+                className={item.errors > 0 ? "attention" : ""}
+                key={"runtime:" + item.tool}
+              >
+                <code>{item.tool}</code>
+                <b>×{item.count}</b>
+                {item.errors > 0 && <small>{item.errors} error</small>}
+              </span>
+            ))}
+          </div>
+        </>
       )}
 
       <div className="ops-summary-time">
@@ -306,8 +455,7 @@ export function LiveOperationsGraph({
     [snapshot, activity, board],
   );
 
-  const nodeById = useMemo(() => nodeMap(model), [model]);
-  const crossings = useMemo(() => edgeMapByGroup(model), [model]);
+  const network = useMemo(() => buildNetworkLayout(model), [model]);
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState<string | null>(
     null,
   );
@@ -366,129 +514,164 @@ export function LiveOperationsGraph({
         ))}
       </div>
 
-      <div
-        className="dynamic-flow-canvas"
-        style={{
-          gridTemplateColumns: model.groups
-            .map((_, index) =>
-              index === model.groups.length - 1
-                ? "minmax(150px, 1fr)"
-                : "minmax(150px, 1fr) 34px",
-            )
-            .join(" "),
-        }}
-      >
-        {model.groups.map((group, index) => {
-          const nodes = group.nodeIds
-            .map((id) => nodeById.get(id))
-            .filter((node): node is OperationsGraphNode => Boolean(node));
-          const nextGroup = model.groups[index + 1];
-          const transition = nextGroup
-            ? crossings.get(group.id + "->" + nextGroup.id) ?? {
-                state: "idle" as OperationsState,
-                label: null,
-              }
-            : null;
+      <div className="operations-network-shell">
+        <div className="operations-network-head">
+          <div>
+            <span className="eyebrow">REAL TOPOLOGY</span>
+            <strong>Observed traffic + explicit contract hops</strong>
+            <small className="network-legend">solid = observed · dotted = contract-inferred</small>
+          </div>
+          <span>
+            {model.nodes.length} nodes · {model.edges.length} links
+          </span>
+        </div>
 
-          return (
-            <div className="dynamic-flow-fragment" key={group.id}>
-              <div className="dynamic-flow-stage">
-                <span className="flow-stage-label">{group.label}</span>
-                <div className="dynamic-flow-stack">
-                  {nodes.map((node) => (
-                    <GraphNodeCard
-                      node={node}
-                      key={node.id}
-                      selected={
-                        Boolean(focusedWorkstreamId) &&
-                        node.workstreamId === focusedWorkstreamId
-                      }
-                      onSelect={(workstreamId) => {
-                        if (workstreamId) setSelectedWorkstreamId(workstreamId);
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-              {nextGroup && transition && (
-                <div className={"dynamic-flow-edge " + transition.state}>
-                  <span />
-                  {transition.label && <small>{transition.label}</small>}
-                  <ArrowRight size={17} />
-                  <i className="flow-packet-dot" />
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {model.groups.length === 0 && (
+        {model.groups.length === 0 ? (
           <div className="live-empty">
             Waiting for the first observable agent path.
+          </div>
+        ) : (
+          <div className="operations-network-scroll">
+            <svg
+              className="operations-network"
+              viewBox={"0 0 " + network.width + " " + network.height}
+              role="img"
+              aria-label="Live OWL agent communication topology"
+            >
+              <defs>
+                <marker
+                  id="owl-network-arrow"
+                  viewBox="0 0 8 8"
+                  refX="7"
+                  refY="4"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto"
+                >
+                  <path d="M0,0 L8,4 L0,8 z" fill="context-stroke" />
+                </marker>
+              </defs>
+
+              {network.groupLabels.map((group) => (
+                <g className="network-group-guide" key={group.id}>
+                  <line
+                    x1={group.x}
+                    x2={group.x}
+                    y1={42}
+                    y2={network.height - 34}
+                  />
+                  <text x={group.x} y={24} textAnchor="middle">
+                    {group.label.toUpperCase()}
+                  </text>
+                </g>
+              ))}
+
+              {network.edges.map((edgePath) => {
+                const edge = edgePath.edge;
+                const dimmed = Boolean(
+                  focusedWorkstreamId &&
+                    edge.workstreamId &&
+                    edge.workstreamId !== focusedWorkstreamId,
+                );
+                const edgeLabel = compactNetworkText(
+                  edge.label ?? edge.relation,
+                  24,
+                );
+                return (
+                  <g
+                    className={
+                      "network-edge-group " +
+                      edge.state +
+                      " " +
+                      edge.relation +
+                      (edge.observed ? "" : " inferred") +
+                      (dimmed ? " dimmed" : "")
+                    }
+                    key={edge.id}
+                  >
+                    <path
+                      className="network-edge-path"
+                      d={edgePath.path}
+                      markerEnd="url(#owl-network-arrow)"
+                    />
+                    {edgeLabel && (
+                      <text
+                        className="network-edge-label"
+                        x={edgePath.labelX}
+                        y={edgePath.labelY}
+                        textAnchor="middle"
+                      >
+                        {edgeLabel}
+                      </text>
+                    )}
+                    {edge.state === "active" && !dimmed && (
+                      <circle className="network-moving-packet" r="3">
+                        <animateMotion
+                          dur={edge.relation === "return" ? "1.6s" : "1.25s"}
+                          repeatCount="indefinite"
+                          path={edgePath.path}
+                        />
+                      </circle>
+                    )}
+                  </g>
+                );
+              })}
+
+              {network.points.map(({ node, x, y }) => {
+                const selected =
+                  Boolean(focusedWorkstreamId) &&
+                  node.workstreamId === focusedWorkstreamId;
+                const dimmed = Boolean(
+                  focusedWorkstreamId &&
+                    node.workstreamId &&
+                    node.workstreamId !== focusedWorkstreamId,
+                );
+                return (
+                  <g
+                    className={
+                      "network-node " +
+                      node.state +
+                      (node.current ? " current" : "") +
+                      (selected ? " selected" : "") +
+                      (dimmed ? " dimmed" : "")
+                    }
+                    key={node.id}
+                    transform={"translate(" + x + " " + y + ")"}
+                    onClick={() => {
+                      if (node.workstreamId) {
+                        setSelectedWorkstreamId(node.workstreamId);
+                      }
+                    }}
+                  >
+                    {(node.current || selected) && (
+                      <circle className="network-node-halo" r="13" />
+                    )}
+                    <circle className="network-node-dot" r="6" />
+                    <text className="network-node-label" x={13} y={-3}>
+                      {compactNetworkText(node.label, 22)}
+                    </text>
+                    {node.detail && (
+                      <text className="network-node-detail" x={13} y={10}>
+                        {compactNetworkText(node.detail, 28)}
+                      </text>
+                    )}
+                    <title>{node.evidence.join("\n")}</title>
+                  </g>
+                );
+              })}
+            </svg>
           </div>
         )}
       </div>
 
-      {model.loopPaths.length > 0 && (
-        <div className="flow-return-zone">
-          <div className="flow-return-zone-head">
-            <span className="eyebrow">RETURN PATH</span>
-            <strong>Result → source · closed-loop delivery</strong>
-          </div>
-          <div className="flow-return-lanes">
-            {model.loopPaths.slice(0, 6).map((loop) => {
-              const selected =
-                Boolean(focusedWorkstreamId) &&
-                loop.workstreamId === focusedWorkstreamId;
-              return (
-                <button
-                  type="button"
-                  className={
-                    "flow-return-lane " +
-                    loop.state +
-                    (loop.running ? " pending-return" : "") +
-                    (selected ? " selected" : "")
-                  }
-                  key={loop.id}
-                  onClick={() => {
-                    if (loop.workstreamId) {
-                      setSelectedWorkstreamId(loop.workstreamId);
-                    }
-                  }}
-                >
-                  <div className="flow-return-source">
-                    <MessageSquare size={13} />
-                    <span>
-                      <strong>{loop.sourceLabel}</strong>
-                      <small>source</small>
-                    </span>
-                  </div>
-                  <div className="flow-return-track">
-                    <ArrowLeft size={14} />
-                    <span className="flow-return-line" />
-                    <i className="flow-return-packet" />
-                    <em>{loop.responseLabel}</em>
-                  </div>
-                  <div className="flow-return-result">
-                    <span>
-                      <strong>{loop.running ? "Executing" : "Returned"}</strong>
-                      <small>{loop.requestLabel}</small>
-                    </span>
-                    <CheckCircle2 size={13} />
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       <div className="live-flow-legend">
         <span><i className="legend-dot active" /> executing / traffic</span>
         <span><i className="legend-dot healthy" /> healthy / verified</span>
-        <span><i className="legend-dot waiting" /> waiting</span>
+        <span><i className="legend-dot waiting" /> waiting / progress</span>
         <span><i className="legend-dot attention" /> attention / error</span>
         <span><i className="legend-dot locked" /> blocked by authorization</span>
+        <span><i className="legend-edge observed" /> observed event</span>
+        <span><i className="legend-edge inferred" /> enforced / inferred path</span>
       </div>
 
       <div className="live-ops-detail-grid">
@@ -548,7 +731,7 @@ export function LiveOperationsGraph({
                     <strong>{item.clientLabel}</strong>
                     <ArrowRight size={12} />
                     <code>{item.tool}</code>
-                    <span className="traffic-spacer" />
+                    <span className="traffic-row-spacer" />
                     <b>{item.status}</b>
                     <small>{duration(item.durationMs)}</small>
                   </summary>

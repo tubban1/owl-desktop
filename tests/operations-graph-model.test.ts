@@ -104,10 +104,12 @@ const emptyBoard = {
 
 function interactionActivity({
   status = "success",
+  tool = "read_file",
   clientKind = "chatgpt",
   clientLabel = "Chat A",
 }: {
-  status?: "success" | "error";
+  status?: "success" | "error" | "progress_required";
+  tool?: string;
   clientKind?: string;
   clientLabel?: string;
 } = {}) {
@@ -123,7 +125,7 @@ function interactionActivity({
         interactionId: "i1",
         phase: "request",
         status: "running",
-        tool: "read_file",
+        tool,
         clientKind,
         clientLabel,
         transportSessionId: "transport_a",
@@ -145,7 +147,7 @@ function interactionActivity({
         interactionId: "i1",
         phase: "response",
         status,
-        tool: "read_file",
+        tool,
         clientKind,
         clientLabel,
         transportSessionId: "transport_a",
@@ -162,7 +164,7 @@ function interactionActivity({
 }
 
 describe("buildOperationsGraphModel", () => {
-  it("builds an observed ChatGPT → MCP → access → Runtime → tool → result route", () => {
+  it("builds an observed request with an enforced/inferred Runtime path", () => {
     const model = buildOperationsGraphModel({
       snapshot: baseSnapshot(),
       activity: interactionActivity(),
@@ -198,7 +200,7 @@ describe("buildOperationsGraphModel", () => {
           detail: "project/package.json",
         }),
         expect.objectContaining({
-          id: "result:owl-workstream:a",
+          id: "result:i1",
           kind: "result",
           label: "Success",
         }),
@@ -212,8 +214,15 @@ describe("buildOperationsGraphModel", () => {
           observed: true,
         }),
         expect.objectContaining({
+          from: "transport:mcp",
+          to: "gate:runtime-access",
+          relation: "authorize",
+          observed: false,
+        }),
+        expect.objectContaining({
           from: "gate:runtime-access",
           to: "runtime:local",
+          observed: false,
         }),
         expect.objectContaining({ relation: "return" }),
       ]),
@@ -222,7 +231,7 @@ describe("buildOperationsGraphModel", () => {
       expect.objectContaining({
         id: "loop:owl-workstream:a",
         sourceNodeId: "source:owl-workstream:a",
-        resultNodeId: "result:owl-workstream:a",
+        resultNodeId: "result:i1",
         sourceLabel: "Chat A",
         requestLabel: expect.stringContaining("read_file"),
         responseLabel: expect.stringContaining("Result"),
@@ -230,6 +239,40 @@ describe("buildOperationsGraphModel", () => {
         running: false,
       }),
     ]);
+  });
+
+  it("routes host-local workstream tools without inventing Authorization or Runtime hops", () => {
+    const model = buildOperationsGraphModel({
+      snapshot: baseSnapshot(),
+      activity: interactionActivity({ tool: "workstream_progress" }),
+      board: emptyBoard,
+      now,
+    });
+
+    expect(model.nodes.some((node) => node.id === "gate:runtime-access")).toBe(false);
+    expect(model.nodes.some((node) => node.id === "runtime:local")).toBe(false);
+    expect(model.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: "source:owl-workstream:a",
+          to: "transport:mcp",
+          observed: true,
+        }),
+        expect.objectContaining({
+          from: "transport:mcp",
+          to: "tool:i1",
+          relation: "execute",
+          label: "handled in Connection Host",
+          observed: true,
+        }),
+        expect.objectContaining({
+          from: "result:i1",
+          to: "source:owl-workstream:a",
+          relation: "return",
+          observed: true,
+        }),
+      ]),
+    );
   });
 
   it("cuts the path at authorization when Runtime is locked", () => {
@@ -509,6 +552,14 @@ describe("buildOperationsGraphModel", () => {
               progressPercent: 100,
               current: "Done",
               updatedAt: "2026-10-02T06:29:59.000Z",
+              actionCount: 2,
+              succeededActions: 2,
+              failedActions: 0,
+              needsReviewActions: 0,
+              actions: [
+                { action: "fs.read", state: "succeeded" },
+                { action: "git.query", state: "succeeded" },
+              ],
             },
           ],
           messages: [
@@ -563,6 +614,10 @@ describe("buildOperationsGraphModel", () => {
         status: "completed",
         outcome: "Completed",
         toolCallCount: 1,
+        runtimeActionCount: 2,
+        runtimeActionSucceeded: 2,
+        runtimeActionFailed: 0,
+        runtimeActionNeedsReview: 0,
         progressCount: 1,
         errorCount: 0,
         warningCount: 1,
@@ -577,8 +632,157 @@ describe("buildOperationsGraphModel", () => {
             errors: 0,
           }),
         ],
+        runtimeActionBreakdown: [
+          expect.objectContaining({
+            tool: "fs.read",
+            count: 1,
+            errors: 0,
+          }),
+          expect.objectContaining({
+            tool: "git.query",
+            count: 1,
+            errors: 0,
+          }),
+        ],
       }),
     );
+  });
+
+  it("renders multiple recent interactions as distinct tool/result/return branches", () => {
+    const first = interactionActivity({ tool: "read_file" });
+    const second = interactionActivity({ tool: "git_status" }).map((entry, index) => ({
+      ...entry,
+      id: entry.id + "_2",
+      at: index === 0
+        ? "2026-10-02T06:29:59.200Z"
+        : "2026-10-02T06:29:59.600Z",
+      meta: {
+        ...entry.meta,
+        interactionId: "i2",
+      },
+    }));
+
+    const model = buildOperationsGraphModel({
+      snapshot: baseSnapshot(),
+      activity: [...first, ...second] as any,
+      board: emptyBoard,
+      now,
+    });
+
+    expect(model.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "tool:i1", label: "read_file" }),
+        expect.objectContaining({ id: "result:i1", kind: "result" }),
+        expect.objectContaining({ id: "tool:i2", label: "git_status" }),
+        expect.objectContaining({ id: "result:i2", kind: "result" }),
+      ]),
+    );
+    expect(model.nodes.find((node) => node.id === "source:owl-workstream:a")).toMatchObject({
+      detail: "Last git_status · success",
+      observedAt: "2026-10-02T06:29:59.600Z",
+    });
+    expect(model.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "edge:return:i1",
+          from: "result:i1",
+          to: "source:owl-workstream:a",
+          relation: "return",
+        }),
+        expect.objectContaining({
+          id: "edge:return:i2",
+          from: "result:i2",
+          to: "source:owl-workstream:a",
+          relation: "return",
+        }),
+      ]),
+    );
+  });
+
+  it("treats implicit progress boundaries as progress, not task errors", () => {
+    const board = {
+      ...emptyBoard,
+      activeCount: 1,
+      streams: [
+        {
+          id: "owl-owner:implicit",
+          ownerId: "owl-owner:implicit",
+          sourceKind: "ChatGPT",
+          sourceLabel: "ChatGPT",
+          connected: true,
+          transportCount: 1,
+          status: "working",
+          isCurrent: true,
+          goal: "Interactive OWL session",
+          phase: "Progress checkpoint",
+          summary: "Continuing after a visible progress update.",
+          updatedAt: "2026-10-02T06:29:59.000Z",
+          orchestrationId: null,
+          currentExecutor: "ChatGPT",
+          currentAction: "Continuing",
+          tasks: [],
+          messages: [],
+          nextActions: ["Continue validation"],
+          toolStats: {
+            totalToolSteps: 4,
+            recentTools: [
+              {
+                at: "2026-10-02T06:29:58.000Z",
+                tool: "runtime_info",
+                outcome: "success",
+                durationMs: 10,
+              },
+              {
+                at: "2026-10-02T06:29:59.000Z",
+                tool: "read_file",
+                outcome: "success",
+                durationMs: 12,
+              },
+            ],
+          },
+          progressPolicy: {
+            intervalMs: 10000,
+            maxToolSteps: 3,
+            checkpointAgeMs: 0,
+            lastProgressAt: "2026-10-02T06:29:59.000Z",
+            toolStepsSinceProgress: 0,
+            updateRecommended: false,
+          },
+        },
+      ],
+    } as any;
+
+    const activity = interactionActivity({
+      tool: "read_file",
+      status: "progress_required",
+    }).map((entry) => ({
+      ...entry,
+      meta: {
+        ...entry.meta,
+        runtimeSessionId: "owl-owner:implicit",
+        workstreamId: "owl-owner:implicit",
+      },
+    }));
+
+    const model = buildOperationsGraphModel({
+      snapshot: baseSnapshot(),
+      activity: activity as any,
+      board,
+      now,
+    });
+    const summary = model.summaries.find(
+      (item) => item.id === "owl-owner:implicit",
+    );
+
+    expect(summary).toMatchObject({
+      toolCallCount: 4,
+      errorCount: 0,
+      status: "running",
+    });
+    expect(model.interactions[0]).toMatchObject({
+      status: "progress",
+      errorCode: null,
+    });
   });
 
   it("adds live process and approval nodes from Runtime state without UI changes", () => {

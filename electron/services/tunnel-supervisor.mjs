@@ -177,9 +177,10 @@ export class TunnelSupervisor {
     });
     child.stderr.on("data", (chunk) => {
       const text = chunk.toString().trim().slice(0, 1000);
-      this.onEvent(classifyTunnelDiagnostic(text), "Tunnel diagnostic", {
-        text,
-      });
+      const level = classifyTunnelDiagnostic(text);
+      if (level !== "info") {
+        this.onEvent(level, "Tunnel diagnostic", { text });
+      }
     });
     child.once("error", (error) => {
       this.onEvent("error", "Tunnel failed to start", {

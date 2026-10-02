@@ -20,6 +20,8 @@ This directory is the canonical product and integration documentation for OWL LA
 
 ### Product areas
 
+- [Conversation Continuity V1](product/CONVERSATION_CONTINUITY_V1.md) — cross-Chat Planner Handoff, Resume Capsule and authority boundaries.
+- [OWL LAB 1.1 Continuity Plan](roadmap/OWL_LAB_1_1_CONTINUITY_PLAN.md) — serialized implementation order and 1.1 release gate.
 - `skills/` — Skill Manager and User Skill product behavior.
 - `release/` — packaging/release evidence.
 - `roadmap/` — Desktop roadmap.

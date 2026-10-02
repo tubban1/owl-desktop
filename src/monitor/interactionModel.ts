@@ -10,7 +10,7 @@ export type McpInteraction = {
   workstreamId: string | null;
   startedAt: string | null;
   completedAt: string | null;
-  status: "running" | "success" | "error";
+  status: "running" | "success" | "error" | "progress";
   durationMs: number | null;
   requestPreview: string | null;
   responsePreview: string | null;
@@ -92,8 +92,14 @@ export function buildMcpInteractionFeed(
       existing.responsePreview = text(meta.payload);
       existing.durationMs =
         typeof meta.durationMs === "number" ? meta.durationMs : null;
-      existing.status = meta.status === "error" ? "error" : "success";
-      existing.errorCode = text(meta.code);
+      existing.status =
+        meta.status === "error"
+          ? "error"
+          : meta.status === "progress_required"
+            ? "progress"
+            : "success";
+      existing.errorCode =
+        existing.status === "error" ? text(meta.code) : null;
     }
     byId.set(id, existing);
   }

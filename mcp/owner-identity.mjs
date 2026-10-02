@@ -55,9 +55,10 @@ export function resolveOwnerIdentity(
     };
   }
 
+  const requestedKind = firstHeader(headers, OWL_CLIENT_KIND_HEADER);
   const fallback =
     typeof fallbackOwnerId === "string" ? fallbackOwnerId.trim() : "";
-  if (fallback && fallback.length <= 512) {
+  if (fallback && fallback.length <= 512 && requestedKind === "desktop") {
     return {
       runtimeSessionId: `owl-owner:${digest(fallback)}`,
       stable: true,
@@ -66,10 +67,21 @@ export function resolveOwnerIdentity(
     };
   }
 
+  const transport =
+    typeof transportSessionId === "string" ? transportSessionId.trim() : "";
+  if (transport && !transport.startsWith("bootstrap:")) {
+    return {
+      runtimeSessionId: `owl-owner:${digest(`mcp-session:${transport}`)}`,
+      stable: true,
+      source: "transport-session",
+      ...clientMetadata(headers, "mcp"),
+    };
+  }
+
   return {
-    runtimeSessionId: `owl-mcp:${transportSessionId}`,
+    runtimeSessionId: `owl-mcp:${transport || "bootstrap"}`,
     stable: false,
-    source: "transport-session",
+    source: "transport-bootstrap",
     ...clientMetadata(headers, "mcp"),
   };
 }

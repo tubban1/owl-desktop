@@ -14,7 +14,7 @@ function assert(condition, message, details) {
 }
 
 const runtimeBaseUrl =
-  process.env.OWL_RUNTIME_URL?.trim() || "http://127.0.0.1:8788";
+  process.env.OWL_RUNTIME_URL?.trim() || "http://127.0.0.1:18788";
 const runtimeToken = process.env.OWL_RUNTIME_API_TOKEN?.trim() || undefined;
 const repo = process.env.OWL_E2E_REPO?.trim() || process.cwd();
 const owner = "owl-desktop:gate3:consequential-replay";

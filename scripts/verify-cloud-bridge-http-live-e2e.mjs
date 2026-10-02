@@ -16,7 +16,7 @@ function assert(condition, message, details) {
 }
 
 const runtimeBaseUrl =
-  process.env.OWL_RUNTIME_URL?.trim() || "http://127.0.0.1:18891";
+  process.env.OWL_RUNTIME_URL?.trim() || "http://127.0.0.1:18788";
 const repo = process.env.OWL_E2E_REPO?.trim() || process.cwd();
 const deviceId = "dev_http_bridge_e2e";
 const deviceCredential = `owldev1.${deviceId}.fixture-secret`;
@@ -158,25 +158,35 @@ const cloudClient = new CloudHttpClient({
 });
 
 let runtimeTaskId;
+let preserveExistingAccess = false;
 try {
   const info = await runtime.info();
   console.log(`PASS Runtime reachable (${info.runtimeVersion}, API ${info.apiVersion})`);
 
-  const access = await runtime.authorizeRuntimeAccess(
-    {
-      deviceId,
-      organizationId: "org_http_bridge_e2e",
-      principalId: "user_http_bridge_e2e",
-      canRun: true,
-      leaseExpiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
-      evidence: { source: "i4-http-live-e2e" },
-    },
-    {
-      requestId: `i4:${commandId}:access`,
-      idempotencyKey: `i4:${commandId}:access`,
-    },
-  );
+  const initialAccess = await runtime.runtimeAccess();
+  preserveExistingAccess = initialAccess.state === "READY";
+  const access = preserveExistingAccess
+    ? initialAccess
+    : await runtime.authorizeRuntimeAccess(
+        {
+          deviceId,
+          organizationId: "org_http_bridge_e2e",
+          principalId: "user_http_bridge_e2e",
+          canRun: true,
+          leaseExpiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+          evidence: { source: "i4-http-live-e2e" },
+        },
+        {
+          requestId: `i4:${commandId}:access`,
+          idempotencyKey: `i4:${commandId}:access`,
+        },
+      );
   assert(access.state === "READY", "Runtime did not enter READY for I4.", access);
+  console.log(
+    preserveExistingAccess
+      ? "PASS Existing Runtime authorization preserved"
+      : "PASS Isolated Runtime authorization projected",
+  );
 
   const service = new CloudBridgeService({
     client: cloudClient,
@@ -303,10 +313,12 @@ try {
       },
     ).catch(() => undefined);
   }
-  await runtime.lockRuntimeAccess("I4_E2E_COMPLETE", {
-    requestId: `i4:${commandId}:lock`,
-    idempotencyKey: `i4:${commandId}:lock`,
-  }).catch(() => undefined);
+  if (!preserveExistingAccess) {
+    await runtime.lockRuntimeAccess("I4_E2E_COMPLETE", {
+      requestId: `i4:${commandId}:lock`,
+      idempotencyKey: `i4:${commandId}:lock`,
+    }).catch(() => undefined);
+  }
   await new Promise((resolve) => server.close(resolve));
   fs.rmSync(scratch, { recursive: true, force: true });
 }

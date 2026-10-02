@@ -30,23 +30,26 @@ describe("OWL MCP logical owner identity", () => {
     expect(a.runtimeSessionId).not.toBe(b.runtimeSessionId);
   });
 
-  it("fails to transport identity instead of guessing when no owner is supplied", () => {
+  it("uses the MCP transport as a stable session identity when no owner is supplied", () => {
     const a = resolveOwnerIdentity({}, "transport-1");
+    const same = resolveOwnerIdentity({}, "transport-1");
     const b = resolveOwnerIdentity({}, "transport-2");
-    expect(a.stable).toBe(false);
+    expect(a.stable).toBe(true);
     expect(a.source).toBe("transport-session");
+    expect(a.runtimeSessionId).toBe(same.runtimeSessionId);
     expect(a.runtimeSessionId).not.toBe(b.runtimeSessionId);
   });
 
 
-  it("uses the persistent Desktop session as a stable fallback across transports", () => {
+  it("uses the persistent Desktop fallback only for explicitly labelled Desktop clients", () => {
+    const headers = { "x-owl-client-kind": "desktop" };
     const a = resolveOwnerIdentity(
-      {},
+      headers,
       "transport-1",
       "owl-desktop:persistent-session-1",
     );
     const b = resolveOwnerIdentity(
-      {},
+      headers,
       "transport-2",
       "owl-desktop:persistent-session-1",
     );
