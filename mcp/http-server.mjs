@@ -17,6 +17,7 @@ export async function startOwlMcpHttpServer({
   plannerContinuation,
   onEvent = () => {},
   sessionIdleTtlMs = 30 * 60_000,
+  ownerSupersedeGraceMs = 60_000,
   maxSessions = 128,
 } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -27,6 +28,10 @@ export async function startOwlMcpHttpServer({
   const sessions = new Map();
   plannerContinuation?.recoverConnectedTransports?.("mcp_restart");
   const boundedSessionIdleTtlMs = Math.max(Number(sessionIdleTtlMs) || 0, 1_000);
+  const boundedOwnerSupersedeGraceMs = Math.max(
+    Number(ownerSupersedeGraceMs) || 0,
+    1_000,
+  );
   const boundedMaxSessions = Math.max(Number(maxSessions) || 0, 8);
   app.use(express.json({ limit: "4mb" }));
 
@@ -38,6 +43,50 @@ export async function startOwlMcpHttpServer({
 
   function transportSessionBusy(session) {
     return Number(session?.activeRequestCount ?? 0) > 0;
+  }
+
+  function reclaimSupersededOwnerSessions(
+    runtimeSessionId,
+    currentTransportSessionId,
+    now = Date.now(),
+  ) {
+    if (!runtimeSessionId || !currentTransportSessionId) return 0;
+    const staleBefore = now - boundedOwnerSupersedeGraceMs;
+    const reclaimed = [];
+
+    for (const [transportSessionId, session] of sessions) {
+      if (transportSessionId === currentTransportSessionId) continue;
+      if (session?.ownerStable !== true) continue;
+      if (session?.runtimeSessionId !== runtimeSessionId) continue;
+      if (transportSessionBusy(session)) continue;
+
+      const lastSeenMs =
+        session.lastSeenAtMs ??
+        Date.parse(session.lastSeenAt ?? session.createdAt ?? "") ??
+        0;
+      if (lastSeenMs > staleBefore) continue;
+
+      sessions.delete(transportSessionId);
+      plannerContinuation?.noteTransportDisconnected?.(
+        runtimeSessionId,
+        transportSessionId,
+        "owner_superseded",
+      );
+      void session.transport.close().catch(() => undefined);
+      reclaimed.push(transportSessionId);
+    }
+
+    if (reclaimed.length > 0) {
+      onEvent("info", "MCP stale owner transports superseded", {
+        runtimeSessionId,
+        replacementTransportSessionId: currentTransportSessionId,
+        reclaimedCount: reclaimed.length,
+        reclaimedTransportSessionIds: reclaimed.slice(0, 8),
+        reason: "owner_superseded",
+      });
+    }
+
+    return reclaimed.length;
   }
 
   function pruneTransportSessions(now = Date.now()) {
@@ -129,28 +178,33 @@ export async function startOwlMcpHttpServer({
 
   function createTransportSession() {
     const server = createOwlMcpServer();
+    const session = {
+      server,
+      transport: null,
+      createdAt: null,
+      lastSeenAt: null,
+      lastSeenAtMs: 0,
+      activeRequestCount: 0,
+    };
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => {
         const now = Date.now();
-        sessions.set(id, {
-          server,
-          transport,
-          createdAt: new Date(now).toISOString(),
-          lastSeenAt: new Date(now).toISOString(),
-          lastSeenAtMs: now,
-          activeRequestCount: 0,
-        });
+        session.createdAt ??= new Date(now).toISOString();
+        session.lastSeenAt = new Date(now).toISOString();
+        session.lastSeenAtMs = now;
+        sessions.set(id, session);
         pruneTransportSessions(now);
         onEvent("info", "MCP transport session opened", { transportSessionId: id });
       },
     });
+    session.transport = transport;
 
     transport.onclose = () => {
       removeTransportSession(transport.sessionId, "transport_close");
     };
 
-    return { server, transport };
+    return session;
   }
 
   app.all("/mcp", requireAuth, async (req, res) => {
@@ -232,6 +286,10 @@ export async function startOwlMcpHttpServer({
         typeof transportSessionId === "string" &&
         !transportSessionId.startsWith("bootstrap:")
       ) {
+        reclaimSupersededOwnerSessions(
+          identity.runtimeSessionId,
+          transportSessionId,
+        );
         plannerContinuation?.noteTransportActivity?.(
           identity.runtimeSessionId,
           transportSessionId,
@@ -338,6 +396,32 @@ export async function startOwlMcpHttpServer({
         // A long request is activity for its entire lifetime. Refresh the idle
         // clock on completion so it cannot be reclaimed immediately afterward.
         touchTransportSession(active);
+
+        // The initialize request begins before Streamable HTTP has assigned a
+        // real session id. Once handleRequest completes, finish the owner
+        // binding and takeover bookkeeping using the canonical id.
+        const initializedTransportSessionId = active.transport?.sessionId;
+        if (
+          identity.stable &&
+          typeof initializedTransportSessionId === "string" &&
+          initializedTransportSessionId &&
+          initializedTransportSessionId !== suppliedSessionId
+        ) {
+          reclaimSupersededOwnerSessions(
+            active.runtimeSessionId ?? identity.runtimeSessionId,
+            initializedTransportSessionId,
+          );
+          plannerContinuation?.noteTransportActivity?.(
+            active.runtimeSessionId ?? identity.runtimeSessionId,
+            initializedTransportSessionId,
+            undefined,
+            {
+              clientKind: active.clientKind ?? identity.clientKind ?? null,
+              clientLabel: active.clientLabel ?? identity.clientLabel ?? null,
+              ownerSource: active.ownerSource ?? identity.source,
+            },
+          );
+        }
       }
 
       if (req.method === "DELETE" && suppliedSessionId) {
@@ -380,6 +464,7 @@ export async function startOwlMcpHttpServer({
         },
         sessionPolicy: {
           idleTtlMs: boundedSessionIdleTtlMs,
+          ownerSupersedeGraceMs: boundedOwnerSupersedeGraceMs,
           maxSessions: boundedMaxSessions,
         },
         plannerContinuation: plannerContinuation?.summary?.() ?? {
@@ -421,6 +506,7 @@ export async function startOwlMcpHttpServer({
       sessionCount: sessions.size,
       sessionPolicy: {
         idleTtlMs: boundedSessionIdleTtlMs,
+        ownerSupersedeGraceMs: boundedOwnerSupersedeGraceMs,
         maxSessions: boundedMaxSessions,
       },
       continuation: plannerContinuation?.summary?.() ?? {

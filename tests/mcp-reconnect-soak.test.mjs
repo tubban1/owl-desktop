@@ -12,6 +12,35 @@ afterEach(async () => {
   }
 });
 
+async function rawInitialize(url, ownerId) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      "x-owl-owner-id": ownerId,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: {
+          name: "raw-owner-takeover-test",
+          version: "0.1.0",
+        },
+      },
+    }),
+  });
+  expect(response.ok).toBe(true);
+  const sessionId = response.headers.get("mcp-session-id");
+  expect(sessionId).toBeTruthy();
+  await response.text();
+  return sessionId;
+}
+
 async function startFakeRuntime() {
   let calls = 0;
   const server = http.createServer(async (req, res) => {
@@ -79,4 +108,91 @@ describe("OWL MCP reconnect soak", () => {
     await new Promise((resolve) => setTimeout(resolve, 1_150));
     expect(mcp.sessionCount()).toBe(0);
   }, 60_000);
+
+  it("supersedes stale inactive transports for the same logical owner", async () => {
+    const runtime = await startFakeRuntime();
+    const events = [];
+    const mcp = await startOwlMcpHttpServer({
+      port: 0,
+      runtimeBaseUrl: runtime.baseUrl,
+      sessionIdleTtlMs: 60_000,
+      ownerSupersedeGraceMs: 1_000,
+      maxSessions: 128,
+      onEvent: (level, message, context) => {
+        events.push({ level, message, context });
+      },
+    });
+    closers.push(() => mcp.close());
+
+    const first = await rawInitialize(mcp.url, "owner-takeover-test");
+    expect(mcp.sessionCount()).toBe(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+    const second = await rawInitialize(mcp.url, "owner-takeover-test");
+    expect(second).not.toBe(first);
+    expect(mcp.sessionCount()).toBe(1);
+    expect(mcp.snapshot().sessions[0].transportSessionId).toBe(second);
+
+    const takeover = events.find(
+      (event) =>
+        event.message === "MCP stale owner transports superseded" &&
+        event.context?.reason === "owner_superseded",
+    );
+    expect(takeover?.context?.reclaimedCount).toBe(1);
+    expect(takeover?.context?.reclaimedTransportSessionIds).toContain(first);
+  }, 20_000);
+
+  it("never supersedes a live event stream for the same logical owner", async () => {
+    const runtime = await startFakeRuntime();
+    const mcp = await startOwlMcpHttpServer({
+      port: 0,
+      runtimeBaseUrl: runtime.baseUrl,
+      sessionIdleTtlMs: 60_000,
+      ownerSupersedeGraceMs: 1_000,
+      maxSessions: 128,
+    });
+    closers.push(() => mcp.close());
+
+    const client = new Client({
+      name: "owner-takeover-live-stream",
+      version: "0.1.0",
+    });
+    const transport = new StreamableHTTPClientTransport(new URL(mcp.url), {
+      requestInit: {
+        headers: { "x-owl-owner-id": "owner-takeover-live-stream" },
+      },
+    });
+    await client.connect(transport);
+
+    const streamDeadline = Date.now() + 2_000;
+    while (
+      Date.now() < streamDeadline &&
+      !mcp.snapshot().sessions.some((session) => session.activeRequestCount > 0)
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const live = mcp.snapshot().sessions.find(
+      (session) => session.activeRequestCount > 0,
+    );
+    expect(live).toBeTruthy();
+
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+    const replacement = await rawInitialize(
+      mcp.url,
+      "owner-takeover-live-stream",
+    );
+    expect(replacement).not.toBe(live.transportSessionId);
+    expect(mcp.sessionCount()).toBe(2);
+    expect(
+      mcp.snapshot().sessions.some(
+        (session) =>
+          session.transportSessionId === live.transportSessionId &&
+          session.activeRequestCount > 0,
+      ),
+    ).toBe(true);
+
+    await transport.close();
+  }, 20_000);
 });
