@@ -322,3 +322,61 @@ Historical terminal tasks, old AgentRequests and support diagnostics do not occu
 The 750 ms Activity IPC stream is the authoritative renderer source for real MCP interactions while Monitor is open.
 
 The slower Runtime snapshot refresh MUST NOT overwrite the renderer's live activity buffer. Snapshot activity is only a bootstrap/fallback source before the first Activity poll. This avoids alternating between a 200-event live buffer and the smaller snapshot projection, which previously caused real interaction cards to appear and disappear every few seconds.
+
+## Dynamic topology contract
+
+The Agent Operations graph is model-driven. The renderer MUST NOT assume a fixed Source -> MCP -> Authorization -> Runtime -> Result layout.
+
+Current Desktop adapters project known facts such as MCP traffic, Cloud RemoteCommands, Runtime access, Runtime Tasks, managed processes, approvals and results into a common graph model:
+
+- groups[]
+- nodes[]
+- edges[]
+- assurances[]
+- currentWorkstreams[]
+- interactions[]
+- nextActions[]
+
+Only groups that have live/relevant nodes are rendered. Group order is supplied by the model, so a Cloud-command path can include a Coordination stage while a local MCP path does not.
+
+### Open graph extension events
+
+Future Worker, Cloud, Runtime and Provider components can add topology without a Desktop UI release by emitting Activity events with meta.eventKind = operations_flow_node.
+
+Required node metadata:
+
+- nodeId
+- groupId
+- groupLabel
+- groupOrder
+- label
+
+Optional metadata:
+
+- kind
+- detail
+- state
+- current
+- workstreamId
+- nodeMeta
+
+Edges use meta.eventKind = operations_flow_edge with:
+
+- edgeId
+- from
+- to
+- state
+- relation
+- label (optional)
+- observed (optional)
+- workstreamId (optional)
+
+Unknown node kinds fall back to a generic visual node. Unknown future groups are rendered using their supplied label/order. This is the compatibility path for future Cloud Workers, remote devices, sandbox targets, new providers or additional execution/control planes.
+
+### Live relevance
+
+The live graph contains current facts, not indefinite history.
+
+A source/workstream remains visible when it is connected, owns active durable Runtime work, or was updated inside the live relevance window. The relevance window is derived from the configured planner progress cadence rather than being a renderer constant.
+
+Old completed/failed work remains Runtime/audit history but does not continue to occupy the live topology.
