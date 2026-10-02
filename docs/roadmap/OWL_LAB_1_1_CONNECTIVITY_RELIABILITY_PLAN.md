@@ -261,15 +261,17 @@ Completed:
   - a stale live process is terminated and restarted instead of remaining green;
   - recovery is single-flight.
 
-- **P0.5 Connection Host fault-domain isolation — source complete**
-  - dev:full now restarts Connection Host independently after process exit or
-    spawn error;
-  - Runtime and other healthy fault domains are not deliberately stopped by
-    that restart path;
+- **P0.5 Connection Host fault-domain isolation — automated isolation gate complete**
+  - dev:full now uses a dedicated child supervisor and restarts Connection Host
+    independently after process exit or spawn error;
+  - fault injection proves a Host exit launches a replacement without sending
+    any signal to a healthy Runtime child;
+  - spawn error + exit is handled once rather than triggering duplicate recovery;
+  - coordinated shutdown cancels queued restarts;
   - a real destructive Host-restart dogfood is still intentionally pending
     because killing the currently controlling Connection Host would sever the
-    active Jarvis session. That acceptance test must run through an isolated
-    harness or a prepared handoff.
+    active Jarvis session. That final acceptance test must run through an
+    isolated harness or a prepared handoff.
 
 - **P0.6 bounded recovery**
   - Tunnel recovery has one in-flight recovery promise;
@@ -313,8 +315,9 @@ The implementation preserves the existing MCP guarantees that an accepted
 Runtime operation survives upstream disconnect and that live/in-flight MCP
 sessions are not reclaimed by idle TTL.
 
-Post-P1.3 verification:
+Post-P1.3 / Host-isolation verification:
 
-    full Desktop gate:          48/48 files, 223/223 tests PASS
+    isolated Host supervisor:   3/3 tests PASS
+    full Desktop gate:          49/49 files, 226/226 tests PASS
     TypeScript + Vite build:    PASS
     git diff --check:           PASS

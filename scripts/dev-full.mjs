@@ -4,8 +4,9 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { DevChildSupervisor } from "./lib/dev-child-supervisor.mjs";
 
 const desktopRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -229,59 +230,13 @@ if (enforceCloudAccess && !fs.existsSync(runtimeLeasePublicKeyFile)) {
   );
 }
 
-const children = new Set();
-const restartTimers = new Set();
-let shuttingDown = false;
+const childSupervisor = new DevChildSupervisor({
+  onFatal(code) {
+    shutdown(code);
+  },
+});
 
-function start(
-  label,
-  cwd,
-  command,
-  args,
-  env = {},
-  { restartOnExit = false, restartDelayMs = 1000 } = {},
-) {
-  const launch = () => {
-    const child = spawn(command, args, {
-      cwd,
-      env: { ...process.env, ...env },
-      stdio: "inherit",
-      detached: false,
-    });
-    children.add(child);
-    let terminationHandled = false;
-    const handleTermination = (code, signal, error = null) => {
-      if (terminationHandled) return;
-      terminationHandled = true;
-      children.delete(child);
-      if (shuttingDown) return;
-
-      const detail = error
-        ? `error=${error instanceof Error ? error.message : String(error)}`
-        : `code=${code ?? "null"}, signal=${signal ?? "null"}`;
-
-      if (restartOnExit) {
-        console.warn(
-          `[dev:full] ${label} terminated (${detail}); restarting without touching other healthy fault domains.`,
-        );
-        const timer = setTimeout(() => {
-          restartTimers.delete(timer);
-          if (!shuttingDown) launch();
-        }, restartDelayMs);
-        restartTimers.add(timer);
-        return;
-      }
-      console.error(`[dev:full] ${label} terminated (${detail}).`);
-      shutdown(code ?? 1);
-    };
-    child.once("error", (error) => handleTermination(null, null, error));
-    child.once("exit", (code, signal) =>
-      handleTermination(code, signal),
-    );
-    return child;
-  };
-  return launch();
-}
+const start = (...args) => childSupervisor.start(...args);
 
 async function assertPortFree(port, label) {
   await new Promise((resolve, reject) => {
@@ -425,18 +380,9 @@ async function waitForDevRuntime(timeoutMs = 30_000) {
   );
 }
 
-function stopChild(child) {
-  try {
-    child.kill("SIGTERM");
-  } catch {}
-}
-
 function shutdown(code = 0) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  for (const timer of restartTimers) clearTimeout(timer);
-  restartTimers.clear();
-  for (const child of children) stopChild(child);
+  if (childSupervisor.shuttingDown) return;
+  childSupervisor.shutdown();
   setTimeout(() => process.exit(code), 250).unref();
 }
 
