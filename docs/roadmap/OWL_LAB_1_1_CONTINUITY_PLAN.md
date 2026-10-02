@@ -182,3 +182,17 @@ page must not be opened merely because browser capability is available.
 This rule was added after dogfood unnecessarily opened Vercel's create-project
 UI even though the target project already had Vercel credentials in its local
 environment.
+
+## Connectivity Reliability hardening
+
+Session Continuity now depends on a truthful and self-healing transport control plane.
+
+The detailed RC work is tracked in:
+
+- `docs/architecture/CONNECTIVITY_RELIABILITY_MODEL_V1.md`
+- `docs/contracts/CONNECTION_HOST_RELIABILITY_CONTRACT_V1.md`
+- `docs/roadmap/OWL_LAB_1_1_CONNECTIVITY_RELIABILITY_PLAN.md`
+- `docs/operations/CONNECTIVITY_RECOVERY_RUNBOOK_V1.md`
+- `docs/architecture/DESKTOP_COMMANDER_STABILITY_REFERENCE.md`
+
+Runtime 1.0 remains frozen. Connectivity hardening belongs primarily to Desktop / Connection Host / Tunnel / MCP, while Runtime's existing durable Task and managed-process semantics must be preserved.
