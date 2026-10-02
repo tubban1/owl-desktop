@@ -28,6 +28,7 @@ import { LiveOperationsGraph } from "./LiveOperationsGraph";
 import { ApprovalAttention } from "../approvals/ApprovalAttention";
 import {
   buildWorkstreamBoard,
+  type MonitorWorkstream,
   type WorkstreamBoard,
 } from "./workstreamModel";
 import {
@@ -69,41 +70,50 @@ const formatCompactNumber = (value: number) => {
   return String(Math.round(bounded));
 };
 
-function ConversationContinuityCard({
-  board,
-  continuation,
-}: {
-  board: WorkstreamBoard;
-  continuation: RuntimeSnapshot["mcp"]["continuation"];
-}) {
-  const [copied, setCopied] = useState(false);
-  const candidates = board.streams
-    .filter((stream) => Boolean(stream.continuity))
-    .sort((left, right) => {
-      const leftPriority =
-        (left.sourceKind === "ChatGPT" ? 10_000 : 0) +
-        (left.isCurrent ? 1_000 : 0) +
-        Number(left.continuity?.score ?? 0);
-      const rightPriority =
-        (right.sourceKind === "ChatGPT" ? 10_000 : 0) +
-        (right.isCurrent ? 1_000 : 0) +
-        Number(right.continuity?.score ?? 0);
-      return rightPriority - leftPriority;
-    });
-  const stream = candidates[0];
-  const continuity = stream?.continuity ?? null;
-  if (!stream || !continuity) return null;
+function ConversationContinuityOverview({ board }: { board: WorkstreamBoard }) {
+  const sessions = board.streams.filter(
+    (stream) => stream.sourceKind === "ChatGPT" && Boolean(stream.continuity),
+  );
+  if (sessions.length === 0) return null;
 
-  const latestHandoff =
-    continuation?.latestReadyHandoff?.sourceWorkstreamId === stream.ownerId
-      ? continuation.latestReadyHandoff
-      : null;
-  const risk = continuity.risk.toUpperCase();
+  const riskCount = (risk: string) =>
+    sessions.filter((stream) => stream.continuity?.risk === risk).length;
+  const handoffReady = sessions.filter(
+    (stream) => stream.continuity?.handoffReady,
+  ).length;
+
+  return (
+    <section className="panel continuity-overview">
+      <div className="continuity-overview-copy">
+        <span className="eyebrow">CONVERSATION CONTINUITY</span>
+        <strong>
+          {sessions.length} ChatGPT session{sessions.length === 1 ? "" : "s"}
+        </strong>
+        <span>Each session is measured and handed off independently.</span>
+      </div>
+      <div className="continuity-overview-stats">
+        <span><strong>{riskCount("critical") + riskCount("high")}</strong> high</span>
+        <span><strong>{riskCount("medium")}</strong> medium</span>
+        <span><strong>{riskCount("low")}</strong> low</span>
+        <span className={handoffReady > 0 ? "ready" : ""}>
+          <strong>{handoffReady}</strong> handoff ready
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function WorkstreamContinuity({ stream }: { stream: MonitorWorkstream }) {
+  const [copied, setCopied] = useState(false);
+  const continuity = stream.continuity;
+  if (stream.sourceKind !== "ChatGPT" || !continuity) return null;
+
+  const handoffId = continuity.handoffReady ? stream.latestHandoffId : null;
   const duplicatePercent = Math.round(continuity.duplicateRatio * 100);
-  const resumePrompt = latestHandoff
+  const resumePrompt = handoffId
     ? [
-        "Continue OWL LAB using Planner Handoff " + latestHandoff.id + ".",
-        "Resume workstream " + latestHandoff.sourceWorkstreamId + ".",
+        "Continue OWL LAB using Planner Handoff " + handoffId + ".",
+        "Resume workstream " + stream.ownerId + ".",
         "Inspect existing Runtime Task state before doing replacement work.",
         "Do not create replacement tasks merely because the ChatGPT conversation changed.",
       ].join(" ")
@@ -121,83 +131,67 @@ function ConversationContinuityCard({
   };
 
   return (
-    <section className={"panel continuity-card risk-" + continuity.risk}>
-      <div className="continuity-head">
-        <div>
-          <span className="eyebrow">CONVERSATION CONTINUITY</span>
-          <div className="continuity-title-row">
-            <h3>{stream.sourceLabel}</h3>
-            <span className={"continuity-risk risk-" + continuity.risk}>
-              {risk}
-            </span>
-          </div>
-          <p>
-            OWL-observed MCP traffic only — not OpenAI&apos;s actual context
-            window.
-          </p>
+    <div className={"workstream-continuity risk-" + continuity.risk}>
+      <div className="workstream-continuity-head">
+        <div className="workstream-continuity-title">
+          <ShieldCheck size={14} />
+          <span>Continuity</span>
+          <span className={"continuity-risk risk-" + continuity.risk}>
+            {continuity.risk.toUpperCase()}
+          </span>
         </div>
-        <div className={"continuity-state " + continuity.state}>
-          <ShieldCheck size={16} />
-          <span>{continuity.state.replaceAll("_", " ")}</span>
-        </div>
+        <span className={"continuity-state " + continuity.state}>
+          {continuity.state.replaceAll("_", " ")}
+        </span>
       </div>
 
-      <div className="continuity-metrics">
+      <div className="workstream-continuity-metrics">
         <div>
-          <span>Observed context floor</span>
+          <span>Context floor</span>
           <strong>~{formatCompactNumber(continuity.observedTokenEquivalent)}</strong>
-          <small>OWL-visible lower bound · heuristic</small>
         </div>
         <div>
-          <span>Growth</span>
-          <strong>
-            +{formatCompactNumber(continuity.recentGrowthTokenEquivalent)}
-          </strong>
-          <small>last {continuity.windowMinutes} min</small>
-        </div>
-        <div>
-          <span>Repeated payload</span>
-          <strong>{duplicatePercent}%</strong>
-          <small>exact sanitized payload hashes</small>
+          <span>10m growth</span>
+          <strong>+{formatCompactNumber(continuity.recentGrowthTokenEquivalent)}</strong>
         </div>
         <div>
           <span>OWL calls</span>
           <strong>{continuity.toolCallCount}</strong>
-          <small>{formatDuration(continuity.sessionAgeMs)} workstream age</small>
+        </div>
+        <div>
+          <span>Repeated</span>
+          <strong>{duplicatePercent}%</strong>
         </div>
       </div>
 
-      <div className="continuity-foot">
-        <div className="continuity-handoff-copy">
+      <div className="workstream-continuity-foot">
+        <div>
           <strong>
             {continuity.handoffReady
               ? "Handoff snapshot ready"
               : continuity.risk === "high" || continuity.risk === "critical"
                 ? "Handoff recommended"
-                : "Continuity protected"}
+                : continuity.risk === "medium"
+                  ? "Growing"
+                  : "Protected"}
           </strong>
           <span>
-            {latestHandoff
-              ? latestHandoff.id
-              : continuity.risk === "high" || continuity.risk === "critical"
-                ? continuity.reasons[0]?.detail ??
-                  "A durable Planner Handoff is being prepared."
-                : continuity.risk === "medium"
-                  ? "Growing, but no handoff is required yet. OWL will prepare one automatically at HIGH."
-                  : "No handoff needed. OWL will snapshot automatically before recommending a new Chat."}
+            {handoffId ??
+              continuity.reasons[0]?.detail ??
+              ("Current planner epoch · " + formatDuration(continuity.sessionAgeMs))}
           </span>
         </div>
-        {latestHandoff && (
+        {handoffId && (
           <button
             className="secondary continuity-copy-button"
             onClick={() => void copyResumePrompt()}
           >
-            <Copy size={14} />
-            {copied ? "Copied" : "Copy Resume Prompt"}
+            <Copy size={13} />
+            {copied ? "Copied" : "Copy resume"}
           </button>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -734,6 +728,8 @@ function WorkstreamsView({
                 {stream.phase && <small>{stream.phase}</small>}
               </div>
 
+              <WorkstreamContinuity stream={stream} />
+
               <div className="workstream-route" aria-label="Current work route">
                 <span>User / caller</span>
                 <ChevronRight size={14} />
@@ -1183,10 +1179,7 @@ export function MonitorPage({
         compact
       />
 
-      <ConversationContinuityCard
-        board={workstreamBoard}
-        continuation={snapshot?.mcp.continuation}
-      />
+      <ConversationContinuityOverview board={workstreamBoard} />
 
       <LiveOperationsGraph
         snapshot={snapshot}

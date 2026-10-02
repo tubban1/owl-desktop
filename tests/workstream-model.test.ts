@@ -191,6 +191,97 @@ describe("buildWorkstreamBoard", () => {
     expect(worker?.messages.some((message) => message.summary === "Build Desktop")).toBe(false);
   });
 
+  it("keeps Conversation Continuity independent for concurrent ChatGPT sessions", () => {
+    const input = snapshot();
+    input.mcp.sessions[1].clientKind = "chatgpt";
+    input.mcp.sessions[1].clientLabel = "Chat B";
+    input.mcp.continuation.owners[1].clientKind = "chatgpt";
+    input.mcp.continuation.owners[1].clientLabel = "Chat B";
+
+    input.mcp.continuation.owners[0].continuity = {
+      modelVersion: 2,
+      basis: "owl_observed_mcp_traffic",
+      risk: "high",
+      state: "handoff_ready",
+      score: 60,
+      handoffReady: true,
+      observedChars: 280_000,
+      observedTokenEquivalent: 70_000,
+      tokenEquivalentHeuristic: "characters_divided_by_4_not_openai_context",
+      recentGrowthChars: 20_000,
+      recentGrowthTokenEquivalent: 5_000,
+      windowMinutes: 10,
+      duplicateChars: 14_000,
+      duplicateRatio: 0.05,
+      toolCallCount: 108,
+      sessionAgeMs: 14_400_000,
+      workstreamAgeMs: 14_400_000,
+      continuityEpochId: "continuity:a",
+      continuityEpochStartedAt: "2026-10-01T20:00:00.000Z",
+      checkpointAgeMs: 10_000,
+      activeTaskCount: 1,
+      reasons: [{ code: "observed_volume", points: 20, detail: "context floor" }],
+    };
+    input.mcp.continuation.owners[0].latestHandoffId = "handoff_a";
+
+    input.mcp.continuation.owners[1].continuity = {
+      modelVersion: 2,
+      basis: "owl_observed_mcp_traffic",
+      risk: "low",
+      state: "healthy",
+      score: 0,
+      handoffReady: false,
+      observedChars: 32_000,
+      observedTokenEquivalent: 8_000,
+      tokenEquivalentHeuristic: "characters_divided_by_4_not_openai_context",
+      recentGrowthChars: 4_000,
+      recentGrowthTokenEquivalent: 1_000,
+      windowMinutes: 10,
+      duplicateChars: 0,
+      duplicateRatio: 0,
+      toolCallCount: 12,
+      sessionAgeMs: 600_000,
+      workstreamAgeMs: 600_000,
+      continuityEpochId: "continuity:b",
+      continuityEpochStartedAt: "2026-10-02T00:00:00.000Z",
+      checkpointAgeMs: 12_000,
+      activeTaskCount: 1,
+      reasons: [],
+    };
+
+    const board = buildWorkstreamBoard({
+      snapshot: input,
+      agentRequests: [],
+      now: Date.parse("2026-10-02T00:00:30.000Z"),
+    });
+    const chatA = board.streams.find((stream) => stream.ownerId === "owl-owner:a");
+    const chatB = board.streams.find((stream) => stream.ownerId === "owl-owner:b");
+
+    expect(chatA).toMatchObject({
+      sourceKind: "ChatGPT",
+      sourceLabel: "Chat A",
+      latestHandoffId: "handoff_a",
+      continuity: {
+        risk: "high",
+        state: "handoff_ready",
+        handoffReady: true,
+        observedTokenEquivalent: 70_000,
+        toolCallCount: 108,
+      },
+    });
+    expect(chatB).toMatchObject({
+      sourceKind: "ChatGPT",
+      sourceLabel: "Chat B",
+      continuity: {
+        risk: "low",
+        state: "healthy",
+        handoffReady: false,
+        observedTokenEquivalent: 8_000,
+        toolCallCount: 12,
+      },
+    });
+  });
+
   it("surfaces real progress handoffs and the 15-second / 3-step cadence", () => {
     const input = snapshot();
     input.mcp.continuation.owners[0].workstream = {

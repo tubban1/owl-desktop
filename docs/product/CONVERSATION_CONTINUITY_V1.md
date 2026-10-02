@@ -241,6 +241,13 @@ keeps its owner across normal reconnect traffic, while a distinct Chat/session
 gets a distinct owner. The persistent Desktop fallback is accepted only when
 the request explicitly identifies itself as a Desktop client.
 
+Monitor presents concurrent ChatGPT sessions independently. LIVE WORKSTREAMS
+keeps one card per planner workstream, and each ChatGPT card carries its own
+Continuity risk, observed context floor, recent growth, OWL call count, repeated
+payload ratio and Handoff state. A lightweight summary above the live view shows
+aggregate HIGH/MEDIUM/LOW and Handoff Ready counts without collapsing the
+underlying sessions into one global continuity card.
+
 The first real Session A -> Session B dogfood then exposed a second integration
 constraint: the live MCP server had all dedicated Continuity tools, but the fresh
 planner conversation still held a cached connector catalog. The compatibility
