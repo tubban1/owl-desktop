@@ -448,6 +448,23 @@ export async function startOwlMcpHttpServer({
 
     try {
       const info = await client.info();
+      let agentRequests = {
+        available: Boolean(agentInbox),
+        pending: 0,
+        claimed: 0,
+        highestPriority: null,
+        byType: {},
+      };
+      if (agentInbox?.summary) {
+        try {
+          agentRequests = {
+            available: true,
+            ...(await agentInbox.summary()),
+          };
+        } catch {
+          agentRequests.available = false;
+        }
+      }
       res.json({
         ok: true,
         service: "owl-mcp",
@@ -456,12 +473,7 @@ export async function startOwlMcpHttpServer({
         runtimeUrl: runtimeBaseUrl,
         transportSessions: sessions.size,
         ownerHeader: "x-owl-owner-id",
-        agentRequests: agentInbox?.summary() ?? {
-          pending: 0,
-          claimed: 0,
-          highestPriority: null,
-          byType: {},
-        },
+        agentRequests,
         sessionPolicy: {
           idleTtlMs: boundedSessionIdleTtlMs,
           ownerSupersedeGraceMs: boundedOwnerSupersedeGraceMs,

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 
 const desktopRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -52,6 +53,7 @@ const desktopSettingsFile =
     "desktop",
     "settings.json",
   );
+const desktopUserDataRoot = path.dirname(desktopSettingsFile);
 let desktopUserSettings = {};
 try {
   desktopUserSettings = JSON.parse(fs.readFileSync(desktopSettingsFile, "utf8"));
@@ -78,6 +80,20 @@ const userWakeAliases = Array.isArray(desktopUserSettings.wakeAliases)
       .map((value) => value.trim())
       .filter(Boolean)
   : [];
+const mcpPort = Number(desktopUserSettings.mcpPort || 8790);
+const connectionHostPort = Number(
+  process.env.OWL_CONNECTION_HOST_PORT || "8791",
+);
+const desktopCapabilityBridgePort = Number(
+  process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_PORT || "8792",
+);
+const connectionHostControlToken =
+  process.env.OWL_CONNECTION_HOST_CONTROL_TOKEN?.trim() ||
+  randomBytes(32).toString("base64url");
+const connectionHostUrl =
+  `http://127.0.0.1:${connectionHostPort}`;
+const desktopCapabilityBridgeUrl =
+  `http://127.0.0.1:${desktopCapabilityBridgePort}`;
 const tsxCli = path.join(runtimeRoot, "node_modules", "tsx", "dist", "cli.mjs");
 
 function parseNodeVersion(value) {
@@ -214,25 +230,47 @@ if (enforceCloudAccess && !fs.existsSync(runtimeLeasePublicKeyFile)) {
 }
 
 const children = new Set();
+const restartTimers = new Set();
 let shuttingDown = false;
 
-function start(label, cwd, command, args, env = {}) {
-  const child = spawn(command, args, {
-    cwd,
-    env: { ...process.env, ...env },
-    stdio: "inherit",
-    detached: false,
-  });
-  children.add(child);
-  child.once("exit", (code, signal) => {
-    children.delete(child);
-    if (shuttingDown) return;
-    console.error(
-      `[dev:full] ${label} exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`,
-    );
-    shutdown(code ?? 1);
-  });
-  return child;
+function start(
+  label,
+  cwd,
+  command,
+  args,
+  env = {},
+  { restartOnExit = false, restartDelayMs = 1000 } = {},
+) {
+  const launch = () => {
+    const child = spawn(command, args, {
+      cwd,
+      env: { ...process.env, ...env },
+      stdio: "inherit",
+      detached: false,
+    });
+    children.add(child);
+    child.once("exit", (code, signal) => {
+      children.delete(child);
+      if (shuttingDown) return;
+      if (restartOnExit) {
+        console.warn(
+          `[dev:full] ${label} exited (code=${code ?? "null"}, signal=${signal ?? "null"}); restarting without touching Runtime/Connection Host.`,
+        );
+        const timer = setTimeout(() => {
+          restartTimers.delete(timer);
+          if (!shuttingDown) launch();
+        }, restartDelayMs);
+        restartTimers.add(timer);
+        return;
+      }
+      console.error(
+        `[dev:full] ${label} exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`,
+      );
+      shutdown(code ?? 1);
+    });
+    return child;
+  };
+  return launch();
 }
 
 async function assertPortFree(port, label) {
@@ -267,12 +305,12 @@ async function assertPortFree(port, label) {
   });
 }
 
-async function waitFor(url, label, timeoutMs = 30_000) {
+async function waitFor(url, label, timeoutMs = 30_000, headers = {}) {
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { headers });
       if (response.ok || response.status === 401) {
         console.log(`[dev:full] ${label} ready: ${url}`);
         return;
@@ -386,6 +424,8 @@ function stopChild(child) {
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
+  for (const timer of restartTimers) clearTimeout(timer);
+  restartTimers.clear();
   for (const child of children) stopChild(child);
   setTimeout(() => process.exit(code), 250).unref();
 }
@@ -423,6 +463,12 @@ if (!fs.existsSync(tunnelBinary)) {
 
 try {
   await assertPortFree(runtimeDevPort, "OWL Runtime DEV");
+  await assertPortFree(mcpPort, "OWL MCP");
+  await assertPortFree(connectionHostPort, "OWL Connection Host");
+  await assertPortFree(
+    desktopCapabilityBridgePort,
+    "OWL Desktop capability bridge",
+  );
 
   const runtimeCommit = spawnSync(
     "git",
@@ -471,6 +517,35 @@ try {
 
   await waitForDevRuntime();
 
+  console.log("[dev:full] starting OWL Connection Host...");
+  start(
+    "connection-host",
+    desktopRoot,
+    runtimeNode,
+    [path.join(desktopRoot, "connection-host", "server.mjs")],
+    {
+      PATH: devPath,
+      OWL_RUNTIME_URL: runtimeBaseUrl,
+      OWL_RUNTIME_API_TOKEN: process.env.OWL_RUNTIME_API_TOKEN || "",
+      OWL_MCP_PORT: String(mcpPort),
+      OWL_CONNECTION_HOST_PORT: String(connectionHostPort),
+      OWL_CONNECTION_HOST_CONTROL_TOKEN: connectionHostControlToken,
+      OWL_DESKTOP_CAPABILITY_BRIDGE_URL: desktopCapabilityBridgeUrl,
+      OWL_DESKTOP_CAPABILITY_BRIDGE_TOKEN: connectionHostControlToken,
+      OWL_DESKTOP_USER_DATA_DIR: desktopUserDataRoot,
+      OWL_DESKTOP_FALLBACK_OWNER_ID:
+        typeof desktopUserSettings.sessionId === "string"
+          ? desktopUserSettings.sessionId
+          : "",
+    },
+  );
+  await waitFor(
+    `${connectionHostUrl}/health`,
+    "Connection Host",
+    30_000,
+    { authorization: `Bearer ${connectionHostControlToken}` },
+  );
+
   console.log("[dev:full] starting OWL Desktop DEV...");
   start(
     "desktop",
@@ -481,12 +556,18 @@ try {
       PATH: devPath,
       OWL_DEV_FORCE_CONNECTIVITY: "true",
       OWL_RUNTIME_DEV_URL: runtimeBaseUrl,
+      OWL_CONNECTION_HOST_URL: connectionHostUrl,
+      OWL_CONNECTION_HOST_CONTROL_TOKEN: connectionHostControlToken,
+      OWL_DESKTOP_CAPABILITY_BRIDGE_PORT: String(
+        desktopCapabilityBridgePort,
+      ),
     },
+    { restartOnExit: true, restartDelayMs: 1200 },
   );
   await waitFor("http://127.0.0.1:5173/", "Vite renderer");
 
   console.log(
-    "[dev:full] VERIFIED: ChatGPT → Tunnel → Desktop MCP → isolated Runtime DEV.",
+    "[dev:full] VERIFIED: ChatGPT → Tunnel → Connection Host MCP → isolated Runtime DEV; Desktop UI is restart-isolated.",
   );
   console.log(
     `[dev:full] Runtime DEV endpoint: ${runtimeBaseUrl} (persistent Desktop settings unchanged).`,

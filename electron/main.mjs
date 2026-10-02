@@ -9,6 +9,8 @@ import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
 import { LocalRuntimeBootstrap } from "./services/local-runtime-bootstrap.mjs";
 import { TunnelSupervisor } from "./services/tunnel-supervisor.mjs";
+import { ConnectionHostClient } from "./services/connection-host-client.mjs";
+import { startDesktopCapabilityBridge } from "./services/desktop-capability-bridge.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
 import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
@@ -34,6 +36,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let storageLayout;
 const devForceConnectivity =
   !app.isPackaged && process.env.OWL_DEV_FORCE_CONNECTIVITY === "true";
+const externalConnectionHostUrl =
+  process.env.OWL_CONNECTION_HOST_URL?.trim() || "";
+const externalConnectionHostToken =
+  process.env.OWL_CONNECTION_HOST_CONTROL_TOKEN?.trim() || "";
+const externalConnectionHostEnabled =
+  Boolean(externalConnectionHostUrl && externalConnectionHostToken);
+const desktopCapabilityBridgePort = Number(
+  process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_PORT || "8792",
+);
 let mainWindow;
 let store;
 let identityVault;
@@ -68,6 +79,10 @@ let cloudAccountState = {
 };
 let mcpServer;
 let mcpState = { status: "stopped", url: null, error: null };
+let connectionHostClient;
+let connectionHostSnapshot = null;
+let desktopCapabilityBridge;
+const seenConnectionHostEventIds = new Set();
 const activity = [];
 
 const record = (level, source, message, meta = {}) => {
@@ -81,6 +96,49 @@ const record = (level, source, message, meta = {}) => {
   });
   if (activity.length > 200) activity.length = 200;
 };
+
+function ingestConnectionHostEvents(events = []) {
+  for (const event of [...events].reverse()) {
+    if (!event?.id || seenConnectionHostEventIds.has(event.id)) continue;
+    seenConnectionHostEventIds.add(event.id);
+    activity.unshift({
+      id: `connection-host:${event.id}`,
+      at: event.at ?? new Date().toISOString(),
+      level: event.level ?? "info",
+      source: event.source ?? "connection-host",
+      message: event.message ?? "Connection Host event",
+      meta: event.meta ?? {},
+    });
+  }
+  while (seenConnectionHostEventIds.size > 800) {
+    const oldest = seenConnectionHostEventIds.values().next().value;
+    seenConnectionHostEventIds.delete(oldest);
+  }
+  if (activity.length > 200) activity.length = 200;
+}
+
+async function refreshConnectionHost() {
+  if (!connectionHostClient) return null;
+  try {
+    const snapshot = await connectionHostClient.health();
+    connectionHostSnapshot = snapshot;
+    ingestConnectionHostEvents(snapshot?.events ?? []);
+    mcpState = {
+      status: snapshot?.mcp?.status ?? "running",
+      url: snapshot?.mcp?.url ?? null,
+      error: null,
+    };
+    return snapshot;
+  } catch (error) {
+    connectionHostSnapshot = null;
+    mcpState = {
+      status: "error",
+      url: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+    return null;
+  }
+}
 
 const collectionSize = (value, keys = []) => {
   if (Array.isArray(value)) return value.length;
@@ -705,6 +763,9 @@ function createAgentRequest(input) {
 
 async function buildCloudPresence() {
   const client = runtimeClient();
+  const connectionHost = externalConnectionHostEnabled
+    ? await refreshConnectionHost()
+    : null;
   const [info, runtimeAccess] = await Promise.all([
     client.info().catch(() => null),
     client.runtimeAccess().catch(() => null),
@@ -764,8 +825,12 @@ async function buildCloudPresence() {
         "runtime.task.create-and-start@1",
       ],
       runtimeReachable: Boolean(info),
-      mcpAvailable: mcpState.status === "running",
-      tunnelAvailable: tunnelSupervisor?.status().state === "running",
+      mcpAvailable: externalConnectionHostEnabled
+        ? connectionHost?.mcp?.status === "running"
+        : mcpState.status === "running",
+      tunnelAvailable: externalConnectionHostEnabled
+        ? connectionHost?.tunnel?.state === "running"
+        : tunnelSupervisor?.status().state === "running",
       authorization: {
         operationalState,
         accountSessionState: cloudAccountState.status,
@@ -785,7 +850,9 @@ async function buildCloudPresence() {
         needsAttentionTasks,
         activeProcesses,
         approvalsPending,
-        mcpSessions: mcpServer?.snapshot()?.sessionCount ?? 0,
+        mcpSessions: externalConnectionHostEnabled
+          ? connectionHost?.mcp?.sessionCount ?? 0
+          : mcpServer?.snapshot()?.sessionCount ?? 0,
         outboxPending: cloudBridgeStore?.snapshot()?.outboxPending ?? 0,
       },
       providers: capabilityCard.providers,
@@ -978,32 +1045,68 @@ function effectiveTunnelBinary(settings) {
   );
 }
 
+async function tunnelStatus() {
+  if (externalConnectionHostEnabled) {
+    const snapshot = await refreshConnectionHost();
+    return snapshot?.tunnel ?? { state: "unavailable" };
+  }
+  return tunnelSupervisor?.status() ?? { state: "stopped" };
+}
+
+async function stopTunnel() {
+  if (externalConnectionHostEnabled) {
+    return connectionHostClient.stopTunnel();
+  }
+  return tunnelSupervisor.stop();
+}
+
+async function restartTunnel(config) {
+  if (externalConnectionHostEnabled) {
+    return connectionHostClient.restartTunnel(config);
+  }
+  return tunnelSupervisor.restart(config);
+}
+
 async function startTunnel() {
   const settings = store.getSettings();
   if (!settings.tunnelEnabled && !devForceConnectivity) {
-    await tunnelSupervisor.stop();
-    return tunnelSupervisor.status();
+    return stopTunnel();
   }
-  return tunnelSupervisor.start({
+  const config = {
     binaryPath: effectiveTunnelBinary(settings),
     tunnelId: settings.tunnelId,
     apiKey: tunnelApiKey(),
     mcpUrl: `http://127.0.0.1:${settings.mcpPort}/mcp`,
-  });
+  };
+  if (externalConnectionHostEnabled) {
+    return connectionHostClient.startTunnel(config);
+  }
+  return tunnelSupervisor.start(config);
 }
 
 async function stopMcp() {
+  if (externalConnectionHostEnabled) {
+    await refreshConnectionHost();
+    return mcpState;
+  }
   if (mcpServer) {
     await mcpServer.close().catch(() => undefined);
     mcpServer = undefined;
   }
   mcpState = { status: "stopped", url: null, error: null };
+  return mcpState;
 }
 
 async function startMcp() {
   const settings = store.getSettings();
   if (!settings.mcpEnabled && !devForceConnectivity) {
     await stopMcp();
+    return mcpState;
+  }
+
+  if (externalConnectionHostEnabled) {
+    mcpState = { status: "starting", url: null, error: null };
+    await refreshConnectionHost();
     return mcpState;
   }
 
@@ -1050,6 +1153,10 @@ async function runtimeSnapshot(options = {}) {
       runtimeHostSupervisor().status(),
     ]);
 
+  const connectionHost = externalConnectionHostEnabled
+    ? await refreshConnectionHost()
+    : null;
+
   const online = info.status === "fulfilled";
   let effectiveRuntimeAccess =
     runtimeAccess.status === "fulfilled" ? runtimeAccess.value : null;
@@ -1083,12 +1190,19 @@ async function runtimeSnapshot(options = {}) {
       approvals: approvals.status === "fulfilled" ? collectionSize(approvals.value, ["approvals", "items"]) : 0,
       processes: processes.status === "fulfilled" ? collectionSize(processes.value, ["processes", "items"]) : 0,
     },
-    mcp: {
-      ...mcpState,
-      ...(mcpServer?.snapshot() ?? { sessionCount: 0, sessions: [] }),
-    },
+    mcp: externalConnectionHostEnabled
+      ? {
+          ...mcpState,
+          ...(connectionHost?.mcp ?? { sessionCount: 0, sessions: [] }),
+        }
+      : {
+          ...mcpState,
+          ...(mcpServer?.snapshot() ?? { sessionCount: 0, sessions: [] }),
+        },
     host: host.status === "fulfilled" ? host.value : null,
-    tunnel: tunnelSupervisor?.status() ?? { state: "stopped" },
+    tunnel: externalConnectionHostEnabled
+      ? connectionHost?.tunnel ?? { state: "unavailable" }
+      : tunnelSupervisor?.status() ?? { state: "stopped" },
     cloud: cloudBridgeSnapshot(),
     agentInbox: agentInbox?.summary() ?? {
       pending: 0,
@@ -1183,7 +1297,10 @@ function createWindow() {
 }
 
 function registerIpc() {
-  ipcMain.handle("desktop:activity:list", () => activity.slice(0, 200));
+  ipcMain.handle("desktop:activity:list", async () => {
+    if (externalConnectionHostEnabled) await refreshConnectionHost();
+    return activity.slice(0, 200);
+  });
   ipcMain.handle("desktop:environment", () => ({
     appVersion: app.getVersion(),
     isPackaged: app.isPackaged,
@@ -1458,9 +1575,9 @@ function registerIpc() {
   ipcMain.handle("host:status", () => runtimeHostSupervisor().status());
   ipcMain.handle("host:restart", () => runtimeHostSupervisor().restartService());
   ipcMain.handle("host:stop", () => runtimeHostSupervisor().stopService());
-  ipcMain.handle("tunnel:status", () => tunnelSupervisor.status());
+  ipcMain.handle("tunnel:status", () => tunnelStatus());
   ipcMain.handle("tunnel:start", () => startTunnel());
-  ipcMain.handle("tunnel:stop", () => tunnelSupervisor.stop());
+  ipcMain.handle("tunnel:stop", () => stopTunnel());
   ipcMain.handle("accounts:list", () => identityVault.list());
   ipcMain.handle("accounts:upsert", (_event, input) => identityVault.upsert(input));
   ipcMain.handle("accounts:delete", (_event, id) => identityVault.delete(id));
@@ -1513,7 +1630,7 @@ function registerIpc() {
       "mcpPort" in (patch ?? {})
     ) {
       if (next.tunnelEnabled) {
-        await tunnelSupervisor.restart({
+        await restartTunnel({
           binaryPath: effectiveTunnelBinary(next),
           tunnelId: next.tunnelId,
           apiKey: tunnelApiKey(),
@@ -1524,7 +1641,7 @@ function registerIpc() {
           });
         });
       } else {
-        await tunnelSupervisor.stop();
+        await stopTunnel();
       }
     }
     if (
@@ -1565,7 +1682,7 @@ function registerIpc() {
     if (meta.name === "OWL_TUNNEL_API_KEY") {
       const settings = store.getSettings();
       if (settings.tunnelEnabled) {
-        await tunnelSupervisor.restart({
+        await restartTunnel({
           binaryPath: effectiveTunnelBinary(settings),
           tunnelId: settings.tunnelId,
           apiKey: tunnelApiKey(),
@@ -1596,7 +1713,7 @@ function registerIpc() {
       if (settings.autoConnectRuntime) await startRuntimeEventBridge();
     }
     if (existing?.name === "OWL_TUNNEL_API_KEY") {
-      await tunnelSupervisor.stop();
+      await stopTunnel();
     }
     if (existing?.name === "OWL_CLOUD_DEVICE_CREDENTIAL") {
       await stopCloudBridge();
@@ -1629,10 +1746,18 @@ if (!hasLock) {
     remoteSubmissionStore = new RemoteSubmissionStore({
       file: path.join(app.getPath("userData"), "remote-submissions.json"),
     });
-    plannerContinuationStore = new PlannerContinuationStore({
-      file: path.join(app.getPath("userData"), "planner-continuation.json"),
-    });
-    plannerContinuationStore.recoverConnectedTransports("desktop_restart");
+    if (externalConnectionHostEnabled) {
+      connectionHostClient = new ConnectionHostClient({
+        baseUrl: externalConnectionHostUrl,
+        token: externalConnectionHostToken,
+      });
+      plannerContinuationStore = null;
+    } else {
+      plannerContinuationStore = new PlannerContinuationStore({
+        file: path.join(app.getPath("userData"), "planner-continuation.json"),
+      });
+      plannerContinuationStore.recoverConnectedTransports("desktop_restart");
+    }
     agentInbox = new AgentInboxStore({
       file: path.join(app.getPath("userData"), "agent-inbox.json"),
     });
@@ -1650,11 +1775,24 @@ if (!hasLock) {
       stateFile: runtimeAgentRequestConsumerStateFile,
     });
     createRuntimeEventBridge();
-    tunnelSupervisor = new TunnelSupervisor({
-      onEvent(level, message, meta) {
-        record(level, "tunnel", message, meta);
-      },
-    });
+    if (externalConnectionHostEnabled) {
+      desktopCapabilityBridge = await startDesktopCapabilityBridge({
+        port: desktopCapabilityBridgePort,
+        token: externalConnectionHostToken,
+        agentInbox,
+        remoteDeviceControl,
+        onEvent(level, message, meta) {
+          record(level, "connection-host", message, meta);
+        },
+      });
+      await refreshConnectionHost();
+    } else {
+      tunnelSupervisor = new TunnelSupervisor({
+        onEvent(level, message, meta) {
+          record(level, "tunnel", message, meta);
+        },
+      });
+    }
     registerIpc();
     record("info", "desktop", "OWL Desktop started", { version: app.getVersion() });
     const settings = store.getSettings();
@@ -1709,8 +1847,11 @@ if (!hasLock) {
     void devAuthCallbackServer?.stop();
     void cloudBridge?.stop();
     runtimeAgentRequestEventBridge?.stop();
-    void tunnelSupervisor?.stop();
-    void stopMcp();
+    void desktopCapabilityBridge?.close();
+    if (!externalConnectionHostEnabled) {
+      void tunnelSupervisor?.stop();
+      void stopMcp();
+    }
   });
 
   app.on("window-all-closed", () => {

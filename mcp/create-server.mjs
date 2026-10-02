@@ -2654,7 +2654,7 @@ export function createOwlMcpServer() {
 
       const openAgentRequests =
         include_agent_requests !== false && context.agentInbox
-          ? context.agentInbox.list({
+          ? await context.agentInbox.list({
               statuses: ["pending", "claimed"],
               limit: 10,
               ownerId: context.runtimeSessionId,
@@ -2835,9 +2835,10 @@ export function createOwlMcpServer() {
           byType: {},
         };
       }
+      const summary = await context.agentInbox.summary();
       return {
         available: true,
-        ...context.agentInbox.summary(),
+        ...summary,
       };
     },
   );
