@@ -694,6 +694,7 @@ export class PlannerContinuationStore {
       responseDigest,
     };
     owner.continuity = {
+      ...(owner.continuity ?? {}),
       observedChars:
         Math.max(0, Number(owner.continuity?.observedChars ?? 0)) +
         requestChars +
@@ -743,7 +744,13 @@ export class PlannerContinuationStore {
     const workstreamCreatedMs = Date.parse(
       owner.workstream.createdAt ?? "",
     );
-    const sessionAgeMs = Number.isFinite(workstreamCreatedMs)
+    const continuityEpochStartedMs = Date.parse(
+      continuity.epochStartedAt ?? owner.workstream.createdAt ?? "",
+    );
+    const sessionAgeMs = Number.isFinite(continuityEpochStartedMs)
+      ? Math.max(0, nowMs - continuityEpochStartedMs)
+      : 0;
+    const workstreamAgeMs = Number.isFinite(workstreamCreatedMs)
       ? Math.max(0, nowMs - workstreamCreatedMs)
       : 0;
     const checkpointUpdatedMs = Date.parse(
@@ -752,9 +759,13 @@ export class PlannerContinuationStore {
     const checkpointAgeMs = Number.isFinite(checkpointUpdatedMs)
       ? Math.max(0, nowMs - checkpointUpdatedMs)
       : null;
+    const toolCallBaseline = Math.max(
+      0,
+      Number(continuity.toolCallBaseline ?? 0),
+    );
     const toolCallCount = Math.max(
       0,
-      Number(owner.workstream.totalToolSteps ?? 0),
+      Number(owner.workstream.totalToolSteps ?? 0) - toolCallBaseline,
     );
     const activeTaskCount = Array.isArray(owner.checkpoint?.taskIds)
       ? owner.checkpoint.taskIds.length
@@ -772,12 +783,24 @@ export class PlannerContinuationStore {
       reasons.push({ code, points, detail });
     };
 
-    if (observedChars >= 3_000_000) {
-      addReason("observed_volume", 30, "OWL-observed payload volume >= 3M chars");
-    } else if (observedChars >= 1_500_000) {
-      addReason("observed_volume", 20, "OWL-observed payload volume >= 1.5M chars");
-    } else if (observedChars >= 500_000) {
-      addReason("observed_volume", 10, "OWL-observed payload volume >= 500K chars");
+    if (observedChars >= 360_000) {
+      addReason(
+        "observed_volume",
+        30,
+        "OWL-observed context floor >= ~90K token-equivalent",
+      );
+    } else if (observedChars >= 240_000) {
+      addReason(
+        "observed_volume",
+        20,
+        "OWL-observed context floor >= ~60K token-equivalent",
+      );
+    } else if (observedChars >= 160_000) {
+      addReason(
+        "observed_volume",
+        10,
+        "OWL-observed context floor >= ~40K token-equivalent",
+      );
     }
 
     if (recentGrowthChars >= 300_000) {
@@ -836,7 +859,7 @@ export class PlannerContinuationStore {
           : "healthy";
 
     return {
-      modelVersion: 1,
+      modelVersion: 2,
       basis: "owl_observed_mcp_traffic",
       risk,
       state: stateLabel,
@@ -852,10 +875,83 @@ export class PlannerContinuationStore {
       duplicateRatio,
       toolCallCount,
       sessionAgeMs,
+      workstreamAgeMs,
+      continuityEpochId: continuity.epochId ?? null,
+      continuityEpochStartedAt:
+        continuity.epochStartedAt ?? owner.workstream.createdAt ?? null,
       checkpointAgeMs,
       activeTaskCount,
       reasons,
     };
+  }
+
+  startContinuityEpoch(
+    ownerId,
+    input = {},
+    now = new Date().toISOString(),
+  ) {
+    if (!ownerId) {
+      throw new Error("Conversation Continuity epoch requires an owner.");
+    }
+    const state = this.read();
+    const owner = state.owners[ownerId];
+    if (!owner?.workstream || owner.workstream.status === "completed") {
+      throw new Error(
+        "CONTINUITY_WORKSTREAM_NOT_ACTIVE: start an epoch on an active OWL workstream.",
+      );
+    }
+
+    const nowMs = Date.parse(now);
+    const previousStatus = this.continuityStatus(
+      ownerId,
+      Number.isFinite(nowMs) ? nowMs : Date.now(),
+      state,
+    );
+    const previous = owner.continuity ?? {};
+    const history = Array.isArray(previous.history)
+      ? [...previous.history]
+      : [];
+    if (previousStatus) {
+      history.push({
+        epochId:
+          previous.epochId ??
+          ("legacy:" + (owner.workstream.createdAt ?? "unknown")),
+        startedAt:
+          previous.epochStartedAt ?? owner.workstream.createdAt ?? null,
+        endedAt: now,
+        reason: String(input.reason ?? "planner_resume").slice(0, 80),
+        ...(typeof input.handoffId === "string" && input.handoffId
+          ? { handoffId: input.handoffId.slice(0, 220) }
+          : {}),
+        observedChars: previousStatus.observedChars,
+        observedTokenEquivalent: previousStatus.observedTokenEquivalent,
+        duplicateRatio: previousStatus.duplicateRatio,
+        toolCallCount: previousStatus.toolCallCount,
+        sessionAgeMs: previousStatus.sessionAgeMs,
+        score: previousStatus.score,
+        risk: previousStatus.risk,
+        state: previousStatus.state,
+      });
+    }
+
+    owner.continuity = {
+      epochId: "continuity:" + randomUUID(),
+      epochStartedAt: now,
+      toolCallBaseline: Math.max(
+        0,
+        Number(owner.workstream.totalToolSteps ?? 0),
+      ),
+      observedChars: 0,
+      duplicateChars: 0,
+      recentTraffic: [],
+      history: history.slice(-8),
+    };
+    owner.updatedAt = now;
+    this.write(state);
+    return this.continuityStatus(
+      ownerId,
+      Number.isFinite(nowMs) ? nowMs : Date.now(),
+    );
   }
 
   prepareHandoff(ownerId, input = {}, now = new Date().toISOString()) {

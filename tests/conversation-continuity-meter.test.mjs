@@ -37,7 +37,7 @@ describe("Conversation Continuity Meter", () => {
     );
 
     expect(status).toMatchObject({
-      modelVersion: 1,
+      modelVersion: 2,
       basis: "owl_observed_mcp_traffic",
       risk: "low",
       state: "healthy",
@@ -143,6 +143,58 @@ describe("Conversation Continuity Meter", () => {
       state: "handoff_ready",
       handoffReady: true,
     });
+  });
+
+  it("recommends a handoff before a real long-workstream traffic floor becomes unsafe", () => {
+    const store = createStore();
+    const owner = store.openWorkstream(
+      {
+        goal: "Calibrate from live OWL LAB dogfood",
+        clientKind: "chatgpt",
+      },
+      "2026-10-02T12:00:00.000Z",
+    );
+
+    for (let index = 0; index < 100; index += 1) {
+      store.recordWorkstreamToolStep(
+        owner.ownerId,
+        { tool: "execute_command", outcome: "success", durationMs: 10 },
+        "2026-10-02T13:20:00.000Z",
+      );
+    }
+    store.recordConversationTraffic(
+      owner.ownerId,
+      {
+        tool: "execute_command",
+        requestChars: 40_000,
+        responseChars: 220_000,
+        requestDigest: "calibration-request",
+        responseDigest: "calibration-response",
+      },
+      "2026-10-02T13:30:00.000Z",
+    );
+
+    const status = store.continuityStatus(
+      owner.ownerId,
+      Date.parse("2026-10-02T14:00:00.000Z"),
+    );
+    expect(status).toMatchObject({
+      modelVersion: 2,
+      risk: "high",
+      state: "handoff_recommended",
+      score: 50,
+      observedChars: 260_000,
+      observedTokenEquivalent: 65_000,
+      recentGrowthChars: 0,
+      toolCallCount: 100,
+    });
+    expect(status.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "observed_volume", points: 20 }),
+        expect.objectContaining({ code: "tool_calls", points: 20 }),
+        expect.objectContaining({ code: "session_age", points: 10 }),
+      ]),
+    );
   });
 
   it("counts exact repeated sanitized payload digests without retaining payload text", () => {

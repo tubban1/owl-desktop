@@ -144,9 +144,9 @@ function ConversationContinuityCard({
 
       <div className="continuity-metrics">
         <div>
-          <span>Observed context</span>
+          <span>Observed context floor</span>
           <strong>~{formatCompactNumber(continuity.observedTokenEquivalent)}</strong>
-          <small>token-equivalent heuristic</small>
+          <small>OWL-visible lower bound · heuristic</small>
         </div>
         <div>
           <span>Growth</span>
