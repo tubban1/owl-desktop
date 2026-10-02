@@ -121,6 +121,13 @@ export default function App() {
   const tunnelTransportReady = tunnelReachability
     ? tunnelReachability === "ready"
     : snapshot?.tunnel.state === "running";
+  const durableMcpReady =
+    snapshot?.cloudMcp?.configured === true &&
+    snapshot?.cloudMcp?.consumer?.ready === true;
+  const remoteTransportReady =
+    settings?.connectivityMode === "custom_tunnel"
+      ? tunnelTransportReady
+      : durableMcpReady;
   const cloudStatusLabel = snapshot?.cloud.status
     ? snapshot.cloud.status.replaceAll("_", " ")
     : "stopped";
@@ -150,12 +157,15 @@ export default function App() {
         description: "Read-only Runtime status is available, but new work needs a valid execution lease.",
       };
     }
-    if (snapshot?.mcp.status !== "running" || !tunnelTransportReady) {
+    if (snapshot?.mcp.status !== "running" || !remoteTransportReady) {
+      const customTunnel = settings?.connectivityMode === "custom_tunnel";
       return {
         state: "CHATGPT_CONNECTION_REQUIRED",
-        label: "Connect ChatGPT",
+        label: customTunnel ? "Connect Tunnel" : "Cloud connection",
         title: "Local execution is ready",
-        description: "Start or recover the OWL MCP/Tunnel connection so ChatGPT can reach this Mac.",
+        description: customTunnel
+          ? "Start or recover your custom OpenAI Tunnel so ChatGPT can reach this Mac."
+          : "Recover the durable OWL Cloud MCP path. Tunnel is not required for the managed production path.",
       };
     }
     return {
@@ -168,7 +178,8 @@ export default function App() {
     online,
     snapshot?.error,
     snapshot?.mcp.status,
-    tunnelTransportReady,
+    remoteTransportReady,
+    settings?.connectivityMode,
     cloudAccount?.status,
     executionReady,
   ]);
@@ -244,6 +255,7 @@ export default function App() {
       "tunnelEnabled" in patch ||
       "tunnelBinaryPath" in patch ||
       "tunnelId" in patch ||
+      "connectivityMode" in patch ||
       "cloudEnabled" in patch ||
       "cloudBaseUrl" in patch ||
       "cloudDeviceId" in patch ||
@@ -305,7 +317,9 @@ export default function App() {
         : productReadiness.state === "AUTHORIZATION_REQUIRED"
           ? "Reauthorize"
           : productReadiness.state === "CHATGPT_CONNECTION_REQUIRED"
-            ? "Connect ChatGPT"
+            ? settings?.connectivityMode === "custom_tunnel"
+              ? "Connect Tunnel"
+              : "Recover Cloud"
             : "Refresh";
 
   const signOutCloudAccount = async () => {
@@ -361,10 +375,17 @@ export default function App() {
         if (snapshot?.mcp.status !== "running") {
           await saveSettings({ mcpEnabled: true });
         }
-        if (settings?.tunnelEnabled !== true) {
-          await saveSettings({ tunnelEnabled: true });
+        if (settings?.connectivityMode === "custom_tunnel") {
+          if (settings.tunnelEnabled !== true || settings.tunnelAutoStart !== true) {
+            await saveSettings({
+              tunnelEnabled: true,
+              tunnelAutoStart: true,
+            });
+          }
+        } else if (settings?.cloudEnabled !== true) {
+          await saveSettings({ cloudEnabled: true });
         }
-        await window.owlDesktop.tunnelStart();
+        await window.owlDesktop.recoverConnectivity();
       }
       await refresh();
     } catch (error) {
@@ -646,7 +667,8 @@ export default function App() {
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">SYSTEM HEALTH</span><h3>Connections</h3></div></div>
               <div className="component-list">
                 <div><span className="component-icon"><Boxes size={17} /></span><p><strong>Local engine</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
-                <div><span className="component-icon"><Terminal size={17} /></span><p><strong>ChatGPT connection</strong><small>{snapshot?.mcp.status === "running" ? "ChatGPT can reach this Mac" : snapshot?.mcp.error ?? "Not connected"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
+                <div><span className="component-icon"><Terminal size={17} /></span><p><strong>Local MCP</strong><small>{snapshot?.mcp.status === "running" ? "Local execution bridge is serving" : snapshot?.mcp.error ?? "Local bridge unavailable"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
+                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>Remote path</strong><small>{settings?.connectivityMode === "custom_tunnel" ? (tunnelTransportReady ? "Custom OpenAI Tunnel reachable" : "Custom Tunnel not proven") : (durableMcpReady ? "OWL Cloud Durable MCP ready" : "Durable Cloud path not proven")}</small></p><StatusPill online={remoteTransportReady} /></div>
                 <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL LAB account</strong><small>{accountConnected ? "Signed in · Cloud device connected" : cloudOnline ? "Cloud connected · account sign-in required" : "Cloud connection unavailable"}</small></p>{accountConnected ? <StatusPill online /> : <span className="neutral-pill">{cloudOnline ? (cloudAccount?.status?.replaceAll("_", " ") ?? "sign-in required") : cloudStatusLabel}</span>}</div>
                 <div><span className="component-icon"><ShieldCheck size={17} /></span><p><strong>Authorization</strong><small>{runtimeAccess?.state === "READY" ? (runtimeAccess?.grant?.signatureVerified ? "Cloud-signed Runtime access" : "Runtime access ready") : runtimeAccess?.reasonCode ?? "Runtime access unavailable"}</small></p><span className={"neutral-pill " + (runtimeAccess?.state === "READY" ? "" : "warning-pill")}>{runtimeAccess?.state?.toLowerCase() ?? "unknown"}</span></div>
               </div>
@@ -1101,10 +1123,13 @@ export default function App() {
             <div className="setting-row"><div><strong>Auto-connect Runtime</strong><span>Probe Runtime when OWL LAB Desktop starts.</span></div><Toggle checked={settings.autoConnectRuntime} onChange={(v) => saveSettings({ autoConnectRuntime: v })} /></div>
             <div className="setting-row"><div><strong>OWL MCP</strong><span>Run the ChatGPT/MCP compatibility adapter with the Desktop lifecycle.</span></div><Toggle checked={settings.mcpEnabled} onChange={(v) => saveSettings({ mcpEnabled: v })} /></div>
             <div className="setting-row"><div><strong>MCP port</strong><span>Loopback port used by OWL MCP and OWL Tunnel.</span></div><input className="setting-input" type="number" min="1024" max="65535" value={settings.mcpPort} onChange={(e) => setSettings({ ...settings, mcpPort: Number(e.target.value) })} onBlur={() => saveSettings({ mcpPort: settings.mcpPort })} /></div>
-            <div className="setting-row"><div><strong>OWL Tunnel</strong><span>Run the remote transport to this Desktop's local MCP endpoint.</span></div><Toggle checked={settings.tunnelEnabled} onChange={(v) => saveSettings({ tunnelEnabled: v })} /></div>
-            <div className="setting-row"><div><strong>Tunnel auto-start</strong><span>Start the tunnel after Desktop and MCP are ready.</span></div><Toggle checked={settings.tunnelAutoStart} onChange={(v) => saveSettings({ tunnelAutoStart: v })} /></div>
-            <div className="setting-row"><div><strong>Tunnel binary override</strong><span>Leave empty to use the vendored OWL Tunnel for this architecture.</span></div><input className="setting-input" value={settings.tunnelBinaryPath} onChange={(e) => setSettings({ ...settings, tunnelBinaryPath: e.target.value })} onBlur={() => saveSettings({ tunnelBinaryPath: settings.tunnelBinaryPath })} placeholder="Automatic (recommended)" /></div>
-            <div className="setting-row"><div><strong>Tunnel ID</strong><span>Control-plane tunnel identity. Normal users should receive this automatically from OWL LAB.</span></div><input className="setting-input" value={settings.tunnelId} onChange={(e) => setSettings({ ...settings, tunnelId: e.target.value })} onBlur={() => saveSettings({ tunnelId: settings.tunnelId })} placeholder="tunnel_…" /></div>
+            <div className="setting-row"><div><strong>Remote connection</strong><span>OWL Cloud Durable MCP is the production default. Custom OpenAI Tunnel remains available for advanced/self-managed deployments.</span></div><select className="setting-input" value={settings.connectivityMode} onChange={(e) => void saveSettings({ connectivityMode: e.target.value as Settings["connectivityMode"] })}><option value="cloud_durable">OWL Cloud · Durable (recommended)</option><option value="custom_tunnel">Custom OpenAI Tunnel · Advanced</option></select></div>
+            {settings.connectivityMode === "custom_tunnel" && <>
+              <div className="setting-row"><div><strong>Custom Tunnel</strong><span>Run your own OpenAI Secure MCP Tunnel to this Desktop's local MCP endpoint.</span></div><Toggle checked={settings.tunnelEnabled} onChange={(v) => saveSettings({ tunnelEnabled: v })} /></div>
+              <div className="setting-row"><div><strong>Tunnel auto-start</strong><span>Start the custom tunnel after Desktop and MCP are ready.</span></div><Toggle checked={settings.tunnelAutoStart} onChange={(v) => saveSettings({ tunnelAutoStart: v })} /></div>
+              <div className="setting-row"><div><strong>Tunnel binary override</strong><span>Leave empty to use the vendored OpenAI tunnel-client for this architecture.</span></div><input className="setting-input" value={settings.tunnelBinaryPath} onChange={(e) => setSettings({ ...settings, tunnelBinaryPath: e.target.value })} onBlur={() => saveSettings({ tunnelBinaryPath: settings.tunnelBinaryPath })} placeholder="Automatic (recommended)" /></div>
+              <div className="setting-row"><div><strong>Tunnel ID</strong><span>Your own OpenAI Platform tunnel identity.</span></div><input className="setting-input" value={settings.tunnelId} onChange={(e) => setSettings({ ...settings, tunnelId: e.target.value })} onBlur={() => saveSettings({ tunnelId: settings.tunnelId })} placeholder="tunnel_…" /></div>
+            </>}
             <div className="setting-group-label"><Cloud size={14} /><span>Cloud Bridge</span></div>
             <div className="setting-row"><div><strong>Device presence</strong><span>Required after enrollment. While OWL LAB Desktop is running, this device reports privacy-bounded presence and usage counters to OWL Cloud even when the account session is signed out.</span></div><span className="neutral-pill">Required</span></div>
             <div className="setting-row"><div><strong>Cloud authorization</strong><span>Account session + entitlement + signed Runtime lease decide whether local computer access is unlocked. Presence alone never grants execution.</span></div><span className="neutral-pill">Cloud enforced</span></div>

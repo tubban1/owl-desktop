@@ -10,6 +10,7 @@ export type Settings = {
   tunnelAutoStart: boolean;
   tunnelBinaryPath: string;
   tunnelId: string;
+  connectivityMode: "cloud_durable" | "custom_tunnel";
   cloudEnabled: boolean;
   cloudAutoStart: boolean;
   cloudBaseUrl: string;
@@ -605,6 +606,25 @@ export type RuntimeSnapshot = {
   };
   host: HostStatus | null;
   tunnel: TunnelStatus;
+  cloudMcp: {
+    configured: boolean;
+    config: { baseUrl?: string; deviceId?: string } | null;
+    consumer: null | {
+      state?: "stopped" | "starting" | "ready" | "degraded";
+      ready?: boolean;
+      running?: boolean;
+      lastPollAt?: string | null;
+      lastSuccessAt?: string | null;
+      failureCount?: number;
+      activeCallId?: string | null;
+      processed?: number;
+      executor?: {
+        lastProofAt?: string | null;
+        lastError?: { at?: string; message?: string } | null;
+      } | null;
+    };
+    completionStore?: unknown;
+  };
   cloud: CloudBridgeStatus;
   agentInbox: AgentInboxSummary;
   runtimeEvents: RuntimeEventBridgeStatus;

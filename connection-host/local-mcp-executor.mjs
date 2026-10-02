@@ -25,6 +25,58 @@ export class LocalMcpExecutor {
     this.lastError = null;
   }
 
+  async probe({ signal } = {}) {
+    const headers = {
+      ...(this.mcpToken ? { authorization: `Bearer ${this.mcpToken}` } : {}),
+    };
+    const client = new Client({
+      name: "owl-connectivity-host-readiness",
+      version: "1.1.0",
+    });
+    const transport = new StreamableHTTPClientTransport(new URL(this.mcpUrl), {
+      requestInit: { headers },
+    });
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal?.reason);
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(
+      () => controller.abort(new Error("Local MCP readiness probe timed out.")),
+      this.connectTimeoutMs,
+    );
+    timer.unref?.();
+
+    try {
+      await Promise.race([
+        client.connect(transport),
+        new Promise((_, reject) => {
+          controller.signal.addEventListener(
+            "abort",
+            () => reject(controller.signal.reason ?? new Error("aborted")),
+            { once: true },
+          );
+        }),
+      ]);
+      await client.listTools(undefined, { signal: controller.signal });
+      this.lastProofAt = new Date().toISOString();
+      this.lastError = null;
+      return this.snapshot();
+    } catch (error) {
+      this.lastError = {
+        at: new Date().toISOString(),
+        message: error instanceof Error ? error.message : String(error),
+      };
+      this.onEvent("warn", "Local MCP readiness probe failed", {
+        message: this.lastError.message,
+      });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      await transport.close().catch(() => undefined);
+    }
+  }
+
   async execute({
     callId,
     ownerId,

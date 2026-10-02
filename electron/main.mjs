@@ -674,6 +674,11 @@ async function completeCloudAccountLogin(url) {
       canRun: enrolled.access?.canRun === true,
     });
     await startCloudBridge();
+    await syncConnectionHostCloudMcp().catch((error) => {
+      record("warn", "cloud-mcp", "Cloud MCP activation after enrollment failed", {
+        code: error?.code ?? error?.name ?? "ERROR",
+      });
+    });
     mainWindow?.webContents?.send("cloud:account-updated", cloudAccountSnapshot());
     return cloudAccountSnapshot();
   } catch (error) {
@@ -947,6 +952,10 @@ async function buildCloudPresence() {
       tunnelAvailable: externalConnectionHostEnabled
         ? tunnelTransportAvailable(connectionHost?.tunnel)
         : tunnelTransportAvailable(tunnelSupervisor?.status()),
+      durableMcpAvailable:
+        externalConnectionHostEnabled &&
+        connectionHost?.cloudMcp?.configured === true &&
+        connectionHost?.cloudMcp?.consumer?.ready === true,
       authorization: {
         operationalState,
         accountSessionState: cloudAccountState.status,
@@ -1185,7 +1194,10 @@ async function restartTunnel(config) {
 
 async function startTunnel() {
   const settings = store.getSettings();
-  if (!settings.tunnelEnabled && !devForceConnectivity) {
+  if (
+    !devForceConnectivity &&
+    (settings.connectivityMode !== "custom_tunnel" || !settings.tunnelEnabled)
+  ) {
     return stopTunnel();
   }
   const config = {
@@ -1319,6 +1331,19 @@ async function runtimeSnapshot(options = {}) {
     tunnel: externalConnectionHostEnabled
       ? connectionHost?.tunnel ?? { state: "unavailable" }
       : tunnelSupervisor?.status() ?? { state: "stopped" },
+    cloudMcp: externalConnectionHostEnabled
+      ? connectionHost?.cloudMcp ?? {
+          configured: false,
+          config: null,
+          consumer: null,
+          completionStore: null,
+        }
+      : {
+          configured: false,
+          config: null,
+          consumer: null,
+          completionStore: null,
+        },
     cloud: cloudBridgeSnapshot(),
     agentInbox: agentInbox?.summary() ?? {
       pending: 0,
@@ -1489,6 +1514,27 @@ function registerIpc() {
     if (!cloudBridge) return await startCloudBridge();
     await cloudBridge.syncOnce({ forceHeartbeat: true });
     return cloudBridgeSnapshot();
+  });
+  ipcMain.handle("connectivity:recover", async () => {
+    const settings = store.getSettings();
+    await startMcp();
+    if (settings.connectivityMode === "custom_tunnel") {
+      const tunnel = await startTunnel();
+      return {
+        mode: "custom_tunnel",
+        tunnel,
+        cloudMcp: null,
+      };
+    }
+    const cloudMcp = await syncConnectionHostCloudMcp();
+    const host = externalConnectionHostEnabled
+      ? await refreshConnectionHost()
+      : null;
+    return {
+      mode: "cloud_durable",
+      tunnel: host?.tunnel ?? null,
+      cloudMcp: host?.cloudMcp ?? cloudMcp ?? null,
+    };
   });
   ipcMain.handle("cloud:devices:list", () =>
     cloudControlPlane().listDevices(),
@@ -1740,12 +1786,18 @@ function registerIpc() {
       }
     }
     if (
+      "connectivityMode" in (patch ?? {}) ||
       "tunnelEnabled" in (patch ?? {}) ||
+      "tunnelAutoStart" in (patch ?? {}) ||
       "tunnelBinaryPath" in (patch ?? {}) ||
       "tunnelId" in (patch ?? {}) ||
       "mcpPort" in (patch ?? {})
     ) {
-      if (next.tunnelEnabled) {
+      if (
+        next.connectivityMode === "custom_tunnel" &&
+        next.tunnelEnabled &&
+        next.tunnelAutoStart
+      ) {
         await restartTunnel({
           binaryPath: effectiveTunnelBinary(next),
           tunnelId: next.tunnelId,
@@ -1761,6 +1813,7 @@ function registerIpc() {
       }
     }
     if (
+      "connectivityMode" in (patch ?? {}) ||
       "cloudEnabled" in (patch ?? {}) ||
       "cloudBaseUrl" in (patch ?? {}) ||
       "cloudDeviceId" in (patch ?? {}) ||
@@ -1957,6 +2010,7 @@ async function runConnectivityHostOnly() {
       const health = await client.health();
 
       const wantsTunnel =
+        current.connectivityMode === "custom_tunnel" &&
         current.tunnelEnabled === true &&
         current.tunnelAutoStart === true &&
         Boolean(current.tunnelId?.trim()) &&

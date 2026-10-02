@@ -38,6 +38,11 @@ export class DesktopStore {
       tunnelAutoStart: false,
       tunnelBinaryPath: "",
       tunnelId: "",
+      connectivityMode:
+        stored.connectivityMode ||
+        (stored.tunnelEnabled === true && String(stored.tunnelId || "").trim()
+          ? "custom_tunnel"
+          : "cloud_durable"),
       cloudEnabled: false,
       cloudAutoStart: false,
       cloudBaseUrl:

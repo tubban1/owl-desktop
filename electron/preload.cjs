@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   cloudStart: () => ipcRenderer.invoke("cloud:start"),
   cloudStop: () => ipcRenderer.invoke("cloud:stop"),
   cloudSync: () => ipcRenderer.invoke("cloud:sync"),
+  recoverConnectivity: () => ipcRenderer.invoke("connectivity:recover"),
   cloudListDevices: () => ipcRenderer.invoke("cloud:devices:list"),
   cloudListCommands: (deviceId, limit) =>
     ipcRenderer.invoke("cloud:commands:list", deviceId, limit),

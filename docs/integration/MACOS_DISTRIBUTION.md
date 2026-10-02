@@ -123,12 +123,13 @@ This preserves the native Host permission identity while allowing Runtime code a
 
 ## Current formal-release blockers
 
-The release gate intentionally remains closed until real provider/release assets exist:
+The unsigned assembly gate is closed for branded icon, arm64+x64 Tunnel artifacts,
+and universal Runtime/Helper packaging. Formal production promotion remains closed on:
 
-- branded `build/icon.icns`;
-- versioned x64 OWL Tunnel artifact;
-- signed universal OWL Runtime Host artifact;
+- non-ad-hoc Developer ID signatures for OWL Runtime Host and OWL LAB Helper;
 - Developer ID Application identity;
-- Apple Team ID and notarization credentials.
+- Apple Team ID and notarization credentials;
+- signed clean-install dogfood;
+- packaged cross-repo reliability soak and signed update/rollback rehearsal.
 
 Development smoke artifacts may be unsigned. They must never be labeled as a production release.

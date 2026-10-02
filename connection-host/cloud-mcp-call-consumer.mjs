@@ -67,6 +67,11 @@ export class CloudMcpCallConsumer {
     this.lastError = null;
     this.activeCallId = null;
     this.processed = 0;
+    this.lastExecutorProbeAt = null;
+    this.executorProbeIntervalMs = Math.max(
+      5_000,
+      Math.min(60_000, this.pollIntervalMs * 10),
+    );
   }
 
   async start() {
@@ -120,6 +125,7 @@ export class CloudMcpCallConsumer {
   async runTick() {
     this.lastPollAt = new Date().toISOString();
     try {
+      await this.ensureExecutorReady();
       const payload = await this.cloudClient.pullMcpCalls(this.batchLimit);
       const calls = Array.isArray(payload?.calls) ? payload.calls : [];
       this.failureCount = 0;
@@ -144,6 +150,19 @@ export class CloudMcpCallConsumer {
       if (!this.running) throw error;
       return this.snapshot();
     }
+  }
+
+  async ensureExecutorReady() {
+    if (typeof this.executor.probe !== "function") return;
+    const snapshot = this.executor.snapshot?.() ?? null;
+    const lastProofMs = snapshot?.lastProofAt ? Date.parse(snapshot.lastProofAt) : NaN;
+    const proofFresh =
+      Number.isFinite(lastProofMs) &&
+      Date.now() - lastProofMs < this.executorProbeIntervalMs &&
+      !snapshot?.lastError;
+    if (proofFresh) return;
+    await this.executor.probe();
+    this.lastExecutorProbeAt = new Date().toISOString();
   }
 
   async processCall(call) {
@@ -268,10 +287,15 @@ export class CloudMcpCallConsumer {
   }
 
   snapshot() {
+    const executor = this.executor.snapshot?.() ?? null;
+    const executorReady =
+      executor === null ||
+      (Boolean(executor.lastProofAt) && !executor.lastError);
     const ready =
       this.running &&
       Boolean(this.lastSuccessAt) &&
-      this.failureCount === 0;
+      this.failureCount === 0 &&
+      executorReady;
     return {
       state: !this.running
         ? "stopped"
@@ -288,7 +312,9 @@ export class CloudMcpCallConsumer {
       failureCount: this.failureCount,
       activeCallId: this.activeCallId,
       processed: this.processed,
-      executor: this.executor.snapshot?.() ?? null,
+      executorReady,
+      lastExecutorProbeAt: this.lastExecutorProbeAt,
+      executor,
     };
   }
 }

@@ -54,6 +54,11 @@ declare global {
       cloudStart(): Promise<CloudBridgeStatus>;
       cloudStop(): Promise<CloudBridgeStatus>;
       cloudSync(): Promise<CloudBridgeStatus>;
+      recoverConnectivity(): Promise<{
+        mode: "cloud_durable" | "custom_tunnel";
+        tunnel: TunnelStatus | null;
+        cloudMcp: RuntimeSnapshot["cloudMcp"] | null;
+      }>;
       cloudListDevices(): Promise<CloudDeviceSummary[]>;
       cloudListCommands(
         deviceId: string,

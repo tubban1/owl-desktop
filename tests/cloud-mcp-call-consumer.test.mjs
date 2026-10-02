@@ -239,3 +239,55 @@ it("persists MCP tool isError results as failed Cloud completions", async () => 
   expect(consumer.snapshot().processed).toBe(0);
   await consumer.stop();
 });
+
+it("does not report durable MCP ready until the local executor is proven reachable", async () => {
+  const cloudClient = {
+    pullMcpCalls: vi.fn(async () => ({ calls: [] })),
+  };
+  let executorState = { lastProofAt: null, lastError: null };
+  const executor = {
+    probe: vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        executorState = {
+          lastProofAt: null,
+          lastError: { at: new Date().toISOString(), message: "local MCP unavailable" },
+        };
+        throw Object.assign(new Error("local MCP unavailable"), {
+          code: "LOCAL_MCP_PROBE_FAILED",
+        });
+      })
+      .mockImplementationOnce(async () => {
+        executorState = {
+          lastProofAt: new Date().toISOString(),
+          lastError: null,
+        };
+        return executorState;
+      }),
+    execute: vi.fn(),
+    snapshot: () => executorState,
+  };
+
+  const consumer = new CloudMcpCallConsumer({
+    cloudClient,
+    executor,
+    pollIntervalMs: 60_000,
+  });
+
+  const degraded = await consumer.start();
+  expect(degraded).toMatchObject({
+    state: "degraded",
+    ready: false,
+    executorReady: false,
+  });
+  expect(cloudClient.pullMcpCalls).not.toHaveBeenCalled();
+
+  await consumer.tick();
+  expect(cloudClient.pullMcpCalls).toHaveBeenCalledTimes(1);
+  expect(consumer.snapshot()).toMatchObject({
+    state: "ready",
+    ready: true,
+    executorReady: true,
+  });
+  await consumer.stop();
+});

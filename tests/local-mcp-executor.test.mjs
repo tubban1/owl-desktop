@@ -39,6 +39,22 @@ async function fakeRuntime() {
 }
 
 describe("LocalMcpExecutor", () => {
+  it("proves local MCP readiness without executing a Runtime tool", async () => {
+    const runtime = await fakeRuntime();
+    const mcp = await startOwlMcpHttpServer({
+      port: 0,
+      runtimeBaseUrl: runtime.url,
+    });
+    closers.push(() => mcp.close());
+
+    const executor = new LocalMcpExecutor({ mcpUrl: mcp.url });
+    const proof = await executor.probe();
+
+    expect(proof.lastProofAt).toBeTruthy();
+    expect(proof.lastError).toBeNull();
+    expect(runtime.requests).toHaveLength(0);
+  });
+
   it("reuses one stable Runtime idempotency identity across fresh MCP transports", async () => {
     const runtime = await fakeRuntime();
     const mcp = await startOwlMcpHttpServer({
