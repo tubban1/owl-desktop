@@ -198,3 +198,31 @@ describe("CloudHttpClient", () => {
     });
   });
 });
+
+it("uses Device auth for durable MCP pull, claim, and completion", async () => {
+  const fetchImpl = vi.fn(async () => jsonResponse({ calls: [] }));
+  const client = new CloudHttpClient({
+    baseUrl: "https://cloud.example.test",
+    deviceCredential: "owldev1.device.secret",
+    fetchImpl,
+  });
+
+  await client.pullMcpCalls(12);
+  await client.claimMcpCall("mcp_1", {
+    claimantId: "host-a",
+    leaseMs: 60000,
+  });
+  await client.completeMcpCall("mcp_1", {
+    claimantId: "host-a",
+    result: { ok: true },
+  });
+
+  expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+    "https://cloud.example.test/device/v1/mcp-calls?limit=12",
+    "https://cloud.example.test/device/v1/mcp-calls/mcp_1/claim",
+    "https://cloud.example.test/device/v1/mcp-calls/mcp_1/complete",
+  ]);
+  for (const [, init] of fetchImpl.mock.calls) {
+    expect(init.headers.authorization).toBe("Device owldev1.device.secret");
+  }
+});

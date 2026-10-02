@@ -248,6 +248,27 @@ export class CloudHttpClient {
     );
   }
 
+  pullMcpCalls(limit = 25) {
+    const bounded = Math.min(Math.max(Number(limit) || 25, 1), 100);
+    return this.request(`/device/v1/mcp-calls?limit=${bounded}`, {
+      auth: "device",
+    });
+  }
+
+  claimMcpCall(callId, input) {
+    return this.request(
+      `/device/v1/mcp-calls/${encodeURIComponent(callId)}/claim`,
+      { method: "POST", auth: "device", body: input },
+    );
+  }
+
+  completeMcpCall(callId, input) {
+    return this.request(
+      `/device/v1/mcp-calls/${encodeURIComponent(callId)}/complete`,
+      { method: "POST", auth: "device", body: input },
+    );
+  }
+
   pullCommands(limit = 25) {
     const bounded = Math.min(Math.max(Number(limit) || 25, 1), 100);
     return this.request(`/device/v1/commands?limit=${bounded}`, {

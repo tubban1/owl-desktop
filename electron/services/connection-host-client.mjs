@@ -159,4 +159,21 @@ export class ConnectionHostClient {
       timeoutMs: options.timeoutMs ?? 15_000,
     });
   }
+
+  configureCloudMcp(config, options = {}) {
+    return this.request("/cloud-mcp/configure", {
+      method: "POST",
+      body: config,
+      ...options,
+      timeoutMs: options.timeoutMs ?? 15_000,
+    });
+  }
+
+  stopCloudMcp(options = {}) {
+    return this.request("/cloud-mcp/stop", {
+      method: "POST",
+      ...options,
+      timeoutMs: options.timeoutMs ?? 10_000,
+    });
+  }
 }

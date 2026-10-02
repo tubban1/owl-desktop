@@ -6,6 +6,10 @@ import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { TunnelSupervisor } from "../electron/services/tunnel-supervisor.mjs";
 import { PlannerContinuationStore } from "../electron/services/planner-continuation-store.mjs";
 import { createDesktopBridgeRpc } from "./bridge-rpc.mjs";
+import { CloudHttpClient } from "../electron/services/cloud-http-client.mjs";
+import { CloudMcpCallConsumer } from "./cloud-mcp-call-consumer.mjs";
+import { CloudMcpCompletionStore } from "./cloud-mcp-completion-store.mjs";
+import { LocalMcpExecutor } from "./local-mcp-executor.mjs";
 
 function required(name, fallback = "") {
   const value = process.env[name]?.trim() || fallback;
@@ -129,6 +133,54 @@ const tunnelSupervisor = new TunnelSupervisor({
   },
 });
 
+const cloudMcpCompletionStore = new CloudMcpCompletionStore({
+  root: path.join(userDataRoot, "connectivity", "cloud-mcp-completions"),
+});
+const cloudMcpExecutor = new LocalMcpExecutor({
+  mcpUrl: mcpServer.url,
+  mcpToken,
+  onEvent(level, message, meta) {
+    record(level, "cloud-mcp-executor", message, meta);
+  },
+});
+let cloudMcpConsumer = null;
+let cloudMcpConfig = null;
+
+async function stopCloudMcpConsumer() {
+  const current = cloudMcpConsumer;
+  cloudMcpConsumer = null;
+  cloudMcpConfig = null;
+  if (current) await current.stop();
+}
+
+async function configureCloudMcpConsumer(config = {}) {
+  const baseUrl = String(config.baseUrl ?? "").trim();
+  const deviceCredential = String(config.deviceCredential ?? "").trim();
+  const deviceId = String(config.deviceId ?? "").trim();
+  if (!baseUrl || !deviceCredential || !deviceId) {
+    const error = new Error("Cloud MCP requires baseUrl, deviceId, and deviceCredential.");
+    error.code = "CLOUD_MCP_CONFIG_INVALID";
+    throw error;
+  }
+
+  await stopCloudMcpConsumer();
+  const client = new CloudHttpClient({ baseUrl, deviceCredential });
+  const consumer = new CloudMcpCallConsumer({
+    cloudClient: client,
+    executor: cloudMcpExecutor,
+    completionStore: cloudMcpCompletionStore,
+    pollIntervalMs: config.pollIntervalMs,
+    leaseMs: config.leaseMs,
+    onEvent(level, message, meta) {
+      record(level, "cloud-mcp", message, meta);
+    },
+  });
+  cloudMcpConfig = { baseUrl, deviceId };
+  cloudMcpConsumer = consumer;
+  await consumer.start();
+  return consumer.snapshot();
+}
+
 function authorized(req) {
   return req.headers.authorization === `Bearer ${controlToken}`;
 }
@@ -153,6 +205,12 @@ app.get("/health", (_req, res) => {
       ...mcpServer.snapshot(),
     },
     tunnel: tunnelSupervisor.status(),
+    cloudMcp: {
+      configured: Boolean(cloudMcpConfig),
+      config: cloudMcpConfig,
+      consumer: cloudMcpConsumer?.snapshot?.() ?? null,
+      completionStore: cloudMcpCompletionStore.snapshot(),
+    },
     events: events.slice(0, 120),
   });
 });
@@ -192,6 +250,26 @@ app.post("/tunnel/stop", async (_req, res) => {
   res.json({ ok: true, result });
 });
 
+app.post("/cloud-mcp/configure", async (req, res) => {
+  try {
+    const result = await configureCloudMcpConsumer(req.body ?? {});
+    res.json({ ok: true, result });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      error: {
+        code: error?.code ?? "CLOUD_MCP_CONFIGURE_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+});
+
+app.post("/cloud-mcp/stop", async (_req, res) => {
+  await stopCloudMcpConsumer();
+  res.json({ ok: true, result: { state: "stopped" } });
+});
+
 const startedAt = new Date().toISOString();
 const listener = await new Promise((resolve, reject) => {
   const candidate = app.listen(controlPort, "127.0.0.1", () =>
@@ -228,10 +306,11 @@ async function shutdown(signal) {
       2_500,
     ),
     boundedStep("Tunnel stop", () => tunnelSupervisor.stop(), 6_000),
+    boundedStep("Cloud MCP consumer stop", () => stopCloudMcpConsumer(), 5_000),
     boundedStep("OWL MCP close", () => mcpServer.close(), 5_000),
   ]);
 
-  const labels = ["listener", "tunnel", "mcp"];
+  const labels = ["listener", "tunnel", "cloud-mcp", "mcp"];
   results.forEach((result, index) => {
     if (result.status !== "rejected") return;
     record("warn", "connection-host", "Shutdown step did not complete cleanly", {

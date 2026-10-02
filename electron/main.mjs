@@ -44,7 +44,8 @@ const externalConnectionHostToken =
   process.env.OWL_CONNECTION_HOST_CONTROL_TOKEN?.trim() || "";
 const externalConnectionHostEnabled =
   Boolean(externalConnectionHostUrl && externalConnectionHostToken);
-const tunnelRecoveryOnly =
+const connectivityRecoveryOnly =
+  process.env.OWL_CONNECTIVITY_RECOVERY_ONLY === "true" ||
   process.env.OWL_TUNNEL_RECOVERY_ONLY === "true";
 const desktopCapabilityBridgePort = Number(
   process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_PORT || "8792",
@@ -347,6 +348,26 @@ function cloudDeviceCredential() {
     store.readSecret("OWL_CLOUD_DEVICE_CREDENTIAL", "owl-cloud") ??
     store.readSecret("OWL_CLOUD_DEVICE_CREDENTIAL")
   );
+}
+
+async function syncConnectionHostCloudMcp() {
+  if (!externalConnectionHostEnabled || !connectionHostClient || !store) return null;
+  const settings = store.getSettings();
+  const deviceCredential = cloudDeviceCredential();
+  if (
+    settings.cloudEnabled !== true ||
+    !settings.cloudBaseUrl?.trim() ||
+    !settings.cloudDeviceId?.trim() ||
+    !deviceCredential
+  ) {
+    return connectionHostClient.stopCloudMcp().catch(() => null);
+  }
+  return connectionHostClient.configureCloudMcp({
+    baseUrl: settings.cloudBaseUrl.trim(),
+    deviceId: settings.cloudDeviceId.trim(),
+    deviceCredential,
+    pollIntervalMs: settings.cloudPollIntervalMs,
+  });
 }
 
 function cloudAccountClient() {
@@ -1665,6 +1686,12 @@ function registerIpc() {
       } else {
         await stopCloudBridge();
       }
+      await syncConnectionHostCloudMcp().catch((error) => {
+        record("warn", "cloud-mcp", "Connection Host Cloud MCP sync failed", {
+          code: error?.code ?? error?.name ?? "ERROR",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
     }
     record("info", "desktop", "Settings updated");
     return next;
@@ -1699,6 +1726,7 @@ function registerIpc() {
       if (settings.cloudBaseUrl?.trim() && settings.cloudDeviceId?.trim()) {
         await startCloudBridge();
       }
+      await syncConnectionHostCloudMcp();
     }
     return meta;
   });
@@ -1721,20 +1749,27 @@ function registerIpc() {
     }
     if (existing?.name === "OWL_CLOUD_DEVICE_CREDENTIAL") {
       await stopCloudBridge();
+      await syncConnectionHostCloudMcp();
     }
     return result;
   });
 }
 
-async function runTunnelRecoveryOnly() {
+async function runConnectivityRecoveryOnly() {
   if (!externalConnectionHostEnabled) {
     throw new Error(
-      "Tunnel recovery-only mode requires an external Connection Host.",
+      "Connectivity recovery-only mode requires an external Connection Host.",
     );
   }
 
   store = new DesktopStore();
   const settings = store.getSettings();
+  const client = new ConnectionHostClient({
+    baseUrl: externalConnectionHostUrl,
+    token: externalConnectionHostToken,
+  });
+  const result = { tunnel: null, cloudMcp: null };
+
   const plan = createTunnelRecoveryPlan({
     settings,
     apiKey: tunnelApiKey(),
@@ -1746,36 +1781,57 @@ async function runTunnelRecoveryOnly() {
   });
 
   if (plan.action === "skip") {
+    result.tunnel = plan;
     console.log(`Tunnel recovery skipped: ${plan.reason}.`);
-    return plan;
+  } else {
+    const status = await client.startTunnel(plan.config);
+    result.tunnel = status;
+    console.log(
+      `Tunnel recovery applied: ${status?.state ?? "unknown"}${
+        status?.pid ? ` · PID ${status.pid}` : ""
+      }.`,
+    );
   }
 
-  const client = new ConnectionHostClient({
-    baseUrl: externalConnectionHostUrl,
-    token: externalConnectionHostToken,
-  });
-  const status = await client.startTunnel(plan.config);
-  console.log(
-    `Tunnel recovery applied: ${status?.state ?? "unknown"}${
-      status?.pid ? ` · PID ${status.pid}` : ""
-    }.`,
-  );
-  return status;
+  const deviceCredential = cloudDeviceCredential();
+  if (
+    settings.cloudEnabled === true &&
+    settings.cloudBaseUrl?.trim() &&
+    settings.cloudDeviceId?.trim() &&
+    deviceCredential
+  ) {
+    const cloudMcp = await client.configureCloudMcp({
+      baseUrl: settings.cloudBaseUrl.trim(),
+      deviceId: settings.cloudDeviceId.trim(),
+      deviceCredential,
+      pollIntervalMs: settings.cloudPollIntervalMs,
+    });
+    result.cloudMcp = cloudMcp;
+    console.log(`Cloud MCP recovery applied: ${cloudMcp?.state ?? "unknown"}.`);
+  } else {
+    result.cloudMcp = {
+      action: "skip",
+      reason: "cloud_device_enrollment_incomplete",
+    };
+    console.log("Cloud MCP recovery skipped: cloud device enrollment incomplete.");
+  }
+
+  return result;
 }
 
-const hasLock = tunnelRecoveryOnly ? true : app.requestSingleInstanceLock();
+const hasLock = connectivityRecoveryOnly ? true : app.requestSingleInstanceLock();
 
-if (tunnelRecoveryOnly) {
+if (connectivityRecoveryOnly) {
   storageLayout = configureOwlDesktopStorage(app);
   app
     .whenReady()
     .then(async () => {
-      await runTunnelRecoveryOnly();
+      await runConnectivityRecoveryOnly();
       app.exit(0);
     })
     .catch((error) => {
       console.error(
-        `Tunnel recovery failed: ${
+        `Connectivity recovery failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -1844,6 +1900,11 @@ if (tunnelRecoveryOnly) {
         },
       });
       await refreshConnectionHost();
+      await syncConnectionHostCloudMcp().catch((error) => {
+        record("warn", "cloud-mcp", "Initial Connection Host Cloud MCP sync failed", {
+          code: error?.code ?? error?.name ?? "ERROR",
+        });
+      });
     } else {
       tunnelSupervisor = new TunnelSupervisor({
         onEvent(level, message, meta) {

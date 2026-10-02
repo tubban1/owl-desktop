@@ -437,6 +437,7 @@ function queueConnectionHostTunnelRecovery() {
             PATH: devPath,
             OWL_CONNECTION_HOST_URL: connectionHostUrl,
             OWL_CONNECTION_HOST_CONTROL_TOKEN: connectionHostControlToken,
+            OWL_CONNECTIVITY_RECOVERY_ONLY: "true",
             OWL_TUNNEL_RECOVERY_ONLY: "true",
             OWL_TUNNEL_BINARY: tunnelBinary,
             OWL_MCP_URL: `http://127.0.0.1:${mcpPort}/mcp`,
