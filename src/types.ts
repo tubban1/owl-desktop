@@ -89,15 +89,54 @@ export type HostStatus = {
   desktopRole: "lifecycle-consumer";
 };
 
+export type TunnelReachabilityState =
+  | "starting"
+  | "ready"
+  | "degraded"
+  | "stale"
+  | "recovering"
+  | "unreachable"
+  | "stopped";
+
 export type TunnelStatus = {
-  state: "running" | "stopped";
+  state: "running" | "restarting" | "stopped";
   pid?: number | null;
   startedAt?: string | null;
   lastExit?: { at: string; code: number | null; signal: string | null } | null;
+  restartAt?: string | null;
+  restartAttempts?: number;
+  desiredRunning?: boolean;
   binaryPath?: string | null;
   tunnelIdConfigured?: boolean;
   mcpUrl?: string | null;
   secretStorage?: string;
+  reachability?: {
+    state: TunnelReachabilityState;
+    healthUrl?: string | null;
+    localReady?: boolean;
+    controlPlane?: {
+      status?: string;
+      state?: string;
+      reasonCode?: string | null;
+      observedAt?: string | null;
+      lastSuccess?: string | null;
+      lastError?: string | null;
+      consecutiveFailures?: number;
+      nextRetry?: string | null;
+      failureCategory?: string | null;
+      httpStatus?: number | null;
+    } | null;
+    lastProbeAt?: string | null;
+    lastHealthOkAt?: string | null;
+    lastControlPlaneOkAt?: string | null;
+    consecutiveFailures?: number;
+    lastError?: {
+      code?: string | null;
+      message?: string | null;
+      at?: string | null;
+    } | null;
+    recovering?: boolean;
+  };
 };
 
 

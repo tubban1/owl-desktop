@@ -117,6 +117,10 @@ export default function App() {
   const cloudOnline = snapshot?.cloud.status === "connected";
   const accountReady = cloudAccount?.status === "ready";
   const accountConnected = cloudOnline && accountReady;
+  const tunnelReachability = snapshot?.tunnel.reachability?.state;
+  const tunnelTransportReady = tunnelReachability
+    ? tunnelReachability === "ready"
+    : snapshot?.tunnel.state === "running";
   const cloudStatusLabel = snapshot?.cloud.status
     ? snapshot.cloud.status.replaceAll("_", " ")
     : "stopped";
@@ -146,7 +150,7 @@ export default function App() {
         description: "Read-only Runtime status is available, but new work needs a valid execution lease.",
       };
     }
-    if (snapshot?.mcp.status !== "running" || snapshot?.tunnel.state !== "running") {
+    if (snapshot?.mcp.status !== "running" || !tunnelTransportReady) {
       return {
         state: "CHATGPT_CONNECTION_REQUIRED",
         label: "Connect ChatGPT",
@@ -164,7 +168,7 @@ export default function App() {
     online,
     snapshot?.error,
     snapshot?.mcp.status,
-    snapshot?.tunnel.state,
+    tunnelTransportReady,
     cloudAccount?.status,
     executionReady,
   ]);
@@ -925,8 +929,8 @@ export default function App() {
             <div className="about-grid"><span>Bundle</span><strong>{snapshot?.host?.host.bundleIdentifier ?? "—"}</strong><span>Host version</span><strong>{snapshot?.host?.host.version ?? "—"}</strong><span>launchd</span><strong>{snapshot?.host?.service.state ?? "not loaded"}</strong><span>Role</span><strong>lifecycle consumer</strong></div>
             <div className="runtime-version"><button className="secondary" onClick={async () => { await window.owlDesktop.hostRestart(); await refresh(); }}>Restart service</button><button className="secondary" onClick={async () => { await window.owlDesktop.hostStop(); await refresh(); }}>Stop service</button></div>
           </section>
-          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">OWL TUNNEL</span><h3>Remote transport to local MCP</h3></div><StatusPill online={snapshot?.tunnel.state === "running"} /></div>
-            <div className="about-grid"><span>State</span><strong>{snapshot?.tunnel.state ?? "stopped"}</strong><span>PID</span><strong>{snapshot?.tunnel.pid ?? "—"}</strong><span>MCP target</span><code>{snapshot?.tunnel.mcpUrl ?? "—"}</code><span>Secret</span><strong>{snapshot?.tunnel.secretStorage ?? "OS encrypted"}</strong></div>
+          <section className="panel"><div className="panel-heading"><div><span className="eyebrow">OWL TUNNEL</span><h3>Remote transport to local MCP</h3></div><StatusPill online={tunnelTransportReady} /></div>
+            <div className="about-grid"><span>Reachability</span><strong>{snapshot?.tunnel.reachability?.state ?? snapshot?.tunnel.state ?? "stopped"}</strong><span>Process</span><strong>{snapshot?.tunnel.state ?? "stopped"} · PID {snapshot?.tunnel.pid ?? "—"}</strong><span>Control plane</span><strong>{snapshot?.tunnel.reachability?.controlPlane?.status ?? "unobserved"}</strong><span>Last proof</span><strong>{snapshot?.tunnel.reachability?.lastHealthOkAt ?? "—"}</strong><span>MCP target</span><code>{snapshot?.tunnel.mcpUrl ?? "—"}</code><span>Secret</span><strong>{snapshot?.tunnel.secretStorage ?? "OS encrypted"}</strong></div>
             <div className="runtime-version"><button className="secondary" onClick={async () => { await window.owlDesktop.tunnelStart(); await refresh(); }}>Start tunnel</button><button className="secondary" onClick={async () => { await window.owlDesktop.tunnelStop(); await refresh(); }}>Stop tunnel</button></div>
           </section>
           <section className="panel cloud-bridge-panel">

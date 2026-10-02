@@ -315,7 +315,16 @@ export function buildMonitorModel({
 
   const runtimeOnline = snapshot?.mode === "live";
   const mcpOnline = snapshot?.mcp.status === "running";
-  const tunnelOnline = snapshot?.tunnel.state === "running";
+  const tunnelReachability = snapshot?.tunnel.reachability?.state;
+  const tunnelOnline = tunnelReachability
+    ? tunnelReachability === "ready"
+    : snapshot?.tunnel.state === "running";
+  const tunnelNeedsAttention = Boolean(
+    tunnelReachability &&
+      ["starting", "degraded", "stale", "recovering"].includes(
+        tunnelReachability,
+      ),
+  );
   const cloudOnline = snapshot?.cloud.status === "connected";
   const eventState = snapshot?.runtimeEvents?.status ?? "stopped";
   const skillRegistry = skillSnapshot?.lifecycle.registrySupported === true;
@@ -340,8 +349,16 @@ export function buildMonitorModel({
     {
       id: "tunnel",
       label: "Tunnel",
-      state: tunnelOnline ? "healthy" : "offline",
-      detail: tunnelOnline ? "Remote transport active" : snapshot?.tunnel.state ?? "stopped",
+      state: tunnelOnline
+        ? "healthy"
+        : tunnelNeedsAttention
+          ? "attention"
+          : "offline",
+      detail: tunnelOnline
+        ? `Remote transport verified · control plane ${snapshot?.tunnel.reachability?.controlPlane?.state ?? "healthy"}`
+        : tunnelReachability
+          ? `${tunnelReachability} · local ready ${snapshot?.tunnel.reachability?.localReady ? "yes" : "no"} · control plane ${snapshot?.tunnel.reachability?.controlPlane?.status ?? "unknown"}`
+          : snapshot?.tunnel.state ?? "stopped",
     },
     {
       id: "cloud",

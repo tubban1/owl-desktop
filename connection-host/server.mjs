@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { TunnelSupervisor } from "../electron/services/tunnel-supervisor.mjs";
 import { PlannerContinuationStore } from "../electron/services/planner-continuation-store.mjs";
+import { createDesktopBridgeRpc } from "./bridge-rpc.mjs";
 
 function required(name, fallback = "") {
   const value = process.env[name]?.trim() || fallback;
@@ -54,33 +55,34 @@ function record(level, source, message, meta = {}) {
   if (events.length > 400) events.length = 400;
 }
 
-async function bridgeRpc(domain, method, args = []) {
-  const response = await fetch(`${desktopBridgeUrl}/rpc`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${desktopBridgeToken}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ domain, method, args }),
-  }).catch((error) => {
-    const wrapped = new Error(
-      "OWL Desktop capability bridge is temporarily unavailable.",
-    );
-    wrapped.code = "DESKTOP_BRIDGE_UNAVAILABLE";
-    wrapped.cause = error;
-    throw wrapped;
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body?.ok !== true) {
-    const error = new Error(
-      body?.error?.message ||
-        `OWL Desktop capability bridge failed with HTTP ${response.status}.`,
-    );
-    error.code = body?.error?.code || "DESKTOP_BRIDGE_UNAVAILABLE";
-    throw error;
+async function boundedStep(label, operation, timeoutMs) {
+  let timeout;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          const error = new Error(
+            `${label} timed out after ${timeoutMs}ms.`,
+          );
+          error.code = "CONNECTION_HOST_SHUTDOWN_TIMEOUT";
+          reject(error);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
-  return body.result;
 }
+
+const bridgeRpc = createDesktopBridgeRpc({
+  baseUrl: desktopBridgeUrl,
+  token: desktopBridgeToken,
+  timeoutMs: Number(process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_TIMEOUT_MS || "5000"),
+  onEvent(level, message, meta) {
+    record(level, "desktop-bridge", message, meta);
+  },
+});
 
 const agentInboxProxy = {
   summary: () => bridgeRpc("agentInbox", "summary"),
@@ -207,11 +209,41 @@ console.log(
   `OWL Connection Host listening on http://127.0.0.1:${controlPort} · MCP ${mcpServer.url}`,
 );
 
+let shuttingDown = false;
 async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   record("info", "connection-host", "OWL Connection Host stopping", { signal });
-  await tunnelSupervisor.stop().catch(() => undefined);
-  await mcpServer.close().catch(() => undefined);
-  await new Promise((resolve) => listener.close(resolve));
+
+  const results = await Promise.allSettled([
+    boundedStep(
+      "Connection Host HTTP listener close",
+      () =>
+        new Promise((resolve, reject) => {
+          listener.close((error) => {
+            if (error) reject(error);
+            else resolve();
+          });
+        }),
+      2_500,
+    ),
+    boundedStep("Tunnel stop", () => tunnelSupervisor.stop(), 6_000),
+    boundedStep("OWL MCP close", () => mcpServer.close(), 5_000),
+  ]);
+
+  const labels = ["listener", "tunnel", "mcp"];
+  results.forEach((result, index) => {
+    if (result.status !== "rejected") return;
+    record("warn", "connection-host", "Shutdown step did not complete cleanly", {
+      step: labels[index],
+      message:
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason),
+      code: result.reason?.code ?? null,
+    });
+  });
+
   process.exit(0);
 }
 

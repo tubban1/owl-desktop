@@ -249,12 +249,20 @@ function start(
       detached: false,
     });
     children.add(child);
-    child.once("exit", (code, signal) => {
+    let terminationHandled = false;
+    const handleTermination = (code, signal, error = null) => {
+      if (terminationHandled) return;
+      terminationHandled = true;
       children.delete(child);
       if (shuttingDown) return;
+
+      const detail = error
+        ? `error=${error instanceof Error ? error.message : String(error)}`
+        : `code=${code ?? "null"}, signal=${signal ?? "null"}`;
+
       if (restartOnExit) {
         console.warn(
-          `[dev:full] ${label} exited (code=${code ?? "null"}, signal=${signal ?? "null"}); restarting without touching Runtime/Connection Host.`,
+          `[dev:full] ${label} terminated (${detail}); restarting without touching other healthy fault domains.`,
         );
         const timer = setTimeout(() => {
           restartTimers.delete(timer);
@@ -263,11 +271,13 @@ function start(
         restartTimers.add(timer);
         return;
       }
-      console.error(
-        `[dev:full] ${label} exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`,
-      );
+      console.error(`[dev:full] ${label} terminated (${detail}).`);
       shutdown(code ?? 1);
-    });
+    };
+    child.once("error", (error) => handleTermination(null, null, error));
+    child.once("exit", (code, signal) =>
+      handleTermination(code, signal),
+    );
     return child;
   };
   return launch();
@@ -538,6 +548,7 @@ try {
           ? desktopUserSettings.sessionId
           : "",
     },
+    { restartOnExit: true, restartDelayMs: 1200 },
   );
   await waitFor(
     `${connectionHostUrl}/health`,

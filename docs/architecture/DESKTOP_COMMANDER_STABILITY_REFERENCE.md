@@ -161,3 +161,26 @@ The upstream repository is MIT licensed.
 OWL may study and reuse MIT-licensed techniques/code subject to preserving required copyright/license notices for copied substantial portions.
 
 Default engineering preference is to reimplement the invariant in OWL-native architecture rather than copy source wholesale.
+
+## OWL-native Tunnel evidence source discovered during implementation
+
+The current OWL Tunnel is not a black box. The vendored component is
+openai/tunnel-client 0.0.15 (a390c168ff1b2d14e73a95991c186c6aba3ff5a0)
+and already exposes a structured local health contract:
+
+- /healthz — process liveness;
+- /readyz — readiness gate;
+- /health?details=true — structured component observations;
+- control-plane — polling attempts, last success, failures, retry/backoff and
+  bounded failure category.
+
+Therefore OWL must **not** copy Desktop Commander's Supabase/WebSocket-specific
+socket introspection into Tunnel Supervisor.
+
+The transferable Desktop Commander invariant is:
+
+> process/channel state is insufficient; require current functional evidence and
+> recover a stale live process.
+
+OWL implements that invariant by consuming the Tunnel component's own supported
+health surface. This is both more stable and less coupled to vendor internals.

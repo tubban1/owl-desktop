@@ -225,3 +225,80 @@ Each item must be automated where practical:
 5. dev:full proves independent Desktop and Connection Host recovery.
 6. One real ChatGPT dogfood intentionally kills/restarts each recoverable local layer while a durable Runtime process continues.
 7. Monitor's displayed reachability matches injected failures.
+
+## Implementation checkpoint — 2026-10-02
+
+The first Connectivity Reliability hardening slice is now implemented in the
+Desktop / Connection Host control plane.
+
+Completed:
+
+- **P0.1 bounded Connection Host control RPC**
+  - ConnectionHostClient.request() now uses AbortController;
+  - default and per-operation deadlines are explicit;
+  - caller cancellation is preserved separately from timeout;
+  - unavailable, timeout and application failures have distinct error codes.
+
+- **P0.2 bounded Desktop capability-bridge RPC**
+  - Connection Host no longer uses an unbounded raw fetch() to Electron;
+  - bridge timeout, cancellation and unavailability are distinct;
+  - bridge fault injection proves a stalled Electron-side endpoint cannot pin a
+    Connection Host request forever.
+
+- **P0.3 evidence-based Tunnel reachability**
+  - OWL consumes the vendored openai/tunnel-client health contract instead of
+    inferring health from process liveness or parsing log messages;
+  - Tunnel starts with an ephemeral --health.url-file;
+  - Supervisor reads /health?details=true and /readyz;
+  - the control-plane component supplies bounded upstream evidence including
+    last success, failures, retry state and failure category;
+  - running remains a process lifecycle fact and no longer implies READY.
+
+- **P0.4 half-open / stale watchdog**
+  - periodic health checks continue while the Tunnel process is alive;
+  - stale health endpoint or stale degraded control-plane evidence transitions
+    the Tunnel to STALE/RECOVERING;
+  - a stale live process is terminated and restarted instead of remaining green;
+  - recovery is single-flight.
+
+- **P0.5 Connection Host fault-domain isolation — source complete**
+  - dev:full now restarts Connection Host independently after process exit or
+    spawn error;
+  - Runtime and other healthy fault domains are not deliberately stopped by
+    that restart path;
+  - a real destructive Host-restart dogfood is still intentionally pending
+    because killing the currently controlling Connection Host would sever the
+    active Jarvis session. That acceptance test must run through an isolated
+    harness or a prepared handoff.
+
+- **P0.6 bounded recovery**
+  - Tunnel recovery has one in-flight recovery promise;
+  - child termination escalates TERM -> KILL with bounded timers;
+  - Connection Host graceful shutdown bounds listener close, Tunnel stop and MCP
+    close independently.
+
+- **P1.1 jittered reconnect backoff**
+  - Tunnel automatic restart now adds bounded jitter to exponential backoff.
+
+- **P1.2 truthful Monitor reachability**
+  - Monitor connectivity and Live Graph prefer Tunnel reachability evidence over
+    process state;
+  - READY is green;
+  - DEGRADED/STALE is attention;
+  - STARTING/RECOVERING is waiting;
+  - the graph carries last health evidence and marks recovery as current work.
+
+Also cleaned:
+
+- duplicate continuation projection in the MCP server snapshot.
+
+Verification at this checkpoint:
+
+    targeted reliability gate: 7/7 files, 38/38 tests PASS
+    full Desktop gate:          47/47 files, 219/219 tests PASS
+    TypeScript + Vite build:    PASS
+    git diff --check:           PASS
+
+The implementation preserves the existing MCP guarantees that an accepted
+Runtime operation survives upstream disconnect and that live/in-flight MCP
+sessions are not reclaimed by idle TTL.

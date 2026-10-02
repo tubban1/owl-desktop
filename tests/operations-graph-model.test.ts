@@ -241,6 +241,86 @@ describe("buildOperationsGraphModel", () => {
     ]);
   });
 
+  it("projects Tunnel reachability instead of treating process liveness as healthy", () => {
+    const model = buildOperationsGraphModel({
+      snapshot: baseSnapshot({
+        tunnel: {
+          state: "running",
+          pid: 777,
+          reachability: {
+            state: "stale",
+            localReady: false,
+            controlPlane: {
+              status: "degraded",
+              state: "backoff",
+              lastSuccess: "2026-10-02T06:27:00.000Z",
+              consecutiveFailures: 4,
+              failureCategory: "network",
+            },
+            lastProbeAt: "2026-10-02T06:30:00.000Z",
+            lastHealthOkAt: "2026-10-02T06:27:00.000Z",
+            consecutiveFailures: 4,
+            recovering: false,
+          },
+        },
+      }),
+      activity: interactionActivity(),
+      board: emptyBoard,
+      now,
+    });
+
+    const tunnel = model.nodes.find((node) => node.id === "transport:tunnel");
+    const edge = model.edges.find((item) => item.id === "edge:tunnel:mcp");
+
+    expect(tunnel).toMatchObject({
+      state: "attention",
+      current: false,
+      observedAt: "2026-10-02T06:27:00.000Z",
+    });
+    expect(tunnel?.detail).toContain("stale");
+    expect(tunnel?.detail).toContain("control plane degraded");
+    expect(tunnel?.evidence).toEqual(
+      expect.arrayContaining(["tunnel-health", "tunnel-status"]),
+    );
+    expect(edge).toMatchObject({
+      state: "attention",
+      observed: true,
+    });
+  });
+
+  it("shows Tunnel recovery as active waiting rather than healthy", () => {
+    const model = buildOperationsGraphModel({
+      snapshot: baseSnapshot({
+        tunnel: {
+          state: "running",
+          pid: 778,
+          reachability: {
+            state: "recovering",
+            localReady: false,
+            controlPlane: {
+              status: "degraded",
+              state: "backoff",
+            },
+            lastProbeAt: "2026-10-02T06:30:00.000Z",
+            lastHealthOkAt: null,
+            consecutiveFailures: 5,
+            recovering: true,
+          },
+        },
+      }),
+      activity: interactionActivity(),
+      board: emptyBoard,
+      now,
+    });
+
+    expect(
+      model.nodes.find((node) => node.id === "transport:tunnel"),
+    ).toMatchObject({
+      state: "waiting",
+      current: true,
+    });
+  });
+
   it("routes host-local workstream tools without inventing Authorization or Runtime hops", () => {
     const model = buildOperationsGraphModel({
       snapshot: baseSnapshot(),

@@ -352,6 +352,48 @@ describe("buildMonitorModel", () => {
     ).toBe("attention");
   });
 
+  it("does not report a live Tunnel process as healthy when reachability is stale", () => {
+    const model = buildMonitorModel({
+      snapshot: {
+        ...baseSnapshot,
+        tunnel: {
+          ...baseSnapshot.tunnel,
+          reachability: {
+            state: "stale",
+            localReady: false,
+            controlPlane: {
+              status: "degraded",
+              state: "backoff",
+              lastSuccess: "2026-10-01T17:58:00.000Z",
+              consecutiveFailures: 4,
+              failureCategory: "network",
+            },
+            lastProbeAt: "2026-10-01T18:00:00.000Z",
+            lastHealthOkAt: "2026-10-01T17:58:00.000Z",
+            lastControlPlaneOkAt: "2026-10-01T17:58:00.000Z",
+            consecutiveFailures: 4,
+            recovering: false,
+          },
+        },
+      },
+      agentRequests: [],
+      skillSnapshot: {
+        ...skillSnapshot,
+        candidates: [],
+        summary: {
+          ...skillSnapshot.summary,
+          candidates: 0,
+        },
+      },
+      activity: [],
+    });
+
+    const tunnel = model.connectivity.find((node) => node.id === "tunnel");
+    expect(tunnel?.state).toBe("attention");
+    expect(tunnel?.detail).toContain("stale");
+    expect(tunnel?.detail).toContain("control plane degraded");
+  });
+
   it("keeps an idle healthy system clear even when retained history contains old errors", () => {
     const model = buildMonitorModel({
       snapshot: baseSnapshot,

@@ -964,21 +964,41 @@ export function buildOperationsGraphModel({
     snapshot?.tunnel.state &&
     snapshot.tunnel.state !== "stopped";
   if (tunnelVisible) {
+    const reachability = snapshot?.tunnel.reachability?.state ?? null;
+    const tunnelNodeState: OperationsState =
+      reachability === "ready"
+        ? "healthy"
+        : reachability === "degraded" || reachability === "stale"
+          ? "attention"
+          : reachability === "starting" || reachability === "recovering"
+            ? "waiting"
+            : reachability === "unreachable"
+              ? "offline"
+              : snapshot?.tunnel.state === "running"
+                ? "healthy"
+                : "offline";
+    const tunnelDetail = reachability
+      ? `${reachability} · local ${snapshot?.tunnel.reachability?.localReady ? "ready" : "not ready"} · control plane ${snapshot?.tunnel.reachability?.controlPlane?.status ?? "unknown"}`
+      : snapshot?.tunnel.state ?? "unknown";
+
     addNode(
       {
         id: "transport:tunnel",
         groupId: "ingress",
         kind: "transport",
         label: "OWL Tunnel",
-        detail: snapshot?.tunnel.state ?? "unknown",
-        state:
-          snapshot?.tunnel.state === "running"
-            ? "healthy"
-            : "offline",
-        current: false,
-        observedAt: snapshot?.checkedAt ?? null,
+        detail: tunnelDetail,
+        state: tunnelNodeState,
+        current: reachability === "recovering",
+        observedAt:
+          snapshot?.tunnel.reachability?.lastHealthOkAt ??
+          snapshot?.tunnel.reachability?.lastProbeAt ??
+          snapshot?.checkedAt ??
+          null,
         workstreamId: null,
-        evidence: ["tunnel-status"],
+        evidence: reachability
+          ? ["tunnel-health", "tunnel-status"]
+          : ["tunnel-status"],
       },
       "Ingress",
       20,
@@ -988,11 +1008,10 @@ export function buildOperationsGraphModel({
         id: "edge:tunnel:mcp",
         from: "transport:tunnel",
         to: "transport:mcp",
-        state:
-          snapshot?.tunnel.state === "running" ? "healthy" : "waiting",
+        state: tunnelNodeState,
         relation: "support",
         label: "remote transport",
-        observed: false,
+        observed: Boolean(snapshot?.tunnel.reachability?.lastHealthOkAt),
         workstreamId: null,
       });
     }

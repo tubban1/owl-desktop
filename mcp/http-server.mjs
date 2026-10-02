@@ -521,11 +521,6 @@ export async function startOwlMcpHttpServer({
         ownerSupersedeGraceMs: boundedOwnerSupersedeGraceMs,
         maxSessions: boundedMaxSessions,
       },
-      continuation: plannerContinuation?.summary?.() ?? {
-        activeCheckpointCount: 0,
-        connectedOwnerCount: 0,
-        latestActive: null,
-      },
       sessions: [...sessions.entries()].map(([transportSessionId, session]) => ({
         transportSessionId,
         runtimeSessionId: session.runtimeSessionId ?? null,

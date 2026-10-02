@@ -19,15 +19,36 @@ function safeUnlink(file) {
   try { fs.rmSync(file, { force: true }); } catch {}
 }
 
+const boundedMs = (value, fallback, minimum = 10, maximum = 300_000) => {
+  const numeric = Number(value);
+  const resolved = Number.isFinite(numeric) ? numeric : fallback;
+  return Math.min(Math.max(resolved, minimum), maximum);
+};
+
+function parseTimestamp(value) {
+  const parsed = Date.parse(String(value ?? ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export class TunnelSupervisor {
   constructor({
     onEvent = () => {},
+    fetchImpl = fetch,
+    random = Math.random,
     restartBaseDelayMs = 1_000,
     restartMaxDelayMs = 30_000,
+    healthCheckIntervalMs = 10_000,
+    healthRequestTimeoutMs = 2_500,
+    healthStartupGraceMs = 45_000,
+    healthStaleAfterMs = 90_000,
   } = {}) {
     this.onEvent = onEvent;
+    this.fetchImpl = fetchImpl;
+    this.random = random;
     this.child = null;
     this.secretFile = null;
+    this.healthUrlFile = null;
+    this.healthBaseUrl = null;
     this.startedAt = null;
     this.lastExit = null;
     this.config = null;
@@ -36,10 +57,40 @@ export class TunnelSupervisor {
     this.restartTimer = null;
     this.restartAt = null;
     this.restartAttempts = 0;
-    this.restartBaseDelayMs = Math.max(Number(restartBaseDelayMs) || 1_000, 10);
+    this.recoveryPromise = null;
+    this.healthCheckTimer = null;
+    this.lastHealthProbeAt = null;
+    this.lastHealthOkAt = null;
+    this.lastControlPlaneOkAt = null;
+    this.lastHealthError = null;
+    this.consecutiveHealthFailures = 0;
+    this.localReady = false;
+    this.controlPlaneHealth = null;
+    this.reachabilityState = "stopped";
+    this.restartBaseDelayMs = boundedMs(restartBaseDelayMs, 1_000);
     this.restartMaxDelayMs = Math.max(
-      Number(restartMaxDelayMs) || 30_000,
+      boundedMs(restartMaxDelayMs, 30_000),
       this.restartBaseDelayMs,
+    );
+    this.healthCheckIntervalMs = boundedMs(
+      healthCheckIntervalMs,
+      10_000,
+      100,
+    );
+    this.healthRequestTimeoutMs = boundedMs(
+      healthRequestTimeoutMs,
+      2_500,
+      50,
+      30_000,
+    );
+    this.healthStartupGraceMs = boundedMs(
+      healthStartupGraceMs,
+      45_000,
+      0,
+    );
+    this.healthStaleAfterMs = Math.max(
+      boundedMs(healthStaleAfterMs, 90_000, 1_000),
+      this.healthCheckIntervalMs * 2,
     );
   }
 
@@ -64,6 +115,18 @@ export class TunnelSupervisor {
         : this.desiredRunning
           ? "memory-until-restart"
           : "os-encrypted-at-rest",
+      reachability: {
+        state: this.reachabilityState,
+        healthUrl: this.healthBaseUrl,
+        localReady: this.localReady,
+        controlPlane: this.controlPlaneHealth,
+        lastProbeAt: this.lastHealthProbeAt,
+        lastHealthOkAt: this.lastHealthOkAt,
+        lastControlPlaneOkAt: this.lastControlPlaneOkAt,
+        consecutiveFailures: this.consecutiveHealthFailures,
+        lastError: this.lastHealthError,
+        recovering: Boolean(this.recoveryPromise),
+      },
     };
   }
 
@@ -94,9 +157,14 @@ export class TunnelSupervisor {
     }
 
     const attempt = this.restartAttempts + 1;
-    const delayMs = Math.min(
+    const baseDelayMs = Math.min(
       this.restartMaxDelayMs,
       this.restartBaseDelayMs * 2 ** Math.min(this.restartAttempts, 6),
+    );
+    const jitter = 0.5 + Math.max(0, Math.min(1, Number(this.random()) || 0));
+    const delayMs = Math.min(
+      this.restartMaxDelayMs,
+      Math.max(10, Math.round(baseDelayMs * jitter)),
     );
     this.restartAttempts = attempt;
     this.restartAt = new Date(Date.now() + delayMs).toISOString();
@@ -124,6 +192,278 @@ export class TunnelSupervisor {
     this.restartTimer.unref?.();
   }
 
+  clearHealthCheck() {
+    if (this.healthCheckTimer) clearTimeout(this.healthCheckTimer);
+    this.healthCheckTimer = null;
+  }
+
+  cleanupHealthArtifact() {
+    safeUnlink(this.healthUrlFile);
+    this.healthUrlFile = null;
+    this.healthBaseUrl = null;
+  }
+
+  resetHealthEvidenceForSpawn() {
+    this.clearHealthCheck();
+    this.healthBaseUrl = null;
+    this.lastHealthProbeAt = null;
+    this.lastHealthOkAt = null;
+    this.lastControlPlaneOkAt = null;
+    this.lastHealthError = null;
+    this.consecutiveHealthFailures = 0;
+    this.localReady = false;
+    this.controlPlaneHealth = null;
+    this.reachabilityState = "starting";
+  }
+
+  scheduleHealthCheck(delayMs = this.healthCheckIntervalMs) {
+    this.clearHealthCheck();
+    if (!this.desiredRunning || !this.child) return;
+
+    this.healthCheckTimer = setTimeout(async () => {
+      this.healthCheckTimer = null;
+      try {
+        await this.checkHealthNow();
+      } catch (error) {
+        this.onEvent("warn", "Tunnel health watchdog failed", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        if (this.desiredRunning && this.child && !this.recoveryPromise) {
+          this.scheduleHealthCheck();
+        }
+      }
+    }, Math.max(10, Number(delayMs) || this.healthCheckIntervalMs));
+    this.healthCheckTimer.unref?.();
+  }
+
+  resolveHealthBaseUrl() {
+    if (this.healthBaseUrl) return this.healthBaseUrl;
+    if (!this.healthUrlFile || !fs.existsSync(this.healthUrlFile)) return null;
+
+    const raw = fs.readFileSync(this.healthUrlFile, "utf8").trim();
+    if (!raw) return null;
+
+    const parsed = new URL(raw);
+    const loopback =
+      parsed.protocol === "http:" &&
+      ["127.0.0.1", "localhost", "::1"].includes(parsed.hostname);
+    if (!loopback) {
+      const error = new Error("OWL Tunnel health URL must be loopback.");
+      error.code = "TUNNEL_HEALTH_URL_INVALID";
+      throw error;
+    }
+
+    parsed.pathname = parsed.pathname
+      .replace(/\/(?:healthz|readyz)\/?$/, "")
+      .replace(/\/$/, "");
+    parsed.search = "";
+    parsed.hash = "";
+    this.healthBaseUrl = parsed.toString().replace(/\/$/, "");
+    return this.healthBaseUrl;
+  }
+
+  async fetchHealth(pathname) {
+    const baseUrl = this.resolveHealthBaseUrl();
+    if (!baseUrl) {
+      const error = new Error("OWL Tunnel health URL is not available yet.");
+      error.code = "TUNNEL_HEALTH_URL_PENDING";
+      throw error;
+    }
+
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort(
+        new Error(
+          `Tunnel health request timed out after ${this.healthRequestTimeoutMs}ms`,
+        ),
+      );
+    }, this.healthRequestTimeoutMs);
+    timeout.unref?.();
+
+    try {
+      return await this.fetchImpl(baseUrl + pathname, {
+        method: "GET",
+        signal: controller.signal,
+      });
+    } catch (cause) {
+      const error = new Error(
+        timedOut
+          ? "OWL Tunnel health endpoint timed out."
+          : "OWL Tunnel health endpoint is unavailable.",
+      );
+      error.code = timedOut
+        ? "TUNNEL_HEALTH_TIMEOUT"
+        : "TUNNEL_HEALTH_UNAVAILABLE";
+      error.cause = cause;
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  controlPlaneProjection(component) {
+    if (!component || typeof component !== "object") return null;
+    const details =
+      component.details && typeof component.details === "object"
+        ? component.details
+        : {};
+    return {
+      status: component.status ?? "unknown",
+      state: component.state ?? "unknown",
+      reasonCode: component.reason_code ?? null,
+      observedAt: component.observed_at ?? null,
+      lastSuccess: details.last_success ?? null,
+      lastError: details.last_error ?? null,
+      consecutiveFailures: Number(details.consecutive_failures ?? 0),
+      nextRetry: details.next_retry ?? null,
+      failureCategory: details.failure_category ?? null,
+      httpStatus: Number(details.http_status ?? 0) || null,
+    };
+  }
+
+  async checkHealthNow() {
+    if (!this.child) return this.status();
+
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const startedMs = parseTimestamp(this.startedAt) ?? now;
+    this.lastHealthProbeAt = nowIso;
+
+    try {
+      const healthResponse = await this.fetchHealth("/health?details=true");
+      if (!healthResponse.ok) {
+        const error = new Error(
+          `OWL Tunnel health endpoint returned HTTP ${healthResponse.status}.`,
+        );
+        error.code = "TUNNEL_HEALTH_FAILED";
+        throw error;
+      }
+
+      const health = await healthResponse.json();
+      const readyResponse = await this.fetchHealth("/readyz");
+      const controlPlane = this.controlPlaneProjection(
+        health?.components?.["control-plane"],
+      );
+
+      this.lastHealthOkAt = nowIso;
+      this.consecutiveHealthFailures = 0;
+      this.lastHealthError = null;
+      this.localReady = readyResponse.ok;
+      this.controlPlaneHealth = controlPlane;
+
+      const controlPlaneSuccessMs = parseTimestamp(controlPlane?.lastSuccess);
+      if (controlPlaneSuccessMs !== null) {
+        this.lastControlPlaneOkAt = new Date(
+          controlPlaneSuccessMs,
+        ).toISOString();
+      }
+
+      const upstreamEvidenceMs =
+        controlPlaneSuccessMs ??
+        parseTimestamp(this.lastControlPlaneOkAt) ??
+        startedMs;
+      const upstreamEvidenceAgeMs = Math.max(0, now - upstreamEvidenceMs);
+
+      if (
+        controlPlane?.status === "degraded" &&
+        upstreamEvidenceAgeMs >= this.healthStaleAfterMs
+      ) {
+        this.reachabilityState = "stale";
+        this.lastHealthError = {
+          code: "TUNNEL_CONTROL_PLANE_STALE",
+          message:
+            controlPlane.failureCategory ||
+            controlPlane.reasonCode ||
+            "Control-plane health is stale.",
+          at: nowIso,
+        };
+        await this.recoverFromStale("control_plane_stale");
+      } else if (controlPlane?.status === "ok" && this.localReady) {
+        this.reachabilityState = "ready";
+        this.restartAttempts = 0;
+      } else if (now - startedMs < this.healthStartupGraceMs) {
+        this.reachabilityState = "starting";
+      } else {
+        this.reachabilityState = "degraded";
+      }
+
+      return this.status();
+    } catch (error) {
+      this.consecutiveHealthFailures += 1;
+      this.lastHealthError = {
+        code: error?.code ?? "TUNNEL_HEALTH_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+        at: nowIso,
+      };
+      this.localReady = false;
+
+      const lastProofMs = parseTimestamp(this.lastHealthOkAt) ?? startedMs;
+      const proofAgeMs = Math.max(0, now - lastProofMs);
+      const pastStartupGrace =
+        now - startedMs >= this.healthStartupGraceMs;
+
+      if (pastStartupGrace && proofAgeMs >= this.healthStaleAfterMs) {
+        this.reachabilityState = "stale";
+        await this.recoverFromStale("health_probe_stale");
+      } else {
+        this.reachabilityState = pastStartupGrace ? "degraded" : "starting";
+      }
+
+      return this.status();
+    }
+  }
+
+  async terminateChildForRecovery() {
+    const child = this.child;
+    if (!child) return;
+
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(forceTimer);
+        clearTimeout(giveUpTimer);
+        resolve();
+      };
+      const forceTimer = setTimeout(() => {
+        if (this.child === child) child.kill("SIGKILL");
+      }, 3_000);
+      const giveUpTimer = setTimeout(finish, 5_000);
+      forceTimer.unref?.();
+      giveUpTimer.unref?.();
+      child.once("exit", finish);
+      child.kill("SIGTERM");
+    });
+  }
+
+  recoverFromStale(reason) {
+    if (this.recoveryPromise) return this.recoveryPromise;
+
+    this.reachabilityState = "recovering";
+    this.clearHealthCheck();
+    this.onEvent("warn", "Tunnel reachability recovery started", {
+      reason,
+      pid: this.child?.pid ?? null,
+      consecutiveFailures: this.consecutiveHealthFailures,
+    });
+
+    const recovery = (async () => {
+      await this.terminateChildForRecovery();
+      if (this.desiredRunning && !this.child) this.scheduleRestart();
+      return this.status();
+    })();
+
+    this.recoveryPromise = recovery.finally(() => {
+      this.recoveryPromise = null;
+      if (this.desiredRunning && this.child) this.scheduleHealthCheck();
+    });
+    return this.recoveryPromise;
+  }
+
   async spawnConfigured() {
     if (this.child) return this.status();
     if (!this.config || !this.apiKey) {
@@ -146,6 +486,12 @@ export class TunnelSupervisor {
     );
     fs.writeFileSync(secretFile, this.apiKey + "\n", { mode: 0o600 });
     this.secretFile = secretFile;
+    safeUnlink(this.healthUrlFile);
+    this.healthUrlFile = path.join(
+      tempDir,
+      `health-url-${process.pid}-${randomUUID()}.txt`,
+    );
+    this.resetHealthEvidenceForSpawn();
 
     const args = [
       "run",
@@ -159,6 +505,8 @@ export class TunnelSupervisor {
       "30s",
       "--health.listen-addr",
       "127.0.0.1:0",
+      "--health.url-file",
+      this.healthUrlFile,
     ];
 
     const child = spawn(binaryPath, args, {
@@ -195,8 +543,12 @@ export class TunnelSupervisor {
       };
       if (this.child === child) this.child = null;
       this.startedAt = null;
+      this.clearHealthCheck();
+      this.localReady = false;
+      this.reachabilityState = this.desiredRunning ? "recovering" : "stopped";
       safeUnlink(this.secretFile);
       this.secretFile = null;
+      this.cleanupHealthArtifact();
       this.onEvent(
         code === 0 ? "info" : "warn",
         "Tunnel stopped",
@@ -213,6 +565,7 @@ export class TunnelSupervisor {
       mcpUrl,
       restartAttempt: this.restartAttempts,
     });
+    this.scheduleHealthCheck(100);
     return this.status();
   }
 
@@ -224,17 +577,22 @@ export class TunnelSupervisor {
     this.apiKey = apiKey;
     this.desiredRunning = true;
     this.restartAttempts = 0;
+    this.reachabilityState = "starting";
     return this.spawnConfigured();
   }
 
   async stop() {
     this.desiredRunning = false;
     this.clearRestartTimer();
+    this.clearHealthCheck();
     const child = this.child;
     if (!child) {
       safeUnlink(this.secretFile);
       this.secretFile = null;
+      this.cleanupHealthArtifact();
       this.apiKey = null;
+      this.localReady = false;
+      this.reachabilityState = "stopped";
       return this.status();
     }
 
@@ -252,8 +610,11 @@ export class TunnelSupervisor {
 
     safeUnlink(this.secretFile);
     this.secretFile = null;
+    this.cleanupHealthArtifact();
     this.apiKey = null;
     this.restartAttempts = 0;
+    this.localReady = false;
+    this.reachabilityState = "stopped";
     return this.status();
   }
 

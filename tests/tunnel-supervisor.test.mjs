@@ -10,6 +10,31 @@ import {
 const scratch = [];
 const supervisors = [];
 
+function jsonResponse(payload, { ok = true, status = 200 } = {}) {
+  return {
+    ok,
+    status,
+    async json() {
+      return payload;
+    },
+  };
+}
+
+function createLongRunningFakeTunnel(dir, name = "fake-tunnel") {
+  const binary = path.join(dir, name);
+  fs.writeFileSync(
+    binary,
+    [
+      "#!/bin/sh",
+      "trap 'exit 0' TERM INT",
+      "while true; do sleep 1; done",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return binary;
+}
+
 afterEach(async () => {
   for (const supervisor of supervisors.splice(0)) {
     await supervisor.stop().catch(() => undefined);
@@ -123,6 +148,195 @@ describe("TunnelSupervisor", () => {
       events.some((event) => event.message === "Tunnel restart scheduled"),
     ).toBe(true);
   }, 15_000);
+
+  it("reports READY only from tunnel health and control-plane evidence", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-tunnel-health-test-"));
+    scratch.push(dir);
+    const binary = createLongRunningFakeTunnel(dir);
+    const now = new Date().toISOString();
+    const fetchImpl = async (url) => {
+      if (String(url).endsWith("/readyz")) {
+        return jsonResponse(null);
+      }
+      if (String(url).includes("/health?details=true")) {
+        return jsonResponse({
+          live: true,
+          ready: true,
+          components: {
+            "control-plane": {
+              status: "ok",
+              state: "idle",
+              observed_at: now,
+              details: {
+                last_success: now,
+                consecutive_failures: 0,
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected health URL: ${url}`);
+    };
+
+    const supervisor = new TunnelSupervisor({
+      fetchImpl,
+      healthCheckIntervalMs: 60_000,
+    });
+    supervisors.push(supervisor);
+    await supervisor.start({
+      binaryPath: binary,
+      tunnelId: "tunnel_health_123456",
+      apiKey: "not-a-real-secret",
+      mcpUrl: "http://127.0.0.1:8790/mcp",
+    });
+    fs.writeFileSync(
+      supervisor.healthUrlFile,
+      "http://127.0.0.1:41001\n",
+      "utf8",
+    );
+
+    const status = await supervisor.checkHealthNow();
+
+    expect(status.reachability).toMatchObject({
+      state: "ready",
+      healthUrl: "http://127.0.0.1:41001",
+      localReady: true,
+      consecutiveFailures: 0,
+      controlPlane: {
+        status: "ok",
+        state: "idle",
+        lastSuccess: now,
+      },
+    });
+    expect(status.reachability.lastHealthOkAt).toBeTruthy();
+    expect(status.reachability.lastControlPlaneOkAt).toBe(now);
+  });
+
+  it("keeps local readiness and upstream reachability separate", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-tunnel-degraded-test-"));
+    scratch.push(dir);
+    const binary = createLongRunningFakeTunnel(dir);
+    const now = new Date().toISOString();
+    const fetchImpl = async (url) => {
+      if (String(url).endsWith("/readyz")) {
+        return jsonResponse(null, { ok: false, status: 503 });
+      }
+      return jsonResponse({
+        live: true,
+        ready: false,
+        components: {
+          "control-plane": {
+            status: "ok",
+            state: "polling",
+            observed_at: now,
+            details: {
+              last_success: now,
+              consecutive_failures: 0,
+            },
+          },
+        },
+      });
+    };
+
+    const supervisor = new TunnelSupervisor({
+      fetchImpl,
+      healthStartupGraceMs: 0,
+      healthCheckIntervalMs: 60_000,
+    });
+    supervisors.push(supervisor);
+    await supervisor.start({
+      binaryPath: binary,
+      tunnelId: "tunnel_degraded_123456",
+      apiKey: "not-a-real-secret",
+      mcpUrl: "http://127.0.0.1:8790/mcp",
+    });
+    fs.writeFileSync(
+      supervisor.healthUrlFile,
+      "http://127.0.0.1:41002\n",
+      "utf8",
+    );
+
+    const status = await supervisor.checkHealthNow();
+
+    expect(status.reachability).toMatchObject({
+      state: "degraded",
+      localReady: false,
+      controlPlane: {
+        status: "ok",
+        state: "polling",
+      },
+    });
+    expect(status.state).toBe("running");
+  });
+
+  it("recovers a live tunnel process when control-plane evidence becomes stale", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-tunnel-stale-test-"));
+    scratch.push(dir);
+    const binary = createLongRunningFakeTunnel(dir);
+    const events = [];
+    const oldSuccess = new Date(Date.now() - 10_000).toISOString();
+    const fetchImpl = async (url) => {
+      if (String(url).endsWith("/readyz")) {
+        return jsonResponse(null, { ok: false, status: 503 });
+      }
+      return jsonResponse({
+        live: true,
+        ready: false,
+        components: {
+          "control-plane": {
+            status: "degraded",
+            state: "backoff",
+            reason_code: "network",
+            observed_at: new Date().toISOString(),
+            details: {
+              last_success: oldSuccess,
+              last_error: new Date().toISOString(),
+              consecutive_failures: 4,
+              failure_category: "network",
+            },
+          },
+        },
+      });
+    };
+
+    const supervisor = new TunnelSupervisor({
+      fetchImpl,
+      random: () => 0.5,
+      restartBaseDelayMs: 5_000,
+      restartMaxDelayMs: 5_000,
+      healthCheckIntervalMs: 100,
+      healthStartupGraceMs: 0,
+      healthStaleAfterMs: 1_000,
+      onEvent(level, message, meta) {
+        events.push({ level, message, meta });
+      },
+    });
+    supervisors.push(supervisor);
+    await supervisor.start({
+      binaryPath: binary,
+      tunnelId: "tunnel_stale_123456",
+      apiKey: "not-a-real-secret",
+      mcpUrl: "http://127.0.0.1:8790/mcp",
+    });
+    fs.writeFileSync(
+      supervisor.healthUrlFile,
+      "http://127.0.0.1:41003\n",
+      "utf8",
+    );
+
+    const status = await supervisor.checkHealthNow();
+
+    expect(status.state).toBe("restarting");
+    expect(status.reachability.state).toBe("recovering");
+    expect(status.restartAttempts).toBe(1);
+    expect(
+      events.some(
+        (event) =>
+          event.message === "Tunnel reachability recovery started" &&
+          event.meta?.reason === "control_plane_stale",
+      ),
+    ).toBe(true);
+  });
 
   it("refuses a non-loopback MCP target", async () => {
     const supervisor = new TunnelSupervisor();
