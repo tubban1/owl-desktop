@@ -19,6 +19,7 @@ export async function startOwlMcpHttpServer({
   sessionIdleTtlMs = 30 * 60_000,
   ownerSupersedeGraceMs = 60_000,
   maxSessions = 128,
+  monotonicNow = () => performance.now(),
 } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error(`Invalid OWL MCP port: ${port}`);
@@ -35,10 +36,15 @@ export async function startOwlMcpHttpServer({
   const boundedMaxSessions = Math.max(Number(maxSessions) || 0, 8);
   app.use(express.json({ limit: "4mb" }));
 
-  function touchTransportSession(session, now = Date.now()) {
+  function touchTransportSession(
+    session,
+    wallNow = Date.now(),
+    monotonicAtMs = monotonicNow(),
+  ) {
     if (!session) return;
-    session.lastSeenAt = new Date(now).toISOString();
-    session.lastSeenAtMs = now;
+    session.lastSeenAt = new Date(wallNow).toISOString();
+    session.lastSeenAtMs = wallNow;
+    session.lastSeenMonotonicMs = monotonicAtMs;
   }
 
   function transportSessionBusy(session) {
@@ -48,10 +54,10 @@ export async function startOwlMcpHttpServer({
   function reclaimSupersededOwnerSessions(
     runtimeSessionId,
     currentTransportSessionId,
-    now = Date.now(),
+    nowMonotonic = monotonicNow(),
   ) {
     if (!runtimeSessionId || !currentTransportSessionId) return 0;
-    const staleBefore = now - boundedOwnerSupersedeGraceMs;
+    const staleBefore = nowMonotonic - boundedOwnerSupersedeGraceMs;
     const reclaimed = [];
 
     for (const [transportSessionId, session] of sessions) {
@@ -60,11 +66,9 @@ export async function startOwlMcpHttpServer({
       if (session?.runtimeSessionId !== runtimeSessionId) continue;
       if (transportSessionBusy(session)) continue;
 
-      const lastSeenMs =
-        session.lastSeenAtMs ??
-        Date.parse(session.lastSeenAt ?? session.createdAt ?? "") ??
-        0;
-      if (lastSeenMs > staleBefore) continue;
+      const lastSeenMonotonicMs =
+        Number(session.lastSeenMonotonicMs) || 0;
+      if (lastSeenMonotonicMs > staleBefore) continue;
 
       sessions.delete(transportSessionId);
       plannerContinuation?.noteTransportDisconnected?.(
@@ -89,18 +93,16 @@ export async function startOwlMcpHttpServer({
     return reclaimed.length;
   }
 
-  function pruneTransportSessions(now = Date.now()) {
-    const staleBefore = now - boundedSessionIdleTtlMs;
+  function pruneTransportSessions(nowMonotonic = monotonicNow()) {
+    const staleBefore = nowMonotonic - boundedSessionIdleTtlMs;
     for (const [transportSessionId, session] of sessions) {
       // Streamable HTTP may keep a GET event stream or a tools/call POST open
       // for a long time. Never classify an in-flight transport as idle.
       if (transportSessionBusy(session)) continue;
 
-      const lastSeenMs =
-        session.lastSeenAtMs ??
-        Date.parse(session.lastSeenAt ?? session.createdAt ?? "") ??
-        0;
-      if (lastSeenMs <= staleBefore) {
+      const lastSeenMonotonicMs =
+        Number(session.lastSeenMonotonicMs) || 0;
+      if (lastSeenMonotonicMs <= staleBefore) {
         sessions.delete(transportSessionId);
         if (session.ownerStable === true) {
           plannerContinuation?.noteTransportDisconnected?.(
@@ -126,7 +128,8 @@ export async function startOwlMcpHttpServer({
     const oldestInactive = [...sessions.entries()]
       .filter(([, session]) => !transportSessionBusy(session))
       .sort(([, left], [, right]) =>
-        (left.lastSeenAtMs ?? 0) - (right.lastSeenAtMs ?? 0),
+        (left.lastSeenMonotonicMs ?? 0) -
+        (right.lastSeenMonotonicMs ?? 0),
       );
 
     for (const [transportSessionId, session] of oldestInactive) {
@@ -184,17 +187,18 @@ export async function startOwlMcpHttpServer({
       createdAt: null,
       lastSeenAt: null,
       lastSeenAtMs: 0,
+      lastSeenMonotonicMs: 0,
       activeRequestCount: 0,
     };
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => {
-        const now = Date.now();
-        session.createdAt ??= new Date(now).toISOString();
-        session.lastSeenAt = new Date(now).toISOString();
-        session.lastSeenAtMs = now;
+        const wallNow = Date.now();
+        const monotonicAtMs = monotonicNow();
+        session.createdAt ??= new Date(wallNow).toISOString();
+        touchTransportSession(session, wallNow, monotonicAtMs);
         sessions.set(id, session);
-        pruneTransportSessions(now);
+        pruneTransportSessions(monotonicAtMs);
         onEvent("info", "MCP transport session opened", { transportSessionId: id });
       },
     });
@@ -219,9 +223,7 @@ export async function startOwlMcpHttpServer({
     if (suppliedSessionId) {
       const supplied = sessions.get(suppliedSessionId);
       if (supplied) {
-        const seenAt = Date.now();
-        supplied.lastSeenAt = new Date(seenAt).toISOString();
-        supplied.lastSeenAtMs = seenAt;
+        touchTransportSession(supplied);
       }
     }
     pruneTransportSessions();

@@ -171,6 +171,62 @@ After repeated failed recovery, stop advertising a transport as available until 
 - per-hop latency and last-success histograms;
 - release soak on packaged Desktop, not only dev:full.
 
+### P2 implementation checkpoint — automated lanes
+
+The non-destructive P2 lanes have now been exercised beyond the ordinary unit
+gate.
+
+- **stalled loopback / half-open equivalent**
+  - Tunnel health fetch has an independent bounded await even when an injected
+    fetch implementation completely ignores AbortSignal;
+  - stale control-plane evidence while the Tunnel child remains alive is
+    recovered through STALE -> RECOVERING rather than process-liveness green.
+
+- **sleep/wake and wall-clock discontinuity**
+  - Tunnel watchdog evidence age uses monotonic time;
+  - the regression suite moves Date.now six hours backward while monotonic
+    evidence continues aging and proves recovery still fires;
+  - MCP session idle TTL and owner-supersede grace now use monotonic elapsed
+    time while retaining wall-clock timestamps for UI/logging;
+  - MCP regression moves wall time +24h and -24h and proves idle reclamation
+    follows monotonic time;
+  - Runtime bootstrap health wait also uses monotonic elapsed time;
+  - Cloud RemoteCommand expiresAt intentionally remains wall-clock based because
+    it is an absolute protocol timestamp rather than an elapsed watchdog.
+
+- **network transition telemetry without secrets**
+  - Tunnel reachability state changes emit structured from/to/reason evidence;
+  - transition metadata includes local readiness, control-plane status,
+    consecutive failures and last proof timestamps;
+  - regression coverage proves API keys, tunnel IDs, MCP URLs and secret text
+    are not included in transition metadata.
+
+- **long MCP reconnect soak**
+  - the reconnect soak count is configurable through
+    OWL_MCP_RECONNECT_SOAK_CYCLES, bounded to 500;
+  - a 100-cycle connect -> runtime_info -> disconnect run passed;
+  - session cap, TTL cleanup, stale-owner takeover and live event-stream
+    protection remained valid.
+
+- **packaged structural smoke**
+  - isolated unsigned arm64 and x64 unpacked Desktop bundles were built;
+  - verify:packaged-smoke passed both architectures;
+  - both bundles contain the pinned Runtime 1.0.0-rc.4 / API 0.1,
+    both Tunnel architectures, Runtime Host 1.0.0 universal, Helper 1.0.0
+    universal and the custom icon;
+  - signing/notarization is intentionally outside development smoke and remains
+    part of the formal distribution gate.
+
+Still pending before Reliability can be declared fully closed:
+
+- a real destructive Connection Host/Tunnel restart using the active ChatGPT
+  path and prepared Planner Handoff;
+- confirmation that the restarted live Tunnel is the new build exposing the
+  health-url/watchdog evidence in Monitor;
+- a longer packaged-runtime behavioral soak, beyond structural packaging;
+- final signed/notarized distribution gate when release credentials are
+  available.
+
 ## Already strong — do not regress
 
 OWL Runtime already provides:

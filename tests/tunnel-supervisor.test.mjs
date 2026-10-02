@@ -372,6 +372,31 @@ describe("TunnelSupervisor", () => {
           event.meta?.reason === "control_plane_stale",
       ),
     ).toBe(true);
+
+    const transitions = events.filter(
+      (event) => event.message === "Tunnel reachability changed",
+    );
+    expect(
+      transitions.some(
+        (event) =>
+          event.meta?.from === "degraded" &&
+          event.meta?.to === "stale" &&
+          event.meta?.reason === "control_plane_stale",
+      ),
+    ).toBe(true);
+    expect(
+      transitions.some(
+        (event) =>
+          event.meta?.from === "stale" &&
+          event.meta?.to === "recovering",
+      ),
+    ).toBe(true);
+    for (const event of transitions) {
+      expect(event.meta).not.toHaveProperty("apiKey");
+      expect(event.meta).not.toHaveProperty("tunnelId");
+      expect(event.meta).not.toHaveProperty("mcpUrl");
+      expect(JSON.stringify(event.meta)).not.toContain("not-a-real-secret");
+    }
   });
 
   it("ignores stale health results from a superseded tunnel generation", async () => {

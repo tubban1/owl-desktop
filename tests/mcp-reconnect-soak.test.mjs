@@ -5,6 +5,10 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 
 const closers = [];
+const reconnectSoakCycles = Math.max(
+  1,
+  Math.min(Number(process.env.OWL_MCP_RECONNECT_SOAK_CYCLES) || 25, 500),
+);
 
 afterEach(async () => {
   while (closers.length) {
@@ -83,7 +87,7 @@ describe("OWL MCP reconnect soak", () => {
     });
     closers.push(() => mcp.close());
 
-    for (let index = 0; index < 25; index += 1) {
+    for (let index = 0; index < reconnectSoakCycles; index += 1) {
       const client = new Client({
         name: `reconnect-soak-${index}`,
         version: "0.1.0",
@@ -102,12 +106,41 @@ describe("OWL MCP reconnect soak", () => {
       await transport.close();
     }
 
-    expect(runtime.calls()).toBeGreaterThanOrEqual(25);
+    expect(runtime.calls()).toBeGreaterThanOrEqual(reconnectSoakCycles);
     expect(mcp.sessionCount()).toBeLessThanOrEqual(8);
 
     await new Promise((resolve) => setTimeout(resolve, 1_150));
     expect(mcp.sessionCount()).toBe(0);
   }, 60_000);
+
+  it("uses monotonic time for idle TTL even when the wall clock jumps", async () => {
+    const runtime = await startFakeRuntime();
+    let monotonicMs = 0;
+    const mcp = await startOwlMcpHttpServer({
+      port: 0,
+      runtimeBaseUrl: runtime.baseUrl,
+      sessionIdleTtlMs: 1_000,
+      maxSessions: 8,
+      monotonicNow: () => monotonicMs,
+    });
+    closers.push(() => mcp.close());
+
+    await rawInitialize(mcp.url, "clock-skew-session-owner");
+    expect(mcp.sessionCount()).toBe(1);
+
+    const realDateNow = Date.now;
+    try {
+      Date.now = () => realDateNow() + 24 * 60 * 60 * 1000;
+      monotonicMs = 500;
+      expect(mcp.sessionCount()).toBe(1);
+
+      Date.now = () => realDateNow() - 24 * 60 * 60 * 1000;
+      monotonicMs = 1_100;
+      expect(mcp.sessionCount()).toBe(0);
+    } finally {
+      Date.now = realDateNow;
+    }
+  });
 
   it("supersedes stale inactive transports for the same logical owner", async () => {
     const runtime = await startFakeRuntime();

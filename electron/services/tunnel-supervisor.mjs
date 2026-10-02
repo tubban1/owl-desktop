@@ -103,6 +103,31 @@ export class TunnelSupervisor {
     );
   }
 
+  transitionReachability(nextState, reason, meta = {}) {
+    const previousState = this.reachabilityState;
+    if (previousState === nextState) return false;
+
+    this.reachabilityState = nextState;
+    this.onEvent(
+      ["degraded", "stale", "recovering", "unreachable"].includes(nextState)
+        ? "warn"
+        : "info",
+      "Tunnel reachability changed",
+      {
+        from: previousState,
+        to: nextState,
+        reason,
+        localReady: this.localReady,
+        controlPlaneStatus: this.controlPlaneHealth?.status ?? null,
+        consecutiveFailures: this.consecutiveHealthFailures,
+        lastHealthOkAt: this.lastHealthOkAt,
+        lastControlPlaneOkAt: this.lastControlPlaneOkAt,
+        ...meta,
+      },
+    );
+    return true;
+  }
+
   status() {
     return {
       state: this.child
@@ -409,7 +434,9 @@ export class TunnelSupervisor {
         controlPlane?.status === "degraded" &&
         upstreamEvidenceAgeMs >= this.healthStaleAfterMs
       ) {
-        this.reachabilityState = "stale";
+        this.transitionReachability("stale", "control_plane_stale", {
+          evidenceAgeMs: Math.round(upstreamEvidenceAgeMs),
+        });
         this.lastHealthError = {
           code: "TUNNEL_CONTROL_PLANE_STALE",
           message:
@@ -420,14 +447,14 @@ export class TunnelSupervisor {
         };
         await this.recoverFromStale("control_plane_stale");
       } else if (controlPlane?.status === "ok" && this.localReady) {
-        this.reachabilityState = "ready";
+        this.transitionReachability("ready", "health_proven");
         this.restartAttempts = 0;
       } else if (
         monotonicNow - startedMonotonicAtMs < this.healthStartupGraceMs
       ) {
-        this.reachabilityState = "starting";
+        this.transitionReachability("starting", "startup_grace");
       } else {
-        this.reachabilityState = "degraded";
+        this.transitionReachability("degraded", "readiness_not_proven");
       }
 
       return this.status();
@@ -452,10 +479,20 @@ export class TunnelSupervisor {
         monotonicNow - startedMonotonicAtMs >= this.healthStartupGraceMs;
 
       if (pastStartupGrace && proofAgeMs >= this.healthStaleAfterMs) {
-        this.reachabilityState = "stale";
+        this.transitionReachability("stale", "health_probe_stale", {
+          proofAgeMs: Math.round(proofAgeMs),
+          errorCode: this.lastHealthError?.code ?? null,
+        });
         await this.recoverFromStale("health_probe_stale");
       } else {
-        this.reachabilityState = pastStartupGrace ? "degraded" : "starting";
+        this.transitionReachability(
+          pastStartupGrace ? "degraded" : "starting",
+          pastStartupGrace ? "health_probe_failed" : "startup_health_pending",
+          {
+            proofAgeMs: Math.round(proofAgeMs),
+            errorCode: this.lastHealthError?.code ?? null,
+          },
+        );
       }
 
       return this.status();
@@ -489,7 +526,7 @@ export class TunnelSupervisor {
   recoverFromStale(reason) {
     if (this.recoveryPromise) return this.recoveryPromise;
 
-    this.reachabilityState = "recovering";
+    this.transitionReachability("recovering", reason);
     this.clearHealthCheck();
     this.onEvent("warn", "Tunnel reachability recovery started", {
       reason,

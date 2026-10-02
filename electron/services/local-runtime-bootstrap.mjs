@@ -560,9 +560,9 @@ export class LocalRuntimeBootstrap {
     if (this.skipLaunchd) {
       return { skipped: true, reachable: false };
     }
-    const deadline = Date.now() + timeoutMs;
+    const deadline = performance.now() + timeoutMs;
     let lastProbe = null;
-    while (Date.now() < deadline) {
+    while (performance.now() < deadline) {
       lastProbe = await this.probeRuntimeIdentity(port, release, 1_000);
       if (lastProbe.exact) {
         return {
