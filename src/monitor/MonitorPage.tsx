@@ -23,6 +23,10 @@ import type {
 } from "../types";
 import { buildMonitorModel } from "./monitorModel";
 import {
+  buildWorkstreamBoard,
+  type WorkstreamBoard,
+} from "./workstreamModel";
+import {
   buildOrchestrationModel,
   type OrchestrationGraphNode,
   type OrchestrationModel,
@@ -307,6 +311,150 @@ function LiveView({ model }: { model: OrchestrationModel }) {
       </section>
 
       <TaskInspector model={model} />
+    </>
+  );
+}
+
+function WorkstreamsView({
+  board,
+  model,
+}: {
+  board: WorkstreamBoard;
+  model: OrchestrationModel;
+}) {
+  const statusTone = (status: string) =>
+    status === "attention"
+      ? "attention"
+      : status === "working"
+        ? "active"
+        : status === "waiting"
+          ? "waiting"
+          : status === "idle"
+            ? "healthy"
+            : "neutral";
+
+  return (
+    <>
+      <section className="workstream-summary">
+        <SummaryMetric label="Workstreams" value={board.activeCount} detail={board.activeCount === 1 ? "active source" : "active sources"} />
+        <SummaryMetric label="Executing" value={board.workingCount} detail="doing work now" />
+        <SummaryMetric label="Waiting" value={board.waitingCount} detail="user / runtime / external" />
+        <SummaryMetric label="Attention" value={board.attentionCount} detail="needs intervention" />
+      </section>
+
+      <section className="panel workstream-board">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">LIVE WORKSTREAMS</span>
+            <h3>Who asked → who is handling → what happens next</h3>
+          </div>
+          <span className="neutral-pill">
+            {board.connectedSources} source{board.connectedSources === 1 ? "" : "s"} connected
+          </span>
+        </div>
+
+        <div className="workstream-list">
+          {board.streams.map((stream) => (
+            <article className={"workstream-card " + stream.status} key={stream.id}>
+              <div className="workstream-head">
+                <div className="workstream-source">
+                  <span className="workstream-source-icon">
+                    {stream.sourceKind === "Cloud" ? <Cloud size={16} /> : <Workflow size={16} />}
+                  </span>
+                  <div>
+                    <strong>{stream.sourceLabel}</strong>
+                    <span>{stream.sourceKind} · {stream.transportCount} transport{stream.transportCount === 1 ? "" : "s"}</span>
+                  </div>
+                </div>
+                <StatusBadge status={stream.status} tone={statusTone(stream.status)} />
+              </div>
+
+              <div className="workstream-goal">
+                <span>Goal</span>
+                <strong>{stream.goal}</strong>
+                {stream.phase && <small>{stream.phase}</small>}
+              </div>
+
+              <div className="workstream-route" aria-label="Current work route">
+                <span>User / caller</span>
+                <ChevronRight size={14} />
+                <span>{stream.sourceLabel}</span>
+                <ChevronRight size={14} />
+                <span className={stream.currentExecutor === "OWL Runtime" ? "active" : ""}>OWL Runtime</span>
+              </div>
+
+              <div className="workstream-current">
+                <div><span>Executing now</span><strong>{stream.currentExecutor}</strong></div>
+                <div><span>Current action</span><strong>{stream.currentAction}</strong></div>
+                <div><span>Tasks</span><strong>{stream.tasks.filter((task) => task.status === "running").length} running · {stream.tasks.length} linked</strong></div>
+                <div>
+                  <span>Progress cadence</span>
+                  <strong className={stream.progressPolicy.updateRecommended ? "workstream-due" : ""}>
+                    {stream.progressPolicy.updateRecommended
+                      ? "Update due"
+                      : String(Math.round(stream.progressPolicy.intervalMs / 1000)) + "s / " + String(stream.progressPolicy.maxToolSteps) + " steps"}
+                  </strong>
+                </div>
+              </div>
+
+              {stream.messages.length > 0 && (
+                <div className="workstream-messages">
+                  <span className="workstream-subhead">Recent handoffs</span>
+                  {stream.messages.slice(0, 4).map((message) => (
+                    <div className="workstream-message" key={message.id}>
+                      <div className="workstream-message-route">
+                        <strong>{message.from}</strong>
+                        <ChevronRight size={12} />
+                        <strong>{message.to}</strong>
+                      </div>
+                      <span>{message.summary}</span>
+                      <time>{formatClock(message.at)}</time>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="workstream-next">
+                <span className="workstream-subhead">Next</span>
+                {stream.nextActions.length > 0 ? (
+                  <ol>
+                    {stream.nextActions.slice(0, 4).map((action) => <li key={action}>{action}</li>)}
+                  </ol>
+                ) : (
+                  <span className="workstream-empty-next">
+                    {stream.status === "idle" || stream.status === "disconnected"
+                      ? "No queued next action."
+                      : "Waiting for the current execution state to advance."}
+                  </span>
+                )}
+              </div>
+            </article>
+          ))}
+
+          {board.streams.length === 0 && (
+            <div className="monitor-clear">
+              <CheckCircle2 size={20} />
+              <div>
+                <strong>No active workstreams</strong>
+                <span>New ChatGPT, Worker or Cloud work will appear here independently.</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <details className="panel workstream-details">
+        <summary>
+          <div>
+            <span className="eyebrow">DETAILED EXECUTION</span>
+            <strong>Task actors, verification and evidence</strong>
+          </div>
+          <ChevronRight size={16} />
+        </summary>
+        <div className="workstream-details-body">
+          <LiveView model={model} />
+        </div>
+      </details>
     </>
   );
 }
@@ -667,6 +815,16 @@ export function MonitorPage({
     [snapshot, agentRequests, skillSnapshot, activity],
   );
 
+  const workstreamBoard = useMemo(
+    () =>
+      buildWorkstreamBoard({
+        snapshot,
+        agentRequests,
+        now: Date.now(),
+      }),
+    [snapshot, agentRequests],
+  );
+
   const baseOrchestration = useMemo(
     () =>
       buildOrchestrationModel({
@@ -742,8 +900,7 @@ export function MonitorPage({
             <h1>Live orchestration</h1>
           </div>
           <p>
-            {model.headline.label} · Runtime-owned Task state, dependencies,
-            verification and coordination.
+            {workstreamBoard.activeCount} active workstream{workstreamBoard.activeCount === 1 ? "" : "s"} · sessions stay separated by stable owner identity.
           </p>
         </div>
         <div className="orch-header-actions">
@@ -799,7 +956,7 @@ export function MonitorPage({
         </div>
       )}
 
-      {tab === "live" && <LiveView model={model} />}
+      {tab === "live" && <WorkstreamsView board={workstreamBoard} model={model} />}
       {tab === "timeline" && <TimelineView model={model} />}
       {tab === "graph" && <GraphView model={model} />}
       {tab === "system" && <SystemView model={model} />}
@@ -807,11 +964,9 @@ export function MonitorPage({
       <div className="contract-note orch-contract-note">
         <Activity size={17} />
         <div>
-          <strong>One projection, multiple views.</strong>
+          <strong>One execution truth, multiple isolated workstreams.</strong>
           <p>
-            Live, Timeline and Graph are different readings of the same public
-            Runtime Task detail. Desktop does not create a second execution state
-            machine and does not scrape ChatGPT output.
+            Live groups public Runtime facts by stable owner/session identity so concurrent ChatGPT and future Worker work cannot collapse into one task stream. Timeline, Graph and System remain deeper readings of the same Runtime-owned state; Desktop does not scrape chat transcripts or create a second execution authority.
           </p>
         </div>
       </div>

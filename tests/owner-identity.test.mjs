@@ -80,4 +80,31 @@ describe("OWL MCP logical owner identity", () => {
     expect(legacy.stable).toBe(true);
     expect(legacy.source).toBe("explicit-header");
   });
+
+  it("carries explicit client kind/label so Worker and ChatGPT streams stay distinguishable", () => {
+    const worker = resolveOwnerIdentity(
+      {
+        "x-owl-owner-id": "worker:nightly:1",
+        "x-owl-client-kind": "worker",
+        "x-owl-client-label": "Night Worker",
+      },
+      "transport-worker",
+    );
+    const chat = resolveOwnerIdentity(
+      { "x-owl-owner-id": "chatgpt:conversation:abc" },
+      "transport-chat",
+    );
+
+    expect(worker).toMatchObject({
+      stable: true,
+      clientKind: "worker",
+      clientLabel: "Night Worker",
+    });
+    expect(chat).toMatchObject({
+      stable: true,
+      clientKind: "chatgpt",
+      clientLabel: null,
+    });
+    expect(worker.runtimeSessionId).not.toBe(chat.runtimeSessionId);
+  });
 });

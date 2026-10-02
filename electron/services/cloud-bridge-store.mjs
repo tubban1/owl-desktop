@@ -27,6 +27,22 @@ function canonicalize(value) {
   return value;
 }
 
+function commandOrigin(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const allowedKinds = new Set(["worker", "chatgpt", "cloud", "user", "agent"]);
+  const kind = allowedKinds.has(value.kind) ? value.kind : null;
+  if (!kind) return null;
+  const bounded = (input, max) =>
+    typeof input === "string" && input.trim()
+      ? input.trim().slice(0, max)
+      : null;
+  return {
+    kind,
+    id: bounded(value.id, 160),
+    label: bounded(value.label, 120),
+  };
+}
+
 export function cloudCommandDigest(command) {
   const canonical = {
     commandId: command?.commandId ?? null,
@@ -35,6 +51,7 @@ export function cloudCommandDigest(command) {
     kindVersion: command?.kindVersion ?? null,
     payload: command?.payload ?? {},
     expiresAt: command?.expiresAt ?? null,
+    origin: commandOrigin(command?.origin),
   };
   return createHash("sha256")
     .update(JSON.stringify(canonicalize(canonical)))
@@ -169,6 +186,7 @@ export class CloudBridgeStore {
       commandId: command.commandId,
       deviceId: command.deviceId,
       kind: command.kind,
+      origin: commandOrigin(command.origin),
       digest,
       status: "processing",
       receivedAt: now,

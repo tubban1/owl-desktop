@@ -60,6 +60,43 @@ describe("CloudBridgeStore", () => {
     expect(cloudCommandDigest(command)).toHaveLength(64);
   });
 
+  it("persists bounded command origin metadata and binds it into dedupe identity", () => {
+    const store = createStore();
+    const command = {
+      commandId: "cmd_origin",
+      deviceId: "dev_1",
+      kind: "runtime.task.create",
+      origin: {
+        kind: "worker",
+        id: "worker_nightly",
+        label: "Night Worker",
+      },
+      payload: { label: "Private task content", steps: [] },
+    };
+
+    store.beginCommand(command);
+    const record = store.getCommand("cmd_origin");
+    expect(record.origin).toEqual({
+      kind: "worker",
+      id: "worker_nightly",
+      label: "Night Worker",
+    });
+    expect(cloudCommandDigest(command)).not.toBe(
+      cloudCommandDigest({
+        ...command,
+        origin: {
+          kind: "worker",
+          id: "worker_other",
+          label: "Other Worker",
+        },
+      }),
+    );
+
+    const raw = fs.readFileSync(store.file, "utf8");
+    expect(raw).not.toContain("Private task content");
+    expect(raw).toContain("Night Worker");
+  });
+
   it("turns interrupted processing into uncertain on restart", () => {
     const store = createStore();
     store.beginCommand({

@@ -203,6 +203,8 @@ export async function startOwlMcpHttpServer({
       active.runtimeSessionId = identity.runtimeSessionId;
       active.ownerStable = identity.stable;
       active.ownerSource = identity.source;
+      active.clientKind = identity.clientKind ?? null;
+      active.clientLabel = identity.clientLabel ?? null;
       if (
         identity.stable &&
         typeof transportSessionId === "string" &&
@@ -211,6 +213,12 @@ export async function startOwlMcpHttpServer({
         plannerContinuation?.noteTransportActivity?.(
           identity.runtimeSessionId,
           transportSessionId,
+          undefined,
+          {
+            clientKind: identity.clientKind ?? null,
+            clientLabel: identity.clientLabel ?? null,
+            ownerSource: identity.source,
+          },
         );
       }
       // Once a tool request has been accepted by OWL MCP, do not bind Runtime
@@ -242,6 +250,8 @@ export async function startOwlMcpHttpServer({
             runtimeSessionId: identity.runtimeSessionId,
             ownerStable: identity.stable,
             ownerSource: identity.source,
+            clientKind: identity.clientKind ?? null,
+            clientLabel: identity.clientLabel ?? null,
             transportSessionId,
             runtimeRequestId,
             logicalRequestId:
@@ -358,6 +368,8 @@ export async function startOwlMcpHttpServer({
         runtimeSessionId: session.runtimeSessionId ?? null,
         ownerStable: session.ownerStable ?? false,
         ownerSource: session.ownerSource ?? "transport-session",
+        clientKind: session.clientKind ?? null,
+        clientLabel: session.clientLabel ?? null,
         createdAt: session.createdAt,
         lastSeenAt: session.lastSeenAt,
         activeRequestCount: Number(session.activeRequestCount ?? 0),

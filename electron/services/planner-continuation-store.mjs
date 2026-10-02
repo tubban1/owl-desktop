@@ -54,6 +54,9 @@ function compactOwner(owner) {
   )[0] ?? null;
   return {
     ownerId: owner.ownerId,
+    clientKind: latest?.clientKind ?? owner.clientKind ?? null,
+    clientLabel: latest?.clientLabel ?? owner.clientLabel ?? null,
+    ownerSource: latest?.ownerSource ?? owner.ownerSource ?? null,
     plannerConnected: connected.length > 0,
     connectedTransportCount: connected.length,
     lastTransportSeenAt: latest?.lastSeenAt ?? latest?.connectedAt ?? null,
@@ -145,6 +148,7 @@ export class PlannerContinuationStore {
     ownerId,
     transportSessionId,
     now = new Date().toISOString(),
+    metadata = {},
   ) {
     if (!ownerId || !transportSessionId) return null;
     const state = this.read();
@@ -157,7 +161,13 @@ export class PlannerContinuationStore {
       lastSeenAt: now,
       disconnectedAt: null,
       disconnectReason: null,
+      clientKind: metadata.clientKind ?? previous?.clientKind ?? null,
+      clientLabel: metadata.clientLabel ?? previous?.clientLabel ?? null,
+      ownerSource: metadata.ownerSource ?? previous?.ownerSource ?? null,
     };
+    owner.clientKind = metadata.clientKind ?? owner.clientKind ?? null;
+    owner.clientLabel = metadata.clientLabel ?? owner.clientLabel ?? null;
+    owner.ownerSource = metadata.ownerSource ?? owner.ownerSource ?? null;
     owner.updatedAt = now;
     this.trimTransports(owner);
     this.write(state);
@@ -168,6 +178,7 @@ export class PlannerContinuationStore {
     ownerId,
     transportSessionId,
     now = new Date().toISOString(),
+    metadata = {},
   ) {
     if (!ownerId || !transportSessionId) return null;
     const state = this.read();
@@ -180,7 +191,13 @@ export class PlannerContinuationStore {
       lastSeenAt: now,
       disconnectedAt: null,
       disconnectReason: null,
+      clientKind: metadata.clientKind ?? previous?.clientKind ?? null,
+      clientLabel: metadata.clientLabel ?? previous?.clientLabel ?? null,
+      ownerSource: metadata.ownerSource ?? previous?.ownerSource ?? null,
     };
+    owner.clientKind = metadata.clientKind ?? owner.clientKind ?? null;
+    owner.clientLabel = metadata.clientLabel ?? owner.clientLabel ?? null;
+    owner.ownerSource = metadata.ownerSource ?? owner.ownerSource ?? null;
     owner.updatedAt = now;
     this.trimTransports(owner);
     this.write(state);
@@ -237,22 +254,39 @@ export class PlannerContinuationStore {
   }
 
   summary() {
-    const owners = Object.values(this.read().owners).map(compactOwner);
-    const active = owners
-      .filter(
-        (owner) =>
-          owner?.checkpoint &&
-          owner.checkpoint.status !== "completed",
-      )
+    const owners = Object.values(this.read().owners)
+      .map(compactOwner)
+      .filter(Boolean)
       .sort(
         (a, b) =>
-          Date.parse(b.checkpoint.updatedAt ?? "") -
-          Date.parse(a.checkpoint.updatedAt ?? ""),
-      );
+          Date.parse(
+            b.checkpoint?.updatedAt ??
+              b.lastTransportSeenAt ??
+              b.updatedAt ??
+              "",
+          ) -
+          Date.parse(
+            a.checkpoint?.updatedAt ??
+              a.lastTransportSeenAt ??
+              a.updatedAt ??
+              "",
+          ),
+      )
+      .slice(0, 48);
+    const active = owners.filter(
+      (owner) =>
+        owner?.checkpoint &&
+        owner.checkpoint.status !== "completed",
+    );
     return {
       activeCheckpointCount: active.length,
       connectedOwnerCount: owners.filter((owner) => owner.plannerConnected).length,
       latestActive: active[0] ?? null,
+      owners,
+      progressPolicy: {
+        recommendedUpdateIntervalMs: 15_000,
+        recommendedMaxToolStepsWithoutUpdate: 3,
+      },
     };
   }
 

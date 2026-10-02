@@ -228,6 +228,11 @@ export type CloudBridgeCommandRecord = {
   commandId: string;
   deviceId: string;
   kind: string;
+  origin?: {
+    kind: "worker" | "chatgpt" | "cloud" | "user" | "agent";
+    id?: string | null;
+    label?: string | null;
+  } | null;
   digest: string;
   status: "processing" | "accepted" | "rejected" | "uncertain";
   receivedAt: string;
@@ -389,6 +394,9 @@ export type PlannerCheckpoint = {
 
 export type PlannerContinuationOwner = {
   ownerId: string;
+  clientKind: "chatgpt" | "worker" | "cloud" | "desktop" | "agent" | "mcp" | null;
+  clientLabel: string | null;
+  ownerSource: string | null;
   plannerConnected: boolean;
   connectedTransportCount: number;
   lastTransportSeenAt: string | null;
@@ -401,6 +409,11 @@ export type PlannerContinuationSummary = {
   activeCheckpointCount: number;
   connectedOwnerCount: number;
   latestActive: PlannerContinuationOwner | null;
+  owners?: PlannerContinuationOwner[];
+  progressPolicy?: {
+    recommendedUpdateIntervalMs: number;
+    recommendedMaxToolStepsWithoutUpdate: number;
+  };
 };
 
 export type RuntimeSnapshot = {
@@ -427,6 +440,8 @@ export type RuntimeSnapshot = {
       runtimeSessionId: string | null;
       ownerStable: boolean;
       ownerSource: string;
+      clientKind?: "chatgpt" | "worker" | "cloud" | "desktop" | "agent" | "mcp" | null;
+      clientLabel?: string | null;
       createdAt: string;
       lastSeenAt: string;
     }>;

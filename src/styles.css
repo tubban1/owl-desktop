@@ -2756,3 +2756,254 @@ input:focus { border-color: #41634b; box-shadow: 0 0 0 3px rgba(78,128,92,.08); 
   color: #6b757b;
   font-size: 8px;
 }
+
+/* Monitor v2 — multi-source workstreams */
+.workstream-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.workstream-board {
+  padding-bottom: 8px;
+}
+
+.workstream-list {
+  display: grid;
+  gap: 10px;
+}
+
+.workstream-card {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.workstream-card.working { border-left-color: #6b96af; }
+.workstream-card.waiting { border-left-color: #c09a57; }
+.workstream-card.attention { border-left-color: #b96e61; }
+.workstream-card.idle { border-left-color: #69a67b; }
+.workstream-card.disconnected { border-left-color: #616973; opacity: 0.82; }
+
+.workstream-head,
+.workstream-source,
+.workstream-message-route,
+.workstream-route,
+.workstream-details summary {
+  display: flex;
+  align-items: center;
+}
+
+.workstream-head {
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.workstream-source {
+  gap: 10px;
+  min-width: 0;
+}
+
+.workstream-source-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.workstream-source > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.workstream-source strong,
+.workstream-goal strong,
+.workstream-current strong {
+  color: var(--text);
+}
+
+.workstream-source span,
+.workstream-goal > span,
+.workstream-goal small,
+.workstream-current span,
+.workstream-message > span,
+.workstream-message time,
+.workstream-empty-next {
+  color: var(--muted);
+}
+
+.workstream-source > div > span,
+.workstream-goal small,
+.workstream-current span,
+.workstream-message time {
+  font-size: 11px;
+}
+
+.workstream-goal {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.workstream-goal > span,
+.workstream-subhead {
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.workstream-goal strong {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.workstream-route {
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.workstream-route span.active {
+  color: #91bdd6;
+}
+
+.workstream-current {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.workstream-current > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 9px;
+}
+
+.workstream-current strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.workstream-due {
+  color: #d3a960 !important;
+}
+
+.workstream-messages,
+.workstream-next {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.workstream-message {
+  display: grid;
+  grid-template-columns: minmax(150px, .7fr) minmax(0, 1.5fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.workstream-message-route {
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.workstream-message-route strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workstream-message > span {
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.workstream-next ol {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 3px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.workstream-details {
+  margin-top: 12px;
+}
+
+.workstream-details > summary {
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.workstream-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.workstream-details > summary > div {
+  display: grid;
+  gap: 3px;
+}
+
+.workstream-details[open] > summary > svg {
+  transform: rotate(90deg);
+}
+
+.workstream-details-body {
+  padding-top: 14px;
+}
+
+@media (max-width: 1000px) {
+  .workstream-summary,
+  .workstream-current {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workstream-message {
+    grid-template-columns: 1fr auto;
+  }
+
+  .workstream-message > span {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .workstream-summary,
+  .workstream-current {
+    grid-template-columns: 1fr;
+  }
+
+  .workstream-head {
+    align-items: flex-start;
+  }
+
+  .workstream-message {
+    grid-template-columns: 1fr;
+  }
+}

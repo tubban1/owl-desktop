@@ -160,5 +160,32 @@ describe("PlannerContinuationStore", () => {
     const summary = store.summary();
     expect(summary.activeCheckpointCount).toBe(1);
     expect(summary.latestActive.checkpoint.goal).toBe("Active");
+    expect(summary.owners).toHaveLength(2);
+    expect(summary.progressPolicy).toEqual({
+      recommendedUpdateIntervalMs: 15000,
+      recommendedMaxToolStepsWithoutUpdate: 3,
+    });
+  });
+
+  it("preserves client metadata in the multi-owner summary", () => {
+    const store = createStore();
+    store.noteTransportActivity(
+      "owl-owner:worker",
+      "transport-worker",
+      "2026-10-01T21:00:01.000Z",
+      {
+        clientKind: "worker",
+        clientLabel: "Night Worker",
+        ownerSource: "explicit-header",
+      },
+    );
+
+    expect(store.summary().owners[0]).toMatchObject({
+      ownerId: "owl-owner:worker",
+      clientKind: "worker",
+      clientLabel: "Night Worker",
+      ownerSource: "explicit-header",
+      plannerConnected: true,
+    });
   });
 });
