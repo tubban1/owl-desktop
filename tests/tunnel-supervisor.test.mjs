@@ -338,6 +338,73 @@ describe("TunnelSupervisor", () => {
     ).toBe(true);
   });
 
+  it("ignores stale health results from a superseded tunnel generation", async () => {
+    let releaseHealth;
+    const healthPayload = new Promise((resolve) => {
+      releaseHealth = resolve;
+    });
+    const supervisor = new TunnelSupervisor({
+      fetchImpl: async (url) => {
+        if (String(url).includes("/health?details=true")) {
+          return {
+            ok: true,
+            status: 200,
+            json: () => healthPayload,
+          };
+        }
+        return jsonResponse(null);
+      },
+      healthCheckIntervalMs: 60_000,
+    });
+    supervisors.push(supervisor);
+
+    const oldChild = { pid: 101 };
+    const newChild = { pid: 202 };
+    supervisor.child = oldChild;
+    supervisor.activeGeneration = 1;
+    supervisor.generation = 1;
+    supervisor.startedAt = new Date().toISOString();
+    supervisor.healthBaseUrl = "http://127.0.0.1:41004";
+    supervisor.reachabilityState = "starting";
+
+    const pending = supervisor.checkHealthNow();
+
+    supervisor.child = newChild;
+    supervisor.activeGeneration = 2;
+    supervisor.generation = 2;
+    supervisor.reachabilityState = "recovering";
+    supervisor.lastHealthOkAt = null;
+    releaseHealth({
+      live: true,
+      ready: true,
+      components: {
+        "control-plane": {
+          status: "ok",
+          state: "idle",
+          observed_at: new Date().toISOString(),
+          details: {
+            last_success: new Date().toISOString(),
+            consecutive_failures: 0,
+          },
+        },
+      },
+    });
+
+    await pending;
+
+    expect(supervisor.status()).toMatchObject({
+      pid: 202,
+      generation: 2,
+      reachability: {
+        state: "recovering",
+        lastHealthOkAt: null,
+      },
+    });
+
+    supervisor.child = null;
+    supervisor.activeGeneration = 0;
+  });
+
   it("refuses a non-loopback MCP target", async () => {
     const supervisor = new TunnelSupervisor();
     supervisors.push(supervisor);

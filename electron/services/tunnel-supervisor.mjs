@@ -59,6 +59,8 @@ export class TunnelSupervisor {
     this.restartAttempts = 0;
     this.recoveryPromise = null;
     this.healthCheckTimer = null;
+    this.generation = 0;
+    this.activeGeneration = 0;
     this.lastHealthProbeAt = null;
     this.lastHealthOkAt = null;
     this.lastControlPlaneOkAt = null;
@@ -102,6 +104,7 @@ export class TunnelSupervisor {
           ? "restarting"
           : "stopped",
       pid: this.child?.pid ?? null,
+      generation: this.activeGeneration || null,
       startedAt: this.startedAt,
       lastExit: this.lastExit,
       restartAt: this.restartAt,
@@ -324,8 +327,18 @@ export class TunnelSupervisor {
     };
   }
 
+  isCurrentGeneration(child, generation) {
+    return (
+      Boolean(child) &&
+      this.child === child &&
+      this.activeGeneration === generation
+    );
+  }
+
   async checkHealthNow() {
-    if (!this.child) return this.status();
+    const child = this.child;
+    const generation = this.activeGeneration;
+    if (!child || generation <= 0) return this.status();
 
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
@@ -343,7 +356,11 @@ export class TunnelSupervisor {
       }
 
       const health = await healthResponse.json();
+      if (!this.isCurrentGeneration(child, generation)) return this.status();
+
       const readyResponse = await this.fetchHealth("/readyz");
+      if (!this.isCurrentGeneration(child, generation)) return this.status();
+
       const controlPlane = this.controlPlaneProjection(
         health?.components?.["control-plane"],
       );
@@ -392,6 +409,8 @@ export class TunnelSupervisor {
 
       return this.status();
     } catch (error) {
+      if (!this.isCurrentGeneration(child, generation)) return this.status();
+
       this.consecutiveHealthFailures += 1;
       this.lastHealthError = {
         code: error?.code ?? "TUNNEL_HEALTH_FAILED",
@@ -514,6 +533,9 @@ export class TunnelSupervisor {
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
     });
+    const generation = this.generation + 1;
+    this.generation = generation;
+    this.activeGeneration = generation;
     this.child = child;
     this.startedAt = new Date().toISOString();
     this.lastExit = null;
@@ -541,7 +563,10 @@ export class TunnelSupervisor {
         code,
         signal,
       };
-      if (this.child === child) this.child = null;
+      if (this.child === child) {
+        this.child = null;
+        if (this.activeGeneration === generation) this.activeGeneration = 0;
+      }
       this.startedAt = null;
       this.clearHealthCheck();
       this.localReady = false;

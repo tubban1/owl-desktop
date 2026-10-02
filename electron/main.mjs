@@ -9,6 +9,7 @@ import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
 import { LocalRuntimeBootstrap } from "./services/local-runtime-bootstrap.mjs";
 import { TunnelSupervisor } from "./services/tunnel-supervisor.mjs";
+import { tunnelTransportAvailable } from "./services/tunnel-availability.mjs";
 import { ConnectionHostClient } from "./services/connection-host-client.mjs";
 import { startDesktopCapabilityBridge } from "./services/desktop-capability-bridge.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
@@ -829,8 +830,8 @@ async function buildCloudPresence() {
         ? connectionHost?.mcp?.status === "running"
         : mcpState.status === "running",
       tunnelAvailable: externalConnectionHostEnabled
-        ? connectionHost?.tunnel?.state === "running"
-        : tunnelSupervisor?.status().state === "running",
+        ? tunnelTransportAvailable(connectionHost?.tunnel)
+        : tunnelTransportAvailable(tunnelSupervisor?.status()),
       authorization: {
         operationalState,
         accountSessionState: cloudAccountState.status,

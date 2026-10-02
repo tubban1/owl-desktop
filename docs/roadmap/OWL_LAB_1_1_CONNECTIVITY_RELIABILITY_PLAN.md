@@ -321,3 +321,29 @@ Post-P1.3 / Host-isolation verification:
     full Desktop gate:          49/49 files, 226/226 tests PASS
     TypeScript + Vite build:    PASS
     git diff --check:           PASS
+
+### P1.5 / P1.6 closure — generation-safe state and fail-closed availability
+
+Completed in the dedicated reliability worktree after the initial P1 checkpoint.
+
+- **P1.5 competing status transitions**
+  - each Tunnel spawn now has a monotonically increasing local generation;
+  - asynchronous health probes capture the child + generation they started against;
+  - a probe result from a superseded generation is discarded before it can write
+    READY/DEGRADED/STALE evidence;
+  - regression coverage holds an old health response open, swaps to a new
+    generation, releases the old response, and proves the new generation state is
+    not overwritten.
+
+- **P1.6 fast-fail transport capability**
+  - Cloud presence no longer projects tunnel availability from process state;
+  - availability is fail-closed and requires all of:
+    process state running, reachability READY, localReady=true, and
+    control-plane status OK;
+  - STARTING, DEGRADED, STALE, RECOVERING, UNREACHABLE and legacy/no-evidence
+    snapshots are not advertised as available.
+
+Targeted closure gate:
+
+    6 test files, 30/30 tests PASS
+    git diff --check: PASS
