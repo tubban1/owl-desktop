@@ -10,7 +10,7 @@ export type Settings = {
   tunnelAutoStart: boolean;
   tunnelBinaryPath: string;
   tunnelId: string;
-  connectivityMode: "cloud_durable" | "custom_tunnel";
+  connectivityMode: "cloud_durable" | "managed_tunnel" | "custom_tunnel";
   cloudEnabled: boolean;
   cloudAutoStart: boolean;
   cloudBaseUrl: string;
@@ -110,6 +110,8 @@ export type TunnelStatus = {
   binaryPath?: string | null;
   tunnelIdConfigured?: boolean;
   mcpUrl?: string | null;
+  controlPlaneBaseUrl?: string | null;
+  controlPlanePollTimeoutMs?: number | null;
   secretStorage?: string;
   reachability?: {
     state: TunnelReachabilityState;

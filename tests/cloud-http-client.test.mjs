@@ -12,6 +12,37 @@ function jsonResponse(body, status = 200) {
 }
 
 describe("CloudHttpClient", () => {
+  it("uses Device auth for managed connectivity bootstrap", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        mode: "managed_tunnel",
+        managedTunnel: {
+          available: true,
+          state: "active",
+          tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
+          controlPlaneBaseUrl: "https://cloud.example.test/tunnel",
+          pollTimeoutMs: 20000,
+          credentialSource: "device",
+        },
+      }),
+    );
+    const client = new CloudHttpClient({
+      baseUrl: "https://cloud.example.test/",
+      deviceCredential: "owldev1.device.secret",
+      fetchImpl,
+    });
+
+    const result = await client.connectivityBootstrap();
+
+    expect(result.mode).toBe("managed_tunnel");
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(
+      "https://cloud.example.test/device/v1/connectivity/bootstrap",
+    );
+    expect(init.method).toBe("POST");
+    expect(init.headers.authorization).toBe("Device owldev1.device.secret");
+  });
+
   it("uses Device auth for presence without exposing the credential elsewhere", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
     const client = new CloudHttpClient({

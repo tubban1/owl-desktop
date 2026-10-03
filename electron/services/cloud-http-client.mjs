@@ -210,6 +210,13 @@ export class CloudHttpClient {
     );
   }
 
+  connectivityBootstrap() {
+    return this.request("/device/v1/connectivity/bootstrap", {
+      method: "POST",
+      auth: "device",
+    });
+  }
+
   heartbeat(input = {}) {
     return this.request("/device/v1/presence", {
       method: "POST",

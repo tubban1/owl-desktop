@@ -90,6 +90,50 @@ describe("TunnelSupervisor", () => {
   });
 
 
+  it("uses an OWL managed control plane without exposing the device credential in argv", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-managed-tunnel-test-"));
+    scratch.push(dir);
+    const binary = path.join(dir, "fake-tunnel");
+    fs.writeFileSync(
+      binary,
+      [
+        "#!/bin/sh",
+        "trap 'exit 0' TERM INT",
+        "while true; do sleep 1; done",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const supervisor = new TunnelSupervisor();
+    supervisors.push(supervisor);
+    await supervisor.start({
+      binaryPath: binary,
+      tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
+      apiKey: "owldev1.device.secret-that-must-not-enter-argv",
+      mcpUrl: "http://127.0.0.1:8790/mcp",
+      controlPlaneBaseUrl: "https://cloud.example.test/tunnel",
+      pollTimeoutMs: 20_000,
+    });
+
+    const args = supervisor.child?.spawnargs ?? [];
+    expect(args).toContain("--control-plane.base-url");
+    expect(args).toContain("https://cloud.example.test/tunnel");
+    expect(args).toContain("--control-plane.poll-timeout");
+    expect(args).toContain("20000ms");
+    expect(args).toContain("--control-plane.initial-poll-timeout");
+    expect(args.join(" ")).not.toContain(
+      "owldev1.device.secret-that-must-not-enter-argv",
+    );
+    expect(fs.readFileSync(supervisor.secretFile, "utf8").trim()).toBe(
+      "owldev1.device.secret-that-must-not-enter-argv",
+    );
+    expect(supervisor.status()).toMatchObject({
+      controlPlaneBaseUrl: "https://cloud.example.test/tunnel",
+      controlPlanePollTimeoutMs: 20_000,
+    });
+  });
+
   it("automatically restarts after an unexpected tunnel exit", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-tunnel-restart-test-"));
     scratch.push(dir);

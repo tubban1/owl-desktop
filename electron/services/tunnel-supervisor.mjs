@@ -145,6 +145,8 @@ export class TunnelSupervisor {
       binaryPath: this.config?.binaryPath ?? null,
       tunnelIdConfigured: Boolean(this.config?.tunnelId),
       mcpUrl: this.config?.mcpUrl ?? null,
+      controlPlaneBaseUrl: this.config?.controlPlaneBaseUrl ?? null,
+      controlPlanePollTimeoutMs: this.config?.pollTimeoutMs ?? null,
       secretStorage: this.child
         ? "ephemeral-file-0600"
         : this.desiredRunning
@@ -165,7 +167,14 @@ export class TunnelSupervisor {
     };
   }
 
-  validateConfig({ binaryPath, tunnelId, apiKey, mcpUrl }) {
+  validateConfig({
+    binaryPath,
+    tunnelId,
+    apiKey,
+    mcpUrl,
+    controlPlaneBaseUrl,
+    pollTimeoutMs,
+  }) {
     if (!binaryPath || !fs.existsSync(binaryPath)) {
       throw new Error("OWL Tunnel binary is missing.");
     }
@@ -177,6 +186,20 @@ export class TunnelSupervisor {
     }
     if (!mcpUrl?.startsWith("http://127.0.0.1:")) {
       throw new Error("OWL Tunnel MCP target must be loopback.");
+    }
+    if (controlPlaneBaseUrl) {
+      const parsed = new URL(controlPlaneBaseUrl);
+      if (parsed.protocol !== "https:") {
+        throw new Error("OWL Tunnel control plane must use HTTPS.");
+      }
+    }
+    if (
+      pollTimeoutMs !== undefined &&
+      (!Number.isFinite(Number(pollTimeoutMs)) ||
+        Number(pollTimeoutMs) < 1_000 ||
+        Number(pollTimeoutMs) > 20_000)
+    ) {
+      throw new Error("OWL Tunnel control-plane poll timeout must be 1–20 seconds.");
     }
   }
 
@@ -561,12 +584,20 @@ export class TunnelSupervisor {
       throw new Error("OWL Tunnel restart configuration is unavailable.");
     }
 
-    const { binaryPath, tunnelId, mcpUrl } = this.config;
+    const {
+      binaryPath,
+      tunnelId,
+      mcpUrl,
+      controlPlaneBaseUrl,
+      pollTimeoutMs,
+    } = this.config;
     this.validateConfig({
       binaryPath,
       tunnelId,
       apiKey: this.apiKey,
       mcpUrl,
+      controlPlaneBaseUrl,
+      pollTimeoutMs,
     });
 
     const tempDir = path.join(os.tmpdir(), "owl-desktop-tunnel");
@@ -590,6 +621,16 @@ export class TunnelSupervisor {
       `file:${secretFile}`,
       "--control-plane.tunnel-id",
       tunnelId,
+      ...(controlPlaneBaseUrl
+        ? [
+            "--control-plane.base-url",
+            controlPlaneBaseUrl,
+            "--control-plane.poll-timeout",
+            `${Math.max(1_000, Math.min(20_000, Number(pollTimeoutMs) || 20_000))}ms`,
+            "--control-plane.initial-poll-timeout",
+            `${Math.max(1_000, Math.min(20_000, Number(pollTimeoutMs) || 20_000))}ms`,
+          ]
+        : []),
       "--mcp.server-url",
       `url=${mcpUrl}`,
       "--mcp.startup-wait-timeout",
@@ -668,11 +709,31 @@ export class TunnelSupervisor {
     return this.status();
   }
 
-  async start({ binaryPath, tunnelId, apiKey, mcpUrl }) {
+  async start({
+    binaryPath,
+    tunnelId,
+    apiKey,
+    mcpUrl,
+    controlPlaneBaseUrl,
+    pollTimeoutMs,
+  }) {
     if (this.child) return this.status();
-    this.validateConfig({ binaryPath, tunnelId, apiKey, mcpUrl });
+    this.validateConfig({
+      binaryPath,
+      tunnelId,
+      apiKey,
+      mcpUrl,
+      controlPlaneBaseUrl,
+      pollTimeoutMs,
+    });
     this.clearRestartTimer();
-    this.config = { binaryPath, tunnelId, mcpUrl };
+    this.config = {
+      binaryPath,
+      tunnelId,
+      mcpUrl,
+      ...(controlPlaneBaseUrl ? { controlPlaneBaseUrl } : {}),
+      ...(pollTimeoutMs ? { pollTimeoutMs: Number(pollTimeoutMs) } : {}),
+    };
     this.apiKey = apiKey;
     this.desiredRunning = true;
     this.restartAttempts = 0;

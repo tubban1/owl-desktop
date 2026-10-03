@@ -124,6 +124,12 @@ export default function App() {
   const durableMcpReady =
     snapshot?.cloudMcp?.configured === true &&
     snapshot?.cloudMcp?.consumer?.ready === true;
+  const managedTunnelSelected =
+    settings?.connectivityMode === "managed_tunnel";
+  const managedTunnelReady =
+    managedTunnelSelected &&
+    tunnelTransportReady &&
+    Boolean(snapshot?.tunnel.controlPlaneBaseUrl);
   const remoteTransportReady =
     settings?.connectivityMode === "custom_tunnel"
       ? tunnelTransportReady
@@ -668,7 +674,7 @@ export default function App() {
               <div className="component-list">
                 <div><span className="component-icon"><Boxes size={17} /></span><p><strong>Local engine</strong><small>{runtimeVersion}</small></p><StatusPill online={online} /></div>
                 <div><span className="component-icon"><Terminal size={17} /></span><p><strong>Local MCP</strong><small>{snapshot?.mcp.status === "running" ? "Local execution bridge is serving" : snapshot?.mcp.error ?? "Local bridge unavailable"}</small></p><StatusPill online={snapshot?.mcp.status === "running"} /></div>
-                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>Remote path</strong><small>{settings?.connectivityMode === "custom_tunnel" ? (tunnelTransportReady ? "Custom OpenAI Tunnel reachable" : "Custom Tunnel not proven") : (durableMcpReady ? "OWL Cloud Durable MCP ready" : "Durable Cloud path not proven")}</small></p><StatusPill online={remoteTransportReady} /></div>
+                <div><span className="component-icon"><Cloud size={17} /></span><p><strong>Remote path</strong><small>{settings?.connectivityMode === "custom_tunnel" ? (tunnelTransportReady ? "Custom OpenAI Tunnel reachable" : "Custom Tunnel not proven") : managedTunnelSelected ? (durableMcpReady ? (managedTunnelReady ? "OWL Cloud Durable MCP ready · Managed Tunnel ready" : "OWL Cloud Durable MCP ready · Managed Tunnel standby") : "Durable Cloud path not proven") : (durableMcpReady ? "OWL Cloud Durable MCP ready" : "Durable Cloud path not proven")}</small></p><StatusPill online={remoteTransportReady} /></div>
                 <div><span className="component-icon"><Cloud size={17} /></span><p><strong>OWL LAB account</strong><small>{accountConnected ? "Signed in · Cloud device connected" : cloudOnline ? "Cloud connected · account sign-in required" : "Cloud connection unavailable"}</small></p>{accountConnected ? <StatusPill online /> : <span className="neutral-pill">{cloudOnline ? (cloudAccount?.status?.replaceAll("_", " ") ?? "sign-in required") : cloudStatusLabel}</span>}</div>
                 <div><span className="component-icon"><ShieldCheck size={17} /></span><p><strong>Authorization</strong><small>{runtimeAccess?.state === "READY" ? (runtimeAccess?.grant?.signatureVerified ? "Cloud-signed Runtime access" : "Runtime access ready") : runtimeAccess?.reasonCode ?? "Runtime access unavailable"}</small></p><span className={"neutral-pill " + (runtimeAccess?.state === "READY" ? "" : "warning-pill")}>{runtimeAccess?.state?.toLowerCase() ?? "unknown"}</span></div>
               </div>
@@ -1123,7 +1129,8 @@ export default function App() {
             <div className="setting-row"><div><strong>Auto-connect Runtime</strong><span>Probe Runtime when OWL LAB Desktop starts.</span></div><Toggle checked={settings.autoConnectRuntime} onChange={(v) => saveSettings({ autoConnectRuntime: v })} /></div>
             <div className="setting-row"><div><strong>OWL MCP</strong><span>Run the ChatGPT/MCP compatibility adapter with the Desktop lifecycle.</span></div><Toggle checked={settings.mcpEnabled} onChange={(v) => saveSettings({ mcpEnabled: v })} /></div>
             <div className="setting-row"><div><strong>MCP port</strong><span>Loopback port used by OWL MCP and OWL Tunnel.</span></div><input className="setting-input" type="number" min="1024" max="65535" value={settings.mcpPort} onChange={(e) => setSettings({ ...settings, mcpPort: Number(e.target.value) })} onBlur={() => saveSettings({ mcpPort: settings.mcpPort })} /></div>
-            <div className="setting-row"><div><strong>Remote connection</strong><span>OWL Cloud Durable MCP is the production default. Custom OpenAI Tunnel remains available for advanced/self-managed deployments.</span></div><select className="setting-input" value={settings.connectivityMode} onChange={(e) => void saveSettings({ connectivityMode: e.target.value as Settings["connectivityMode"] })}><option value="cloud_durable">OWL Cloud · Durable (recommended)</option><option value="custom_tunnel">Custom OpenAI Tunnel · Advanced</option></select></div>
+            <div className="setting-row"><div><strong>Remote connection</strong><span>OWL Cloud Durable MCP remains the production correctness path. Managed Tunnel is an optional OWL-provided acceleration path; Custom Tunnel remains advanced/self-managed.</span></div><select className="setting-input" value={settings.connectivityMode} onChange={(e) => void saveSettings({ connectivityMode: e.target.value as Settings["connectivityMode"] })}><option value="cloud_durable">OWL Cloud · Durable (recommended)</option><option value="managed_tunnel">OWL Managed Tunnel</option><option value="custom_tunnel">Custom OpenAI Tunnel · Advanced</option></select></div>
+            {settings.connectivityMode === "managed_tunnel" && <div className="contract-note compact-note"><ShieldCheck size={17} /><div><strong>No OpenAI API key is stored on this Mac.</strong><p>OWL Cloud provisions the Tunnel for this device and keeps the OpenAI Admin/Runtime credentials server-side. This Mac authenticates only with its existing OWL device credential.</p></div></div>}
             {settings.connectivityMode === "custom_tunnel" && <>
               <div className="setting-row"><div><strong>Custom Tunnel</strong><span>Run your own OpenAI Secure MCP Tunnel to this Desktop's local MCP endpoint.</span></div><Toggle checked={settings.tunnelEnabled} onChange={(v) => saveSettings({ tunnelEnabled: v })} /></div>
               <div className="setting-row"><div><strong>Tunnel auto-start</strong><span>Start the custom tunnel after Desktop and MCP are ready.</span></div><Toggle checked={settings.tunnelAutoStart} onChange={(v) => saveSettings({ tunnelAutoStart: v })} /></div>

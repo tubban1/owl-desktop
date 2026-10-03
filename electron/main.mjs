@@ -35,6 +35,7 @@ import { RuntimeAgentRequestEventConsumer } from "./services/runtime-agent-reque
 import { RuntimeAgentRequestEventBridge } from "./services/runtime-agent-request-event-bridge.mjs";
 import { createTunnelRecoveryPlan } from "./services/tunnel-recovery-plan.mjs";
 import { ConnectivityHostLaunchAgent } from "./services/connectivity-host-launch-agent.mjs";
+import { buildManagedTunnelConfig } from "./services/managed-tunnel-config.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let storageLayout;
@@ -463,6 +464,113 @@ async function syncConnectionHostCloudMcp() {
   });
 }
 
+async function resolveManagedTunnelConfig(
+  settings = store.getSettings(),
+  { mcpPort = settings.mcpPort } = {},
+) {
+  if (settings.connectivityMode !== "managed_tunnel") {
+    return {
+      projection: {
+        mode: "cloud_durable",
+        managedTunnel: {
+          available: false,
+          state: "disabled",
+          reason: "managed_tunnel_not_selected",
+        },
+      },
+      config: null,
+    };
+  }
+
+  const deviceCredential = cloudDeviceCredential();
+  if (
+    settings.cloudEnabled !== true ||
+    !settings.cloudBaseUrl?.trim() ||
+    !settings.cloudDeviceId?.trim() ||
+    !deviceCredential
+  ) {
+    return {
+      projection: {
+        mode: "cloud_durable",
+        managedTunnel: {
+          available: false,
+          state: "not_configured",
+          reason: "cloud_device_enrollment_incomplete",
+        },
+      },
+      config: null,
+    };
+  }
+
+  const cloud = new CloudHttpClient({
+    baseUrl: settings.cloudBaseUrl.trim(),
+    deviceCredential,
+  });
+  const projection = await cloud.connectivityBootstrap();
+  return {
+    projection,
+    config: buildManagedTunnelConfig({
+      projection,
+      deviceCredential,
+      binaryPath: effectiveTunnelBinary(settings),
+      mcpUrl: `http://127.0.0.1:${mcpPort}/mcp`,
+    }),
+  };
+}
+
+async function reconcileManagedTunnel({
+  settings = store.getSettings(),
+  client = connectionHostClient,
+  currentTunnel = null,
+  mcpPort = settings.mcpPort,
+  forceRestart = false,
+} = {}) {
+  if (settings.connectivityMode !== "managed_tunnel") return null;
+  const resolved = await resolveManagedTunnelConfig(settings, { mcpPort });
+  const status =
+    currentTunnel ??
+    (client ? (await client.health())?.tunnel ?? null : tunnelSupervisor?.status());
+
+  if (!resolved.config) {
+    if (
+      status?.desiredRunning === true ||
+      ["running", "restarting"].includes(status?.state)
+    ) {
+      if (client) await client.stopTunnel();
+      else await tunnelSupervisor?.stop();
+    }
+    record("info", "managed-tunnel", "Managed Tunnel is not active; Durable MCP remains primary", {
+      state: resolved.projection?.managedTunnel?.state ?? "unknown",
+      reason: resolved.projection?.managedTunnel?.reason ?? null,
+    });
+    return {
+      projection: resolved.projection,
+      tunnel: client ? (await client.health())?.tunnel ?? null : tunnelSupervisor?.status(),
+    };
+  }
+
+  const sameManagedControlPlane =
+    status?.controlPlaneBaseUrl === resolved.config.controlPlaneBaseUrl;
+  const tunnelRunning = ["running", "restarting"].includes(status?.state);
+  let tunnel = status;
+  if (forceRestart || !tunnelRunning || !sameManagedControlPlane) {
+    tunnel =
+      client
+        ? tunnelRunning || status?.desiredRunning === true
+          ? await client.restartTunnel(resolved.config)
+          : await client.startTunnel(resolved.config)
+        : tunnelRunning || status?.desiredRunning === true
+          ? await tunnelSupervisor.restart(resolved.config)
+          : await tunnelSupervisor.start(resolved.config);
+  }
+  record("info", "managed-tunnel", "OWL Managed Tunnel reconciled", {
+    state: resolved.projection?.managedTunnel?.state ?? "active",
+    controlPlane: "owl-cloud",
+    credentialSource: "device",
+  });
+  return { projection: resolved.projection, tunnel };
+}
+
 function cloudAccountClient() {
   const settings = store.getSettings();
   return new CloudHttpClient({
@@ -681,6 +789,13 @@ async function completeCloudAccountLogin(url) {
         code: error?.code ?? error?.name ?? "ERROR",
       });
     });
+    if (store.getSettings().connectivityMode === "managed_tunnel") {
+      await reconcileManagedTunnel().catch((error) => {
+        record("warn", "managed-tunnel", "Managed Tunnel activation after enrollment failed", {
+          code: error?.code ?? error?.name ?? "ERROR",
+        });
+      });
+    }
     mainWindow?.webContents?.send("cloud:account-updated", cloudAccountSnapshot());
     return cloudAccountSnapshot();
   } catch (error) {
@@ -1529,13 +1644,28 @@ function registerIpc() {
       };
     }
     const cloudMcp = await syncConnectionHostCloudMcp();
+    let managedTunnel = null;
+    if (settings.connectivityMode === "managed_tunnel") {
+      managedTunnel = await reconcileManagedTunnel({ settings }).catch((error) => ({
+        projection: {
+          mode: "cloud_durable",
+          managedTunnel: {
+            available: false,
+            state: "failed",
+            reason: error?.code ?? error?.name ?? "managed_tunnel_recovery_failed",
+          },
+        },
+        tunnel: null,
+      }));
+    }
     const host = externalConnectionHostEnabled
       ? await refreshConnectionHost()
       : null;
     return {
-      mode: "cloud_durable",
-      tunnel: host?.tunnel ?? null,
+      mode: settings.connectivityMode,
+      tunnel: host?.tunnel ?? managedTunnel?.tunnel ?? null,
       cloudMcp: host?.cloudMcp ?? cloudMcp ?? null,
+      managedTunnel: managedTunnel?.projection ?? null,
     };
   });
   ipcMain.handle("cloud:devices:list", () =>
@@ -1795,7 +1925,14 @@ function registerIpc() {
       "tunnelId" in (patch ?? {}) ||
       "mcpPort" in (patch ?? {})
     ) {
-      if (
+      if (next.connectivityMode === "managed_tunnel") {
+        await reconcileManagedTunnel({ settings: next }).catch((error) => {
+          record("warn", "managed-tunnel", "Managed Tunnel sync failed", {
+            code: error?.code ?? error?.name ?? "ERROR",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+      } else if (
         next.connectivityMode === "custom_tunnel" &&
         next.tunnelEnabled &&
         next.tunnelAutoStart
@@ -1858,7 +1995,10 @@ function registerIpc() {
     }
     if (meta.name === "OWL_TUNNEL_API_KEY") {
       const settings = store.getSettings();
-      if (settings.tunnelEnabled) {
+      if (
+        settings.connectivityMode === "custom_tunnel" &&
+        settings.tunnelEnabled
+      ) {
         await restartTunnel({
           binaryPath: effectiveTunnelBinary(settings),
           tunnelId: settings.tunnelId,
@@ -1873,6 +2013,16 @@ function registerIpc() {
         await startCloudBridge();
       }
       await syncConnectionHostCloudMcp();
+      if (settings.connectivityMode === "managed_tunnel") {
+        await reconcileManagedTunnel({
+          settings,
+          forceRestart: true,
+        }).catch((error) => {
+          record("warn", "managed-tunnel", "Managed Tunnel credential refresh failed", {
+            code: error?.code ?? error?.name ?? "ERROR",
+          });
+        });
+      }
     }
     return meta;
   });
@@ -1891,11 +2041,18 @@ function registerIpc() {
       if (settings.autoConnectRuntime) await startRuntimeEventBridge();
     }
     if (existing?.name === "OWL_TUNNEL_API_KEY") {
-      await stopTunnel();
+      const settings = store.getSettings();
+      if (settings.connectivityMode === "custom_tunnel") {
+        await stopTunnel();
+      }
     }
     if (existing?.name === "OWL_CLOUD_DEVICE_CREDENTIAL") {
+      const settings = store.getSettings();
       await stopCloudBridge();
       await syncConnectionHostCloudMcp();
+      if (settings.connectivityMode === "managed_tunnel") {
+        await stopTunnel();
+      }
     }
     return result;
   });
@@ -1914,29 +2071,52 @@ async function runConnectivityRecoveryOnly() {
     baseUrl: externalConnectionHostUrl,
     token: externalConnectionHostToken,
   });
-  const result = { tunnel: null, cloudMcp: null };
+  const result = { tunnel: null, cloudMcp: null, managedTunnel: null };
 
-  const plan = createTunnelRecoveryPlan({
-    settings,
-    apiKey: tunnelApiKey(),
-    binaryPath:
-      process.env.OWL_TUNNEL_BINARY?.trim() || effectiveTunnelBinary(settings),
-    mcpUrl:
-      process.env.OWL_MCP_URL?.trim() ||
-      `http://127.0.0.1:${settings.mcpPort}/mcp`,
-  });
-
-  if (plan.action === "skip") {
-    result.tunnel = plan;
-    console.log(`Tunnel recovery skipped: ${plan.reason}.`);
-  } else {
-    const status = await client.startTunnel(plan.config);
-    result.tunnel = status;
+  if (settings.connectivityMode === "managed_tunnel") {
+    const managed = await reconcileManagedTunnel({
+      settings,
+      client,
+      mcpPort: settings.mcpPort,
+      forceRestart: true,
+    });
+    result.tunnel = managed?.tunnel ?? null;
+    result.managedTunnel = managed?.projection ?? null;
     console.log(
-      `Tunnel recovery applied: ${status?.state ?? "unknown"}${
-        status?.pid ? ` · PID ${status.pid}` : ""
-      }.`,
+      `Managed Tunnel recovery ${
+        managed?.projection?.managedTunnel?.available ? "applied" : "deferred"
+      }: ${managed?.projection?.managedTunnel?.state ?? "unknown"}.`,
     );
+  } else if (settings.connectivityMode === "custom_tunnel") {
+    const plan = createTunnelRecoveryPlan({
+      settings,
+      apiKey: tunnelApiKey(),
+      binaryPath:
+        process.env.OWL_TUNNEL_BINARY?.trim() || effectiveTunnelBinary(settings),
+      mcpUrl:
+        process.env.OWL_MCP_URL?.trim() ||
+        `http://127.0.0.1:${settings.mcpPort}/mcp`,
+    });
+
+    if (plan.action === "skip") {
+      result.tunnel = plan;
+      console.log(`Tunnel recovery skipped: ${plan.reason}.`);
+    } else {
+      const status = await client.startTunnel(plan.config);
+      result.tunnel = status;
+      console.log(
+        `Tunnel recovery applied: ${status?.state ?? "unknown"}${
+          status?.pid ? ` · PID ${status.pid}` : ""
+        }.`,
+      );
+    }
+  } else {
+    await client.stopTunnel().catch(() => undefined);
+    result.tunnel = {
+      action: "skip",
+      reason: "cloud_durable_mode",
+    };
+    console.log("Tunnel recovery skipped: Cloud Durable MCP mode.");
   }
 
   const deviceCredential = cloudDeviceCredential();
@@ -2016,26 +2196,35 @@ async function runConnectivityHostOnly() {
       const current = store.getSettings();
       const health = await client.health();
 
-      const wantsTunnel =
-        current.connectivityMode === "custom_tunnel" &&
-        current.tunnelEnabled === true &&
-        current.tunnelAutoStart === true &&
-        Boolean(current.tunnelId?.trim()) &&
-        Boolean(tunnelApiKey());
-      if (wantsTunnel) {
-        if (!["running", "restarting"].includes(health?.tunnel?.state)) {
-          await client.startTunnel({
-            binaryPath: effectiveTunnelBinary(current),
-            tunnelId: current.tunnelId,
-            apiKey: tunnelApiKey(),
-            mcpUrl: `http://127.0.0.1:${process.env.OWL_MCP_PORT}/mcp`,
-          });
+      if (current.connectivityMode === "managed_tunnel") {
+        await reconcileManagedTunnel({
+          settings: current,
+          client,
+          currentTunnel: health?.tunnel ?? null,
+          mcpPort: Number(process.env.OWL_MCP_PORT),
+        });
+      } else {
+        const wantsTunnel =
+          current.connectivityMode === "custom_tunnel" &&
+          current.tunnelEnabled === true &&
+          current.tunnelAutoStart === true &&
+          Boolean(current.tunnelId?.trim()) &&
+          Boolean(tunnelApiKey());
+        if (wantsTunnel) {
+          if (!["running", "restarting"].includes(health?.tunnel?.state)) {
+            await client.startTunnel({
+              binaryPath: effectiveTunnelBinary(current),
+              tunnelId: current.tunnelId,
+              apiKey: tunnelApiKey(),
+              mcpUrl: `http://127.0.0.1:${process.env.OWL_MCP_PORT}/mcp`,
+            });
+          }
+        } else if (
+          health?.tunnel?.state !== "stopped" ||
+          health?.tunnel?.desiredRunning === true
+        ) {
+          await client.stopTunnel();
         }
-      } else if (
-        health?.tunnel?.state !== "stopped" ||
-        health?.tunnel?.desiredRunning === true
-      ) {
-        await client.stopTunnel();
       }
 
       const deviceCredential = cloudDeviceCredential();
@@ -2610,7 +2799,9 @@ if (packagedConnectivityHostSoakOnly) {
     }
     if (
       devForceConnectivity ||
-      (settings.tunnelEnabled && settings.tunnelAutoStart)
+      (settings.connectivityMode === "custom_tunnel" &&
+        settings.tunnelEnabled &&
+        settings.tunnelAutoStart)
     ) {
       await startTunnel().catch((error) => {
         record("error", "tunnel", "Tunnel auto-start failed", {
@@ -2629,6 +2820,13 @@ if (packagedConnectivityHostSoakOnly) {
           message: error instanceof Error ? error.message : String(error),
         });
       });
+      if (settings.connectivityMode === "managed_tunnel") {
+        await reconcileManagedTunnel({ settings }).catch((error) => {
+          record("warn", "managed-tunnel", "Managed Tunnel startup reconciliation failed", {
+            code: error?.code ?? error?.name ?? "ERROR",
+          });
+        });
+      }
     }
 
     app.on("activate", () => {
