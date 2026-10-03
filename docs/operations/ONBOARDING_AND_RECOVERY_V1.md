@@ -59,7 +59,7 @@ Normal user action:
 [ Connect ChatGPT ]
 ```
 
-Cloud provisions tunnel identity and a rotating credential. Desktop owns tunnel lifecycle. Normal users never type Tunnel ID, OWL_TUNNEL_API_KEY, MCP port, Tunnel binary path or Runtime endpoint.
+Cloud Durable MCP is connected first and remains the correctness path. When OWL Managed Tunnel is enabled for the account/workspace, Cloud provisions the Tunnel identity and Desktop reuses its existing OS-encrypted OWL device credential to authenticate to the OWL Tunnel proxy. OWL OpenAI Admin/Runtime credentials remain server-side. Normal users never type Tunnel ID, OWL_TUNNEL_API_KEY, MCP port, Tunnel binary path or Runtime endpoint.
 
 ### 4. Permissions
 
@@ -85,7 +85,7 @@ ChatGPT can securely work on this Mac.
 | CHATGPT_CONNECTION_REQUIRED | Local execution ready but remote MCP transport absent | Connect ChatGPT |
 | PERMISSION_REQUIRED | Requested capability needs macOS permission | Grant permission |
 | DEGRADED | Core work available but recoverable support/Cloud issue exists | View issue |
-| READY | Account + Runtime + execution lease + MCP/tunnel ready | Start working |
+| READY | Account + Runtime + execution lease + local MCP + Cloud Durable MCP proven; optional Managed Tunnel is secondary | Start working |
 
 Overview should show one aggregate product state and one next action. Component badges remain secondary diagnostics.
 
@@ -192,7 +192,7 @@ raw transport diagnostics
 
 - **Repair Runtime** — validate release, native apps, plist, launchd and health.
 - **Reauthorize Runtime** — refresh Cloud effective access and project a new lease.
-- **Reconnect ChatGPT** — rotate/re-provision tunnel credential and restart tunnel.
+- **Reconnect ChatGPT** — recover Cloud Durable MCP first; if Managed Tunnel is enabled, re-bootstrap its device binding/proxy path; Custom Tunnel recovery remains an Advanced action.
 - **Test connection** — run a harmless read/write/verification in a temporary file.
 - **Export diagnostics** — create one redacted support bundle with versions, readiness, launchd status, Runtime logs and recent Desktop events.
 

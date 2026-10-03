@@ -37,6 +37,23 @@ For normal users.
 
 This is the default for fresh installations.
 
+### `managed_tunnel` — OWL-managed acceleration
+
+For users who want Tunnel convenience without handling OpenAI credentials.
+
+- Cloud provisions and persists the device's OpenAI Tunnel identity.
+- Desktop uses its existing OWL device credential only.
+- The vendored `tunnel-client` points to the OWL Cloud Tunnel proxy.
+- OWL Cloud validates `deviceId <-> tunnelId` and substitutes a server-side
+  OpenAI Runtime credential upstream.
+- OWL OpenAI Admin/Runtime credentials never leave Cloud.
+- If provisioning or the managed Tunnel path is unavailable, Cloud Durable MCP
+  remains the production correctness path.
+
+This mode is implemented but must remain disabled in an environment until an
+OWL-owned OpenAI Tunnel Admin credential, Runtime credential and intended
+ChatGPT workspace ID(s) are configured and dogfooded.
+
 ### `custom_tunnel` — advanced / self-managed
 
 For developers, enterprise operators or users who intentionally manage their
@@ -54,25 +71,33 @@ It never writes the key into settings, logs or LaunchAgent plist.
 Existing installations that already have an enabled Tunnel ID migrate to this
 mode so the cutover does not silently break a working connection.
 
-## Managed OWL Tunnel
+## Managed OWL Tunnel implementation
 
-OWL LAB may add an OWL-managed Tunnel accelerator later, but it MUST NOT be
-implemented by embedding or distributing one shared OWL OpenAI API key.
+The server-side proxy design is now implemented.
 
-The currently vendored OpenAI `tunnel-client` authenticates its control-plane
-poll/response loop with an OpenAI Runtime API key. OpenAI API security
-guidance says API keys must not be exposed in client-side applications.
+```text
+Desktop tunnel-client
+  api-key = OWL device credential
+  base-url = OWL Cloud /tunnel
+        ↓
+OWL Cloud
+  authenticate device
+  verify bound tunnelId
+  replace Authorization
+        ↓
+OpenAI Tunnel control plane
+  server-side OWL Runtime credential
+```
 
-Therefore an OWL-managed accelerator needs one of these safe designs:
+Tunnel creation uses a separate server-side OWL OpenAI Admin credential and
+explicit ChatGPT workspace ID(s). No shared or per-device OpenAI API key is
+distributed to Desktop.
 
-1. a server-side OWL transport proxy that keeps the OpenAI runtime credential
-   server-side and authenticates enrolled OWL devices separately; or
-2. a future OpenAI-supported short-lived workload/device credential accepted
-   by the tunnel runtime without distributing an OWL long-lived API key.
+The detailed Cloud contract is
+`owl-cloud/docs/architecture/MANAGED_TUNNEL_V1.md`.
 
-Until that boundary is implemented and verified, OWL-managed Tunnel is not a
-release dependency because `cloud_durable` already supplies the managed
-production path.
+Managed Tunnel is still not a release dependency because `cloud_durable`
+already supplies the production correctness path.
 
 ## Readiness
 
@@ -91,8 +116,9 @@ AND Cloud durable MCP poll proven
 `process alive`, `listener exists`, or `Tunnel running` alone are never
 sufficient readiness proofs.
 
-`custom_tunnel` uses Tunnel end-to-end reachability as its remote transport
-readiness predicate.
+`managed_tunnel` keeps product readiness anchored to Cloud Durable MCP; managed
+Tunnel reachability is an additional acceleration fact. `custom_tunnel` uses
+Tunnel end-to-end reachability as its remote transport readiness predicate.
 
 ## Secret boundaries
 
@@ -101,6 +127,8 @@ readiness predicate.
 | OWL account identity | canonical | session/cache |
 | OWL device ID | canonical | cached |
 | OWL device credential | verifier / revocation state | OS-encrypted secret |
+| Managed Tunnel ID/binding | canonical | runtime projection/cache only |
+| Managed Tunnel proxy auth | validates device credential | existing OWL device credential |
 | Custom Tunnel ID | optional metadata only | local config |
 | Custom OpenAI Runtime API key | never | OS-encrypted secret |
 | OWL OpenAI Admin/Runtime credentials | server-side secret manager only | never |
