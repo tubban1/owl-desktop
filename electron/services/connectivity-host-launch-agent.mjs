@@ -7,6 +7,29 @@ import { performance } from "node:perf_hooks";
 
 const execFileAsync = promisify(execFile);
 
+const SAFE_ENVIRONMENT_KEYS = new Set([
+  "OWL_CONNECTIVITY_HOST_STORE_ROOT",
+  "OWL_CONNECTION_HOST_PORT",
+  "OWL_MCP_PORT",
+  "OWL_DESKTOP_USER_DATA_DIR",
+  "OWL_DESKTOP_CAPABILITY_BRIDGE_PORT",
+]);
+
+function safeEnvironmentVariables(input = {}) {
+  return Object.fromEntries(
+    Object.entries(input)
+      .filter(([, value]) => value !== undefined && value !== null && String(value).trim())
+      .map(([key, value]) => {
+        if (!SAFE_ENVIRONMENT_KEYS.has(key)) {
+          throw new Error(
+            `ConnectivityHostLaunchAgent refuses non-allowlisted environment key: ${key}`,
+          );
+        }
+        return [key, String(value).trim()];
+      }),
+  );
+}
+
 function xml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -22,6 +45,9 @@ export class ConnectivityHostLaunchAgent {
     homeDir = os.homedir(),
     uid = process.getuid?.() ?? 501,
     launchdLabel = "ai.owl.desktop.connectivity-host",
+    environmentVariables = {},
+    throttleIntervalSeconds = 5,
+    logDir,
     execFileImpl = execFileAsync,
     skipLaunchd = false,
     monotonicNow = () => performance.now(),
@@ -34,6 +60,11 @@ export class ConnectivityHostLaunchAgent {
     this.homeDir = homeDir;
     this.uid = uid;
     this.launchdLabel = launchdLabel;
+    this.environmentVariables = safeEnvironmentVariables(environmentVariables);
+    this.throttleIntervalSeconds = Math.max(
+      1,
+      Math.min(60, Math.floor(Number(throttleIntervalSeconds) || 5)),
+    );
     this.execFileImpl = execFileImpl;
     this.skipLaunchd = skipLaunchd;
     this.monotonicNow = monotonicNow;
@@ -44,16 +75,25 @@ export class ConnectivityHostLaunchAgent {
       "LaunchAgents",
       `${launchdLabel}.plist`,
     );
-    this.logDir = path.join(
-      homeDir,
-      "Library",
-      "Logs",
-      "OWL LAB",
-      "connectivity-host",
-    );
+    this.logDir = logDir
+      ? path.resolve(logDir)
+      : path.join(
+          homeDir,
+          "Library",
+          "Logs",
+          "OWL LAB",
+          "connectivity-host",
+        );
   }
 
   plist() {
+    const environmentEntries = Object.entries(this.environmentVariables)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(
+        ([key, value]) =>
+          `    <key>${xml(key)}</key>\n    <string>${xml(value)}</string>`,
+      )
+      .join("\n");
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -68,6 +108,7 @@ export class ConnectivityHostLaunchAgent {
   <dict>
     <key>OWL_CONNECTIVITY_HOST_ONLY</key>
     <string>true</string>
+${environmentEntries ? `\n${environmentEntries}` : ""}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -76,7 +117,7 @@ export class ConnectivityHostLaunchAgent {
   <key>ProcessType</key>
   <string>Background</string>
   <key>ThrottleInterval</key>
-  <integer>5</integer>
+  <integer>${this.throttleIntervalSeconds}</integer>
   <key>StandardOutPath</key>
   <string>${xml(path.join(this.logDir, "stdout.log"))}</string>
   <key>StandardErrorPath</key>

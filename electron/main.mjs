@@ -53,6 +53,8 @@ const cloudMcpLiveProbeOnly =
   process.env.OWL_CLOUD_MCP_LIVE_PROBE_ONLY === "true";
 const packagedConnectivityHostLiveProbeOnly =
   process.env.OWL_PACKAGED_CONNECTIVITY_HOST_LIVE_PROBE_ONLY === "true";
+const packagedConnectivityHostSoakOnly =
+  process.env.OWL_PACKAGED_CONNECTIVITY_HOST_SOAK_ONLY === "true";
 const connectivityHostOnly =
   process.env.OWL_CONNECTIVITY_HOST_ONLY === "true";
 const desktopCapabilityBridgePort = Number(
@@ -1964,7 +1966,10 @@ async function runConnectivityRecoveryOnly() {
 }
 
 async function runConnectivityHostOnly() {
-  store = new DesktopStore({ root: canonicalDesktopRoot() });
+  const connectivityStoreRoot =
+    process.env.OWL_CONNECTIVITY_HOST_STORE_ROOT?.trim() ||
+    canonicalDesktopRoot();
+  store = new DesktopStore({ root: connectivityStoreRoot });
   const settings = store.getSettings();
   const controlToken = connectivityHostControlToken();
   if (!controlToken) {
@@ -1980,14 +1985,16 @@ async function runConnectivityHostOnly() {
   else delete process.env.OWL_RUNTIME_API_TOKEN;
   if (localMcpToken) process.env.OWL_MCP_API_TOKEN = localMcpToken;
   else delete process.env.OWL_MCP_API_TOKEN;
-  process.env.OWL_MCP_PORT = String(settings.mcpPort);
+  process.env.OWL_MCP_PORT =
+    process.env.OWL_MCP_PORT?.trim() || String(settings.mcpPort);
   process.env.OWL_CONNECTION_HOST_PORT =
     process.env.OWL_CONNECTION_HOST_PORT?.trim() || "8791";
   process.env.OWL_CONNECTION_HOST_CONTROL_TOKEN = controlToken;
   process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_URL =
     `http://127.0.0.1:${desktopCapabilityBridgePort}`;
   process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_TOKEN = controlToken;
-  process.env.OWL_DESKTOP_USER_DATA_DIR = canonicalDesktopRoot();
+  process.env.OWL_DESKTOP_USER_DATA_DIR =
+    process.env.OWL_DESKTOP_USER_DATA_DIR?.trim() || connectivityStoreRoot;
   if (settings.sessionId) {
     process.env.OWL_DESKTOP_FALLBACK_OWNER_ID = settings.sessionId;
   } else {
@@ -2021,7 +2028,7 @@ async function runConnectivityHostOnly() {
             binaryPath: effectiveTunnelBinary(current),
             tunnelId: current.tunnelId,
             apiKey: tunnelApiKey(),
-            mcpUrl: `http://127.0.0.1:${current.mcpPort}/mcp`,
+            mcpUrl: `http://127.0.0.1:${process.env.OWL_MCP_PORT}/mcp`,
           });
         }
       } else if (
@@ -2082,7 +2089,7 @@ async function runConnectivityHostOnly() {
       service: "owl-connectivity-host",
       pid: process.pid,
       controlUrl: `http://127.0.0.1:${process.env.OWL_CONNECTION_HOST_PORT}`,
-      mcpPort: settings.mcpPort,
+      mcpPort: Number(process.env.OWL_MCP_PORT),
       secretSource: "electron-safeStorage",
       secretsPrinted: false,
     }),
@@ -2358,11 +2365,37 @@ const hasLock =
   connectivityRecoveryOnly ||
   cloudMcpLiveProbeOnly ||
   packagedConnectivityHostLiveProbeOnly ||
+  packagedConnectivityHostSoakOnly ||
   connectivityHostOnly
     ? true
     : app.requestSingleInstanceLock();
 
-if (packagedConnectivityHostLiveProbeOnly) {
+if (packagedConnectivityHostSoakOnly) {
+  const soakProfileRoot = path.join(
+    os.tmpdir(),
+    `owl-packaged-connectivity-soak-profile-${process.pid}`,
+  );
+  app.setPath("userData", soakProfileRoot);
+  app.setPath("sessionData", path.join(soakProfileRoot, "session"));
+  app
+    .whenReady()
+    .then(async () => {
+      app.dock?.hide();
+      const { runPackagedConnectivityHostSoak } = await import(
+        "../scripts/verify-packaged-connectivity-host-soak.mjs"
+      );
+      await runPackagedConnectivityHostSoak();
+      app.exit(0);
+    })
+    .catch((error) => {
+      console.error(
+        `Packaged Connectivity Host soak failed: ${
+          error instanceof Error ? error.stack || error.message : String(error)
+        }`,
+      );
+      app.exit(1);
+    });
+} else if (packagedConnectivityHostLiveProbeOnly) {
   const probeProfileRoot = path.join(
     os.tmpdir(),
     `owl-packaged-connectivity-live-profile-${process.pid}`,

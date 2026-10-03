@@ -219,7 +219,9 @@ gate.
 
 Still pending before Reliability can be declared fully closed:
 
-- a longer packaged-runtime behavioral soak, beyond structural packaging;
+- the full packaged fault matrix beyond the now-passed isolated 100-cycle
+  Connectivity Host restart soak;
+- embedded packaged Runtime lifecycle acceptance;
 - final signed/notarized distribution gate when release credentials are
   available.
 
@@ -501,8 +503,12 @@ Post-fix gate:
     packaged recovery module:   present in app.asar
 
 This closes the active-ChatGPT Connection Host/Tunnel destructive restart gate.
-The remaining Reliability items are packaged-runtime behavioral soak and the
-signed/notarized distribution gate.
+The isolated packaged Connectivity Host 100-cycle restart soak is now also
+closed separately; see
+`docs/release/PACKAGED_CONNECTIVITY_HOST_RESTART_SOAK_2026-10-03.md`.
+The remaining Reliability items are the broader packaged fault matrix,
+embedded packaged Runtime lifecycle acceptance, and the signed/notarized
+distribution gate.
 
 ### Cloud durable MCP + packaged Connectivity Host acceptance — 2026-10-02
 

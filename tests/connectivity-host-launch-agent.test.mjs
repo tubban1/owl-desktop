@@ -40,6 +40,46 @@ describe("ConnectivityHostLaunchAgent", () => {
     expect(plist).not.toMatch(/TOKEN|API_KEY|DEVICE_CREDENTIAL|Bearer|owldev1\./);
   });
 
+  it("allows only non-secret isolation overrides in the LaunchAgent", () => {
+    const homeDir = tempHome();
+    const service = new ConnectivityHostLaunchAgent({
+      desktopExecPath: "/Applications/OWL LAB Desktop.app/Contents/MacOS/OWL LAB Desktop",
+      homeDir,
+      launchdLabel: "ai.owl.desktop.connectivity-host.soak",
+      throttleIntervalSeconds: 1,
+      environmentVariables: {
+        OWL_CONNECTIVITY_HOST_STORE_ROOT: "/tmp/owl-soak-store",
+        OWL_CONNECTION_HOST_PORT: "8891",
+        OWL_MCP_PORT: "8890",
+        OWL_DESKTOP_USER_DATA_DIR: "/tmp/owl-soak-data",
+      },
+      skipLaunchd: true,
+    });
+    const plist = service.plist();
+
+    expect(plist).toContain("ai.owl.desktop.connectivity-host.soak");
+    expect(plist).toContain("OWL_CONNECTION_HOST_PORT");
+    expect(plist).toContain("8891");
+    expect(plist).toContain("OWL_MCP_PORT");
+    expect(plist).toContain("8890");
+    expect(plist).toContain("<integer>1</integer>");
+    expect(plist).not.toMatch(/TOKEN|API_KEY|DEVICE_CREDENTIAL|Bearer|owldev1\./);
+  });
+
+  it("rejects secret-bearing LaunchAgent environment overrides", () => {
+    expect(
+      () =>
+        new ConnectivityHostLaunchAgent({
+          desktopExecPath: "/Applications/OWL LAB Desktop.app/Contents/MacOS/OWL LAB Desktop",
+          homeDir: tempHome(),
+          environmentVariables: {
+            OWL_MCP_API_TOKEN: "must-never-enter-plist",
+          },
+          skipLaunchd: true,
+        }),
+    ).toThrow(/refuses non-allowlisted environment key/);
+  });
+
   it("does not restart an unchanged already-loaded service", async () => {
     const homeDir = tempHome();
     const calls = [];
