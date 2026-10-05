@@ -2363,7 +2363,11 @@ export function createOwlMcpServer() {
     server,
     "send_process_input",
     "Compatibility tool: send stdin to a managed OWL Runtime process.",
-    { process_id: z.string().min(1), input: z.string() },
+    {
+      process_id: z.string().min(1),
+      input: z.string(),
+      control_token: z.string().min(20).optional(),
+    },
     {
       title: "Send Process Input",
       readOnlyHint: false,
@@ -2448,6 +2452,7 @@ export function createOwlMcpServer() {
     {
       process_id: z.string().min(1),
       signal: z.enum(["SIGTERM", "SIGKILL", "SIGINT"]).optional(),
+      control_token: z.string().min(20).optional(),
     },
     {
       title: "Kill Process",
