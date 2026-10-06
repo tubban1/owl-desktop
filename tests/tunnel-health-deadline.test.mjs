@@ -49,6 +49,10 @@ describe("Tunnel health response deadline", () => {
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const supervisor = supervisorFor(fetch);
+    // Real Node fetch/undici initialization can exceed the 50 ms synthetic
+    // deadline under load. Production uses a 2.5 s default, so keep this
+    // loopback recovery probe bounded but realistic.
+    supervisor.healthRequestTimeoutMs = 500;
     supervisor.healthBaseUrl = `http://127.0.0.1:${server.address().port}`;
     try {
       const failed = await supervisor.checkHealthNow();
