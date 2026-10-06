@@ -17,6 +17,8 @@ extraResources:
     to: owl-runtime
   - from: vendor/owl-tunnel
     to: owl-tunnel
+  - from: vendor/runtime-node
+    to: runtime-node
   - from: vendor/runtime-host
     to: runtime-host
   - from: vendor/helper

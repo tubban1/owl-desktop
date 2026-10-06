@@ -118,6 +118,7 @@ export class LocalRuntimeBootstrap {
     uid = process.getuid?.() ?? 501,
     runtimePort = 8788,
     launchdLabel = "com.owl.runtime",
+    runtimeArch = process.arch === "arm64" ? "arm64" : "x64",
     fetchImpl = fetch,
     execFileImpl = execFileAsync,
     skipLaunchd = false,
@@ -133,6 +134,10 @@ export class LocalRuntimeBootstrap {
     this.uid = uid;
     this.runtimePort = runtimePort;
     this.launchdLabel = launchdLabel;
+    if (!["arm64", "x64"].includes(runtimeArch)) {
+      throw new Error(`Unsupported OWL Runtime Node architecture: ${runtimeArch}`);
+    }
+    this.runtimeArch = runtimeArch;
     this.fetchImpl = fetchImpl;
     this.execFileImpl = execFileImpl;
     this.skipLaunchd = skipLaunchd;
@@ -143,6 +148,7 @@ export class LocalRuntimeBootstrap {
     this.currentLink = path.join(this.owlHome, "current");
     this.envFile = path.join(this.owlHome, "runtime.env");
     this.logDir = path.join(this.owlHome, "logs");
+    this.nodeRoot = path.join(this.owlHome, "node");
     this.stateRoot = path.join(homeDir, ".owl-runtime");
     this.launchAgent = path.join(
       homeDir,
@@ -164,6 +170,89 @@ export class LocalRuntimeBootstrap {
 
   resource(...parts) {
     return path.join(this.resourcesPath, ...parts);
+  }
+
+  installRuntimeNode() {
+    const source = this.resource("runtime-node", this.runtimeArch);
+    const componentFile = path.join(source, "component.json");
+    if (!fs.existsSync(componentFile)) {
+      throw new Error(
+        `Packaged OWL Runtime Node manifest is missing for ${this.runtimeArch}.`,
+      );
+    }
+    const manifest = JSON.parse(fs.readFileSync(componentFile, "utf8"));
+    if (
+      manifest.component !== "owl-runtime-node" ||
+      manifest.architecture !== this.runtimeArch ||
+      !/^v\d+\.\d+\.\d+$/.test(manifest.nodeVersion ?? "") ||
+      manifest.executable !== "bin/node" ||
+      !/^[a-f0-9]{64}$/.test(manifest.binarySha256 ?? "")
+    ) {
+      throw new Error("Packaged OWL Runtime Node manifest is invalid.");
+    }
+
+    const sourceBinary = path.join(source, manifest.executable);
+    if (!fs.existsSync(sourceBinary)) {
+      throw new Error("Packaged OWL Runtime Node executable is missing.");
+    }
+    const sourceSha = createHash("sha256")
+      .update(fs.readFileSync(sourceBinary))
+      .digest("hex");
+    if (sourceSha !== manifest.binarySha256) {
+      throw new Error(
+        `Packaged OWL Runtime Node SHA256 mismatch: expected ${manifest.binarySha256}, got ${sourceSha}`,
+      );
+    }
+
+    const destination = path.join(
+      this.nodeRoot,
+      `${manifest.nodeVersion}-${this.runtimeArch}`,
+    );
+    const destinationBinary = path.join(destination, manifest.executable);
+    const destinationManifest = path.join(destination, "component.json");
+    let changed = true;
+
+    if (fs.existsSync(destinationBinary) && fs.existsSync(destinationManifest)) {
+      try {
+        const installed = JSON.parse(
+          fs.readFileSync(destinationManifest, "utf8"),
+        );
+        const installedSha = createHash("sha256")
+          .update(fs.readFileSync(destinationBinary))
+          .digest("hex");
+        changed =
+          installed.nodeVersion !== manifest.nodeVersion ||
+          installed.architecture !== manifest.architecture ||
+          installedSha !== manifest.binarySha256;
+      } catch {
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      fs.mkdirSync(this.nodeRoot, { recursive: true, mode: 0o700 });
+      const temp = path.join(
+        this.nodeRoot,
+        `.tmp-${manifest.nodeVersion}-${this.runtimeArch}-${process.pid}`,
+      );
+      fs.rmSync(temp, { recursive: true, force: true });
+      fs.cpSync(source, temp, { recursive: true, force: true });
+      fs.chmodSync(path.join(temp, manifest.executable), 0o755);
+      fs.rmSync(destination, { recursive: true, force: true });
+      fs.renameSync(temp, destination);
+    }
+
+    fs.chmodSync(destinationBinary, 0o755);
+    this.onEvent("info", "Runtime Node prepared", {
+      nodeVersion: manifest.nodeVersion,
+      architecture: this.runtimeArch,
+      changed,
+    });
+    return {
+      manifest,
+      binary: destinationBinary,
+      changed,
+    };
   }
 
   async ensureNativeApps() {
@@ -363,7 +452,7 @@ export class LocalRuntimeBootstrap {
     env.set("OWL_WAKE_NAME", wakeName);
     if (wakeAliases.length > 0) env.set("OWL_ALIASES", wakeAliases.join(","));
     else env.delete("OWL_ALIASES");
-    env.set("ELECTRON_RUN_AS_NODE", "1");
+    env.delete("ELECTRON_RUN_AS_NODE");
     env.set("OWL_RUNTIME_MODE", "production");
     env.set("OWL_STATE_ROOT", this.stateRoot);
     env.set("OWL_RUNTIME_ACCESS_MODE", "enforced");
@@ -402,7 +491,7 @@ export class LocalRuntimeBootstrap {
     };
   }
 
-  writeLaunchAgent() {
+  writeLaunchAgent(runtimeNode) {
     const hostBinary = path.join(
       this.runtimeHostDestination,
       "Contents",
@@ -425,7 +514,7 @@ export class LocalRuntimeBootstrap {
     <string>${xml(hostBinary)}</string>
     <string>--env-file</string>
     <string>${xml(this.envFile)}</string>
-    <string>${xml(this.desktopExecPath)}</string>
+    <string>${xml(runtimeNode.binary)}</string>
     <string>${xml(serverScript)}</string>
   </array>
   <key>WorkingDirectory</key>
@@ -587,9 +676,10 @@ export class LocalRuntimeBootstrap {
 
   async ensure() {
     const nativeApps = await this.ensureNativeApps();
+    const runtimeNode = this.installRuntimeNode();
     const release = this.installRuntimeRelease();
     const environment = this.ensureEnvironment();
-    const launchAgent = this.writeLaunchAgent();
+    const launchAgent = this.writeLaunchAgent(runtimeNode);
 
     let launchd;
     let health;
@@ -639,6 +729,11 @@ export class LocalRuntimeBootstrap {
     return {
       ok: true,
       nativeApps,
+      runtimeNode: {
+        nodeVersion: runtimeNode.manifest.nodeVersion,
+        architecture: runtimeNode.manifest.architecture,
+        changed: runtimeNode.changed,
+      },
       release,
       environment: {
         port: environment.port,

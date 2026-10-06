@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalRuntimeBootstrap } from "../electron/services/local-runtime-bootstrap.mjs";
 
@@ -43,6 +44,31 @@ function fixture() {
   );
   fs.writeFileSync(path.join(runtime, "dist", "server.js"), "console.log('runtime');\n");
   fs.writeFileSync(path.join(runtime, "package.json"), JSON.stringify({ name: "owl-runtime" }));
+
+  const runtimeArch = process.arch === "arm64" ? "arm64" : "x64";
+  const runtimeNode = path.join(resources, "runtime-node", runtimeArch);
+  const runtimeNodeBinary = path.join(runtimeNode, "bin", "node");
+  fs.mkdirSync(path.dirname(runtimeNodeBinary), { recursive: true });
+  fs.copyFileSync(process.execPath, runtimeNodeBinary);
+  fs.chmodSync(runtimeNodeBinary, 0o755);
+  const runtimeNodeSha = createHash("sha256")
+    .update(fs.readFileSync(runtimeNodeBinary))
+    .digest("hex");
+  fs.writeFileSync(
+    path.join(runtimeNode, "component.json"),
+    JSON.stringify({
+      contractVersion: 1,
+      component: "owl-runtime-node",
+      architecture: runtimeArch,
+      nodeVersion: "v22.23.3",
+      executable: "bin/node",
+      binarySha256: runtimeNodeSha,
+      sourceTarball: `node-v22.23.3-darwin-${runtimeArch}.tar.gz`,
+      sourceTarballSha256: "a".repeat(64),
+      sourceUrl: "https://nodejs.org/dist/v22.23.3/test.tgz",
+    }),
+  );
+  fs.writeFileSync(path.join(runtimeNode, "VERSION"), "v22.23.3\n");
 
   const host = path.join(resources, "runtime-host", "OWL Runtime.app");
   fs.mkdirSync(path.join(host, "Contents", "MacOS"), { recursive: true });
@@ -135,7 +161,7 @@ describe("LocalRuntimeBootstrap", () => {
     expect(env).toContain("PORT=8788");
     expect(env).toContain("OWL_WAKE_NAME=OWL");
     expect(env).toContain("OWL_ALIASES=OWL Runtime,AgentOS");
-    expect(env).toContain("ELECTRON_RUN_AS_NODE=1");
+    expect(env).not.toContain("ELECTRON_RUN_AS_NODE");
     expect(env).toContain("OWL_RUNTIME_ACCESS_MODE=enforced");
     expect(env).toContain("OWL_APPROVAL_MODE=enforce");
     expect(env).toContain("ALLOW_WRITE=true");
@@ -161,8 +187,16 @@ describe("LocalRuntimeBootstrap", () => {
     );
     expect(launchAgent).toContain("com.owl.runtime");
     expect(launchAgent).toContain("OWL Runtime.app");
-    expect(launchAgent).toContain("OWL LAB Desktop.app");
+    expect(launchAgent).toContain(
+      `.owl/node/v22.23.3-${process.arch === "arm64" ? "arm64" : "x64"}/bin/node`,
+    );
+    expect(launchAgent).not.toContain("OWL LAB Desktop.app");
     expect(launchAgent).toContain(".owl/current/dist/server.js");
+    expect(result.runtimeNode).toMatchObject({
+      nodeVersion: "v22.23.3",
+      architecture: process.arch === "arm64" ? "arm64" : "x64",
+      changed: true,
+    });
   });
 
 
@@ -429,5 +463,6 @@ describe("LocalRuntimeBootstrap", () => {
     expect(second.nativeApps.every((item) => !item.changed)).toBe(true);
     expect(fs.readFileSync(host, "utf8")).toBe("preserve-me");
     expect(second.release.changed).toBe(false);
+    expect(second.runtimeNode.changed).toBe(false);
   });
 });

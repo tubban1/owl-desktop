@@ -49,6 +49,12 @@ const runtimeContract = JSON.parse(
     "utf8",
   ),
 );
+const runtimeNodeContract = JSON.parse(
+  fs.readFileSync(
+    path.join(root, "docs/contracts/OWL_RUNTIME_NODE_COMPONENT_V1.json"),
+    "utf8",
+  ),
+);
 const runtimeManifest = JSON.parse(
   fs.readFileSync(path.join(root, "vendor/owl-runtime/component.json"), "utf8"),
 );
@@ -77,6 +83,12 @@ const packaged = (pkg.build?.extraResources ?? []).some(
 if (!packaged) {
   throw new Error("OWL Tunnel is not included in Desktop extraResources.");
 }
+const runtimeNodePackaged = (pkg.build?.extraResources ?? []).some(
+  (entry) => entry.from === "vendor/runtime-node" && entry.to === "runtime-node",
+);
+if (!runtimeNodePackaged) {
+  throw new Error("OWL Runtime Node is not included in Desktop extraResources.");
+}
 
 for (const arch of ["arm64", "x64"]) {
   const dir = path.join(root, "vendor/owl-tunnel", arch);
@@ -102,6 +114,32 @@ for (const arch of ["arm64", "x64"]) {
   const expected = arch === "arm64" ? /arm64/ : /x86_64/;
   if (!expected.test(file.stdout)) {
     throw new Error(`Tunnel binary architecture mismatch for ${arch}: ${file.stdout}`);
+  }
+}
+
+for (const arch of ["arm64", "x64"]) {
+  const dir = path.join(root, "vendor/runtime-node", arch);
+  const component = JSON.parse(
+    fs.readFileSync(path.join(dir, "component.json"), "utf8"),
+  );
+  const binary = path.join(dir, component.executable ?? "bin/node");
+  const actualSha = createHash("sha256")
+    .update(fs.readFileSync(binary))
+    .digest("hex");
+  if (
+    component.component !== "owl-runtime-node" ||
+    component.architecture !== arch ||
+    component.nodeVersion !== runtimeNodeContract.nodeVersion ||
+    component.binarySha256 !== actualSha ||
+    component.sourceTarballSha256 !== runtimeNodeContract.artifacts[arch].sha256
+  ) {
+    throw new Error(`Runtime Node manifest/hash mismatch for ${arch}.`);
+  }
+  const file = spawnSync("/usr/bin/file", [binary], { encoding: "utf8" });
+  if (file.status !== 0) throw new Error(file.stderr || "file(1) failed.");
+  const expected = arch === "arm64" ? /arm64/ : /x86_64/;
+  if (!expected.test(file.stdout)) {
+    throw new Error(`Runtime Node architecture mismatch for ${arch}: ${file.stdout}`);
   }
 }
 
