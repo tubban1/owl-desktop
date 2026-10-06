@@ -72,7 +72,11 @@ export function resolveOwnerIdentity(
   if (transport && !transport.startsWith("bootstrap:")) {
     return {
       runtimeSessionId: `owl-owner:${digest(`mcp-session:${transport}`)}`,
-      stable: true,
+      // A transport session is useful for connection isolation, but it is not
+      // a durable logical owner. ChatGPT/Tunnel may create a fresh transport
+      // between tool calls or after reconnect. Treating that identity as
+      // stable fragments one logical workflow into many Runtime owners.
+      stable: false,
       source: "transport-session",
       ...clientMetadata(headers, "mcp"),
     };

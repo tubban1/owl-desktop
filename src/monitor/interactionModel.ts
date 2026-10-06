@@ -10,7 +10,7 @@ export type McpInteraction = {
   workstreamId: string | null;
   startedAt: string | null;
   completedAt: string | null;
-  status: "running" | "success" | "error" | "progress";
+  status: "running" | "success" | "error" | "progress" | "interrupted";
   durationMs: number | null;
   requestPreview: string | null;
   responsePreview: string | null;
@@ -42,6 +42,8 @@ function clientLabel(kind: string | null, explicit: string | null): string {
 export function buildMcpInteractionFeed(
   activity: ActivityEntry[],
   limit = 30,
+  now = Date.now(),
+  runningStaleMs = 30_000,
 ): McpInteraction[] {
   const byId = new Map<string, McpInteraction>();
 
@@ -102,6 +104,18 @@ export function buildMcpInteractionFeed(
         existing.status === "error" ? text(meta.code) : null;
     }
     byId.set(id, existing);
+  }
+
+  for (const interaction of byId.values()) {
+    if (interaction.status !== "running") continue;
+    const startedAt = Date.parse(interaction.startedAt ?? "");
+    if (!Number.isFinite(startedAt) || now - startedAt <= runningStaleMs) continue;
+    interaction.status = "interrupted";
+    interaction.completedAt = new Date(startedAt + runningStaleMs).toISOString();
+    interaction.durationMs = runningStaleMs;
+    interaction.errorCode = "MCP_INTERACTION_INTERRUPTED";
+    interaction.responsePreview =
+      "No MCP response was observed before the transport interaction became stale.";
   }
 
   return [...byId.values()]

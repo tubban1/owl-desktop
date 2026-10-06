@@ -280,7 +280,9 @@ function sourceLabel(interaction: McpInteraction): string {
 
 function stateFromInteraction(interaction: McpInteraction): OperationsState {
   if (interaction.status === "running") return "active";
-  if (interaction.status === "error") return "attention";
+  if (interaction.status === "error" || interaction.status === "interrupted") {
+    return "attention";
+  }
   if (interaction.status === "progress") return "waiting";
   return "healthy";
 }
@@ -638,8 +640,9 @@ export function buildOperationsGraphModel({
   const interactions = buildMcpInteractionFeed(
     activity,
     policy.maxInteractionHistory,
+    now,
   );
-  const summaryInteractions = buildMcpInteractionFeed(activity, 200);
+  const summaryInteractions = buildMcpInteractionFeed(activity, 200, now);
   const recentInteractions = interactions.filter((interaction) => {
     if (interaction.status === "running") return true;
     const at = timestamp(interaction.completedAt ?? interaction.startedAt);

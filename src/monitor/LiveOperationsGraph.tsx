@@ -485,7 +485,11 @@ export function LiveOperationsGraph({
   const running = model.runningInteractions.length > 0;
 
   return (
-    <section className="panel live-ops-panel">
+    <section
+      className={
+        "panel live-ops-panel " + (running ? "traffic-running" : "traffic-idle")
+      }
+    >
       <div className="panel-heading live-ops-heading">
         <div>
           <span className="eyebrow">LIVE AGENT FLOW</span>
@@ -604,7 +608,7 @@ export function LiveOperationsGraph({
                         {edgeLabel}
                       </text>
                     )}
-                    {edge.state === "active" && !dimmed && (
+                    {running && edge.state === "active" && !dimmed && (
                       <circle className="network-moving-packet" r="3">
                         <animateMotion
                           dur={edge.relation === "return" ? "1.6s" : "1.25s"}

@@ -717,7 +717,9 @@ function ensureImplicitWorkstream(context, toolName, args = {}) {
     toolName === "workstream_open" ||
     CONTINUITY_DISCOVERY_TOOLS.has(toolName) ||
     isContinuityCompatibilitySkill(toolName, args) ||
-    !context.runtimeSessionId
+    !context.runtimeSessionId ||
+    !context.ownerStable ||
+    context.ownerSource === "transport-session"
   ) return null;
   const store = context.plannerContinuation;
   if (!store?.ensureImplicitWorkstream) return null;

@@ -270,7 +270,9 @@ describe("MCP workstream isolation", () => {
       name: "implicit-owner-client",
       version: "0.1.0",
     });
-    const transport = new StreamableHTTPClientTransport(new URL(mcp.url));
+    const transport = new StreamableHTTPClientTransport(new URL(mcp.url), {
+      requestInit: { headers: { "x-owl-owner-id": ownerId } },
+    });
     await client.connect(transport);
     closers.push(() => transport.close().catch(() => undefined));
 

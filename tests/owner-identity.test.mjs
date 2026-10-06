@@ -30,11 +30,11 @@ describe("OWL MCP logical owner identity", () => {
     expect(a.runtimeSessionId).not.toBe(b.runtimeSessionId);
   });
 
-  it("uses the MCP transport as a stable session identity when no owner is supplied", () => {
+  it("uses the MCP transport only as an unstable connection identity when no owner is supplied", () => {
     const a = resolveOwnerIdentity({}, "transport-1");
     const same = resolveOwnerIdentity({}, "transport-1");
     const b = resolveOwnerIdentity({}, "transport-2");
-    expect(a.stable).toBe(true);
+    expect(a.stable).toBe(false);
     expect(a.source).toBe("transport-session");
     expect(a.runtimeSessionId).toBe(same.runtimeSessionId);
     expect(a.runtimeSessionId).not.toBe(b.runtimeSessionId);

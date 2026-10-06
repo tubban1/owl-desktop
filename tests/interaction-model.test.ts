@@ -79,13 +79,41 @@ describe("buildMcpInteractionFeed", () => {
           payload: "{\"path\":\"/tmp/demo.txt\"}",
         },
       },
-    ] as any);
+    ] as any, 30, Date.parse("2026-10-02T04:00:10.000Z"));
 
     expect(feed[0]).toMatchObject({
       id: "req_running",
       status: "running",
       clientLabel: "MCP client",
       responsePreview: null,
+    });
+  });
+
+  it("marks an orphaned running request interrupted after the stale window", () => {
+    const feed = buildMcpInteractionFeed([
+      {
+        id: "1",
+        at: "2026-10-02T04:00:00.000Z",
+        level: "info",
+        source: "mcp",
+        message: "MCP interaction request",
+        meta: {
+          eventKind: "mcp_interaction",
+          interactionId: "req_stale",
+          phase: "request",
+          status: "running",
+          tool: "start_process",
+          clientKind: "chatgpt",
+          payload: "{\"command\":\"npm test\"}",
+        },
+      },
+    ] as any, 30, Date.parse("2026-10-02T04:00:31.000Z"));
+
+    expect(feed[0]).toMatchObject({
+      id: "req_stale",
+      status: "interrupted",
+      durationMs: 30_000,
+      errorCode: "MCP_INTERACTION_INTERRUPTED",
     });
   });
 });
