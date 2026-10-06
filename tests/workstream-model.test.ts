@@ -404,6 +404,175 @@ describe("buildWorkstreamBoard", () => {
     expect(release?.messages[0]?.id).toBe("cmd_worker_b");
   });
 
+
+  it("hides transport-only implicit MCP fragments from user-level workstreams", () => {
+    const input = snapshot();
+    input.mcp.sessions.push({
+      transportSessionId: "transport-fragment",
+      runtimeSessionId: "owl-owner:fragment",
+      ownerStable: true,
+      ownerSource: "transport-session",
+      clientKind: "mcp",
+      clientLabel: null,
+      createdAt: "2026-10-02T00:00:26.000Z",
+      lastSeenAt: "2026-10-02T00:00:29.500Z",
+    });
+    input.mcp.continuation.owners.push({
+      ownerId: "owl-owner:fragment",
+      clientKind: "mcp",
+      clientLabel: null,
+      ownerSource: "transport-session",
+      plannerConnected: true,
+      connectedTransportCount: 1,
+      lastTransportSeenAt: "2026-10-02T00:00:29.500Z",
+      lastDisconnectedAt: null,
+      updatedAt: "2026-10-02T00:00:29.500Z",
+      checkpoint: null,
+      latestHandoffId: null,
+      workstream: {
+        schemaVersion: 1,
+        workstreamId: "owl-owner:fragment",
+        implicit: true,
+        status: "active",
+        goal: "Interactive OWL session",
+        label: null,
+        clientKind: "mcp",
+        clientLabel: null,
+        createdAt: "2026-10-02T00:00:26.000Z",
+        updatedAt: "2026-10-02T00:00:29.500Z",
+        completedAt: null,
+        lastProgressAt: "2026-10-02T00:00:26.000Z",
+        toolStepsSinceProgress: 1,
+        totalToolSteps: 1,
+        progressEvents: [],
+        recentTools: [],
+      },
+      continuity: {
+        modelVersion: 2,
+        basis: "owl_observed_mcp_traffic",
+        risk: "low",
+        state: "healthy",
+        score: 0,
+        handoffReady: false,
+        observedChars: 1000,
+        observedTokenEquivalent: 250,
+        tokenEquivalentHeuristic: "characters_divided_by_4_not_openai_context",
+        recentGrowthChars: 1000,
+        recentGrowthTokenEquivalent: 250,
+        windowMinutes: 10,
+        duplicateChars: 0,
+        duplicateRatio: 0,
+        toolCallCount: 1,
+        sessionAgeMs: 3000,
+        workstreamAgeMs: 3000,
+        continuityEpochId: null,
+        continuityEpochStartedAt: null,
+        checkpointAgeMs: null,
+        activeTaskCount: 0,
+        reasons: [],
+      },
+    });
+
+    const board = buildWorkstreamBoard({
+      snapshot: input,
+      agentRequests: [],
+      now: Date.parse("2026-10-02T00:00:30.000Z"),
+    });
+
+    expect(
+      board.streams.some((stream) => stream.ownerId === "owl-owner:fragment"),
+    ).toBe(false);
+    expect(board.streams).toHaveLength(2);
+  });
+
+  it("promotes an implicit owner back into LIVE WORKSTREAMS when durable Runtime work is active", () => {
+    const input = snapshot();
+    input.tasks.push({
+      id: "task_fragment",
+      label: "Durable fragment task",
+      ownerSessionId: "owl-owner:fragment",
+      status: "running",
+      updatedAt: "2026-10-02T00:00:29.000Z",
+      counts: { total: 1, succeeded: 0, running: 1 },
+      progress: { message: "Executing durable task" },
+    });
+    input.mcp.continuation.owners.push({
+      ownerId: "owl-owner:fragment",
+      clientKind: "mcp",
+      clientLabel: null,
+      ownerSource: "transport-session",
+      plannerConnected: false,
+      connectedTransportCount: 0,
+      lastTransportSeenAt: null,
+      lastDisconnectedAt: "2026-10-02T00:00:28.000Z",
+      updatedAt: "2026-10-02T00:00:29.000Z",
+      checkpoint: null,
+      latestHandoffId: null,
+      workstream: {
+        schemaVersion: 1,
+        workstreamId: "owl-owner:fragment",
+        implicit: true,
+        status: "active",
+        goal: "Interactive OWL session",
+        label: null,
+        clientKind: "mcp",
+        clientLabel: null,
+        createdAt: "2026-10-02T00:00:20.000Z",
+        updatedAt: "2026-10-02T00:00:29.000Z",
+        completedAt: null,
+        lastProgressAt: "2026-10-02T00:00:20.000Z",
+        toolStepsSinceProgress: 1,
+        totalToolSteps: 1,
+        progressEvents: [],
+        recentTools: [],
+      },
+    });
+
+    const board = buildWorkstreamBoard({
+      snapshot: input,
+      agentRequests: [],
+      now: Date.parse("2026-10-02T00:00:30.000Z"),
+    });
+
+    expect(
+      board.streams.find((stream) => stream.ownerId === "owl-owner:fragment"),
+    ).toMatchObject({
+      status: "working",
+      currentExecutor: "OWL Runtime",
+      tasks: [expect.objectContaining({ id: "task_fragment", status: "running" })],
+    });
+  });
+
+
+  it("does not resurrect terminal Runtime task history as a live workstream", () => {
+    const input = snapshot();
+    input.tasks.push({
+      id: "task_terminal_history",
+      label: "Old detached E2E task",
+      ownerSessionId: "owl-owner:terminal-history",
+      status: "completed",
+      updatedAt: "2026-10-02T00:00:29.000Z",
+      counts: { total: 1, succeeded: 1, running: 0 },
+      progress: {
+        phase: "completed",
+        terminal: true,
+        message: "Indexed terminal task in global episodic memory",
+      },
+    });
+
+    const board = buildWorkstreamBoard({
+      snapshot: input,
+      agentRequests: [],
+      now: Date.parse("2026-10-02T00:00:30.000Z"),
+    });
+
+    expect(
+      board.streams.some(
+        (stream) => stream.ownerId === "owl-owner:terminal-history",
+      ),
+    ).toBe(false);
+  });
+
   it("routes claimed AgentRequests only to their claiming owner", () => {
     const board = buildWorkstreamBoard({
       snapshot: snapshot(),

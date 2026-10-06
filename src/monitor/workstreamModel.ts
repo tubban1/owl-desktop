@@ -90,6 +90,21 @@ function sourceRole(kind: PlannerContinuationOwner["clientKind"]) {
   }
 }
 
+function runtimeTaskStatus(task: Row): string {
+  return String(task.status ?? task.progress?.phase ?? "unknown");
+}
+
+function runtimeTaskIsLive(task: Row): boolean {
+  return (
+    task.progress?.terminal !== true &&
+    ACTIVE_TASK_STATES.has(runtimeTaskStatus(task))
+  );
+}
+
+function projectedTaskIsLive(task: WorkstreamTask): boolean {
+  return task.terminal !== true && ACTIVE_TASK_STATES.has(task.status);
+}
+
 function taskProgress(task: Row): number | null {
   const counts = task.counts ?? task.progress?.counts ?? {};
   const total = Number(counts.total ?? 0);
@@ -112,6 +127,7 @@ export type WorkstreamTask = {
   id: string;
   label: string;
   status: string;
+  terminal: boolean;
   progressPercent: number | null;
   current: string | null;
   updatedAt: string | null;
@@ -283,16 +299,17 @@ function streamStatus(
   checkpointStatus: string | null,
   tasks: WorkstreamTask[],
 ): MonitorWorkstream["status"] {
+  const liveTasks = tasks.filter(projectedTaskIsLive);
   if (
-    tasks.some((task) =>
+    liveTasks.some((task) =>
       ["failed", "blocked", "needs_review"].includes(task.status),
     )
   ) {
     return "attention";
   }
-  if (tasks.some((task) => task.status === "running")) return "working";
+  if (liveTasks.some((task) => task.status === "running")) return "working";
   if (
-    tasks.some((task) =>
+    liveTasks.some((task) =>
       ["pending", "waiting_approval", "paused"].includes(task.status),
     ) ||
     (checkpointStatus && WAITING_CHECKPOINT_STATES.has(checkpointStatus))
@@ -313,7 +330,30 @@ export function buildWorkstreamBoard({
   now?: number;
 }): WorkstreamBoard {
   const taskRows = rows(snapshot?.tasks, ["tasks", "items"]);
-  const owners = ownerSeeds(snapshot, taskRows);
+  const owners = ownerSeeds(snapshot, taskRows).filter((owner) => {
+    const workstream = owner.workstream ?? null;
+    const explicitDurableWorkstream =
+      Boolean(workstream) &&
+      workstream?.implicit !== true &&
+      workstream?.status !== "completed";
+    const hasPlannerCheckpoint =
+      Boolean(owner.checkpoint) && owner.checkpoint?.status !== "completed";
+    const hasPlannerHandoff = Boolean(owner.latestHandoffId);
+    const hasActiveRuntimeTask = taskRows.some(
+      (task) =>
+        taskBelongsToOwner(task, owner) && runtimeTaskIsLive(task),
+    );
+
+    // A transport-scoped implicit workstream is compatibility plumbing, not a
+    // user-level workstream. It remains visible in Real Traffic / topology,
+    // but only durable planner/work evidence promotes it into LIVE WORKSTREAMS.
+    return (
+      explicitDurableWorkstream ||
+      hasPlannerCheckpoint ||
+      hasPlannerHandoff ||
+      hasActiveRuntimeTask
+    );
+  });
   const progressIntervalMs =
     snapshot?.mcp.continuation?.progressPolicy?.recommendedUpdateIntervalMs ??
     15_000;
@@ -333,7 +373,8 @@ export function buildWorkstreamBoard({
         .map((task): WorkstreamTask => ({
           id: String(task.id),
           label: String(task.label ?? task.id ?? "Task"),
-          status: String(task.status ?? task.progress?.phase ?? "unknown"),
+          status: runtimeTaskStatus(task),
+          terminal: task.progress?.terminal === true,
           progressPercent: taskProgress(task),
           current:
             typeof task.progress?.message === "string"
@@ -512,9 +553,10 @@ export function buildWorkstreamBoard({
       messages.sort((a, b) => timestamp(b.at) - timestamp(a.at));
 
       const activeTask =
-        ownerTasks.find((task) => task.status === "running") ??
-        ownerTasks.find((task) => ACTIVE_TASK_STATES.has(task.status)) ??
-        ownerTasks[0] ??
+        ownerTasks.find(
+          (task) => task.status === "running" && projectedTaskIsLive(task),
+        ) ??
+        ownerTasks.find(projectedTaskIsLive) ??
         null;
       const checkpointStatus =
         workstream?.status ?? checkpoint?.status ?? null;
@@ -566,7 +608,7 @@ export function buildWorkstreamBoard({
         isCurrent:
           connected ||
           Boolean(workstream && workstream.status !== "completed") ||
-          ownerTasks.some((task) => ACTIVE_TASK_STATES.has(task.status)),
+          ownerTasks.some(projectedTaskIsLive),
         goal:
           workstream?.goal ??
           checkpoint?.goal ??

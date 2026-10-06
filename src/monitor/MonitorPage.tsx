@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -6,7 +6,6 @@ import {
   ChevronRight,
   Clock3,
   Cloud,
-  Copy,
   Cpu,
   GitBranch,
   Inbox,
@@ -28,7 +27,6 @@ import { LiveOperationsGraph } from "./LiveOperationsGraph";
 import { ApprovalAttention } from "../approvals/ApprovalAttention";
 import {
   buildWorkstreamBoard,
-  type MonitorWorkstream,
   type WorkstreamBoard,
 } from "./workstreamModel";
 import {
@@ -56,144 +54,6 @@ const formatDuration = (value?: number | null) => {
   const seconds = Math.round((value % 60_000) / 1000);
   return String(minutes) + "m " + String(seconds) + "s";
 };
-
-const formatCompactNumber = (value: number) => {
-  const bounded = Math.max(0, value);
-  if (bounded >= 1_000_000) {
-    const scaled = bounded / 1_000_000;
-    return scaled.toFixed(scaled < 10 ? 1 : 0).replace(/\.0$/, "") + "M";
-  }
-  if (bounded >= 1_000) {
-    const scaled = bounded / 1_000;
-    return scaled.toFixed(scaled < 10 ? 1 : 0).replace(/\.0$/, "") + "K";
-  }
-  return String(Math.round(bounded));
-};
-
-function ConversationContinuityOverview({ board }: { board: WorkstreamBoard }) {
-  const sessions = board.streams.filter(
-    (stream) => stream.sourceKind === "ChatGPT" && Boolean(stream.continuity),
-  );
-  if (sessions.length === 0) return null;
-
-  const riskCount = (risk: string) =>
-    sessions.filter((stream) => stream.continuity?.risk === risk).length;
-  const handoffReady = sessions.filter(
-    (stream) => stream.continuity?.handoffReady,
-  ).length;
-
-  return (
-    <section className="panel continuity-overview">
-      <div className="continuity-overview-copy">
-        <span className="eyebrow">CONVERSATION CONTINUITY</span>
-        <strong>
-          {sessions.length} ChatGPT session{sessions.length === 1 ? "" : "s"}
-        </strong>
-        <span>Each session is measured and handed off independently.</span>
-      </div>
-      <div className="continuity-overview-stats">
-        <span><strong>{riskCount("critical") + riskCount("high")}</strong> high</span>
-        <span><strong>{riskCount("medium")}</strong> medium</span>
-        <span><strong>{riskCount("low")}</strong> low</span>
-        <span className={handoffReady > 0 ? "ready" : ""}>
-          <strong>{handoffReady}</strong> handoff ready
-        </span>
-      </div>
-    </section>
-  );
-}
-
-function WorkstreamContinuity({ stream }: { stream: MonitorWorkstream }) {
-  const [copied, setCopied] = useState(false);
-  const continuity = stream.continuity;
-  if (stream.sourceKind !== "ChatGPT" || !continuity) return null;
-
-  const handoffId = continuity.handoffReady ? stream.latestHandoffId : null;
-  const duplicatePercent = Math.round(continuity.duplicateRatio * 100);
-  const resumePrompt = handoffId
-    ? [
-        "Continue OWL LAB using Planner Handoff " + handoffId + ".",
-        "Resume workstream " + stream.ownerId + ".",
-        "Inspect existing Runtime Task state before doing replacement work.",
-        "Do not create replacement tasks merely because the ChatGPT conversation changed.",
-      ].join(" ")
-    : "";
-
-  const copyResumePrompt = async () => {
-    if (!resumePrompt) return;
-    try {
-      await navigator.clipboard.writeText(resumePrompt);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  return (
-    <div className={"workstream-continuity risk-" + continuity.risk}>
-      <div className="workstream-continuity-head">
-        <div className="workstream-continuity-title">
-          <ShieldCheck size={14} />
-          <span>Continuity</span>
-          <span className={"continuity-risk risk-" + continuity.risk}>
-            {continuity.risk.toUpperCase()}
-          </span>
-        </div>
-        <span className={"continuity-state " + continuity.state}>
-          {continuity.state.replaceAll("_", " ")}
-        </span>
-      </div>
-
-      <div className="workstream-continuity-metrics">
-        <div>
-          <span>Context floor</span>
-          <strong>~{formatCompactNumber(continuity.observedTokenEquivalent)}</strong>
-        </div>
-        <div>
-          <span>10m growth</span>
-          <strong>+{formatCompactNumber(continuity.recentGrowthTokenEquivalent)}</strong>
-        </div>
-        <div>
-          <span>OWL calls</span>
-          <strong>{continuity.toolCallCount}</strong>
-        </div>
-        <div>
-          <span>Repeated</span>
-          <strong>{duplicatePercent}%</strong>
-        </div>
-      </div>
-
-      <div className="workstream-continuity-foot">
-        <div>
-          <strong>
-            {continuity.handoffReady
-              ? "Handoff snapshot ready"
-              : continuity.risk === "high" || continuity.risk === "critical"
-                ? "Handoff recommended"
-                : continuity.risk === "medium"
-                  ? "Growing"
-                  : "Protected"}
-          </strong>
-          <span>
-            {handoffId ??
-              continuity.reasons[0]?.detail ??
-              ("Current planner epoch · " + formatDuration(continuity.sessionAgeMs))}
-          </span>
-        </div>
-        {handoffId && (
-          <button
-            className="secondary continuity-copy-button"
-            onClick={() => void copyResumePrompt()}
-          >
-            <Copy size={13} />
-            {copied ? "Copied" : "Copy resume"}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function StatusBadge({
   status,
@@ -728,8 +588,6 @@ function WorkstreamsView({
                 {stream.phase && <small>{stream.phase}</small>}
               </div>
 
-              <WorkstreamContinuity stream={stream} />
-
               <div className="workstream-route" aria-label="Current work route">
                 <span>User / caller</span>
                 <ChevronRight size={14} />
@@ -1178,8 +1036,6 @@ export function MonitorPage({
         onDeny={onDenyApproval}
         compact
       />
-
-      <ConversationContinuityOverview board={workstreamBoard} />
 
       <LiveOperationsGraph
         snapshot={snapshot}

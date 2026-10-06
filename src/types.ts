@@ -461,6 +461,7 @@ export type WorkstreamToolEvent = {
 export type PlannerWorkstream = {
   schemaVersion: 1;
   workstreamId: string;
+  implicit?: boolean;
   status:
     | "active"
     | "waiting_runtime"
