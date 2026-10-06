@@ -48,6 +48,18 @@ In particular:
 - viewer never creates a RemoteCommand;
 - run/schedule/approve are device-scoped effective permissions supplied by Cloud.
 
+## Cloud discovery
+
+For Cloud-connected account UI, Desktop should use:
+
+- `GET /v1/organizations` — active organization memberships for the signed-in user;
+- `GET /v1/organizations/{organizationId}/devices` — non-sensitive device discovery summaries;
+- `GET /v1/devices/{deviceId}/access` — effective action permissions.
+
+A device appearing in organization inventory does **not** imply `canRun`.
+
+Owner/admin may receive organization device summaries so grant/revoke administration is possible without receiving execution authority. The discovery summary is intentionally not a Runtime or health projection and does not include capabilities, Runtime compatibility, last-seen, events, or health.
+
 ## Device credential handling
 
 - Store device credential only in the OS credential store.
