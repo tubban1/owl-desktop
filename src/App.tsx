@@ -239,11 +239,21 @@ export default function App() {
 
   useEffect(() => {
     if (page !== "overview" && page !== "monitor") return;
-    const timer = window.setInterval(() => {
+    const intervalMs = page === "monitor" ? 3000 : 5000;
+    const tick = () => {
+      if (document.hidden) return;
       setNow(Date.now());
       void refresh(false);
-    }, 3000);
-    return () => window.clearInterval(timer);
+    };
+    const onVisibility = () => {
+      if (!document.hidden) tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    const timer = window.setInterval(tick, intervalMs);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.clearInterval(timer);
+    };
   }, [page]);
 
   const runtimeVersion = snapshot?.info?.runtimeVersion ?? "Not connected";
@@ -438,14 +448,20 @@ export default function App() {
     if (page !== "logs" && page !== "monitor") return;
     let cancelled = false;
     const pollActivity = async () => {
+      if (document.hidden) return;
       const rows = await window.owlDesktop.listActivity().catch(() => null);
       if (!cancelled && rows) setLiveActivity(rows);
     };
     void pollActivity();
-    const intervalMs = page === "monitor" ? 750 : 1000;
+    const intervalMs = page === "monitor" ? 1500 : 2500;
+    const onVisibility = () => {
+      if (!document.hidden) void pollActivity();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     const timer = window.setInterval(() => void pollActivity(), intervalMs);
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
       window.clearInterval(timer);
     };
   }, [page]);

@@ -3480,6 +3480,12 @@ input:focus { border-color: #41634b; box-shadow: 0 0 0 3px rgba(78,128,92,.08); 
 }
 
 /* Agent Operations single live graph */
+.live-ops-panel.traffic-idle *,
+.live-ops-panel.traffic-idle *::before,
+.live-ops-panel.traffic-idle *::after {
+  animation-play-state: paused !important;
+}
+
 .live-ops-panel {
   padding-bottom: 14px;
 }
