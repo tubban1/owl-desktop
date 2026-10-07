@@ -2,7 +2,7 @@
   "contractVersion": 1,
   "component": "owl-runtime",
   "repository": "tubban1/owl-runtime",
-  "gitSha": "edad5221302d098238b332aa15b44e240c6d8375",
+  "gitSha": "8f553f6e4a00e8e2d571086d89041d9d224a0b22",
   "runtimeVersion": "1.0.0-rc.4",
   "apiVersion": "0.1",
   "releaseLine": "OWL LAB 1.x"
