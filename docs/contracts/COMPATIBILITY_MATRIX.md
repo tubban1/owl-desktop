@@ -13,7 +13,7 @@ assembly, while the older tested set remains below as historical RC evidence.
 | Component | Current local baseline | Evidence status |
 | --- | --- | --- |
 | OWL Desktop | code baseline `940622f6b6fb985495f3bba825347035e7168442` | P0.3 first-run readiness onboarding + P0.2 reliability closure; local main ahead of origin |
-| OWL Runtime | main `125c8faf1bbc0fc9e7489af2e376836fba8db3f6`, version `1.0.0-rc.4`, API `0.1` | P0.2 lifecycle/error/resource fixes plus managed-process admission fail-fast self-dogfood fix; local main ahead of origin by 2 |
+| OWL Runtime | release component `125c8faf1bbc0fc9e7489af2e376836fba8db3f6`, version `1.0.0-rc.4`, API `0.1`; repo HEAD `7cbb6cb` adds verifier-only isolation | P0.2 lifecycle/error/resource fixes plus managed-process admission fail-fast self-dogfood fix; verifier-only HEAD does not change packaged Runtime bytes |
 | OWL Cloud | main `9cd8f291e3dc5183e2e4504bd4a2bd5050c32b4b` | source head recorded; Cloud release compatibility must be re-verified before 1.1 RC |
 | OWL Tunnel | vendor `0.0.15`, git `a390c168ff1b2d14e73a95991c186c6aba3ff5a0` | existing signed component contract unchanged |
 | Runtime Host | bundle `fan.fde.owl.runtime@1.0.0` | rebuilt from the active Runtime component pin |

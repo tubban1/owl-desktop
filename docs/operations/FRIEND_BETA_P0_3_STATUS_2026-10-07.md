@@ -13,7 +13,8 @@ This document is the current truth table. It does not rewrite the historical
 
 ```text
 Desktop code baseline: 940622f6b6fb985495f3bba825347035e7168442
-Runtime main:         125c8faf1bbc0fc9e7489af2e376836fba8db3f6
+Runtime release pin:  125c8faf1bbc0fc9e7489af2e376836fba8db3f6
+Runtime repo HEAD:     7cbb6cb (verifier-only isolation)
 Runtime:      1.0.0-rc.4
 Runtime API:  0.1
 Cloud main:   9cd8f291e3dc5183e2e4504bd4a2bd5050c32b4b
