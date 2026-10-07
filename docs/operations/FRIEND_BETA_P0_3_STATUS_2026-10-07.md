@@ -13,8 +13,8 @@ This document is the current truth table. It does not rewrite the historical
 
 ```text
 Desktop code baseline: 940622f6b6fb985495f3bba825347035e7168442
-Runtime release pin:  125c8faf1bbc0fc9e7489af2e376836fba8db3f6
-Runtime repo HEAD:     7cbb6cb (verifier-only isolation)
+Runtime release pin:  edad5221302d098238b332aa15b44e240c6d8375
+Runtime repo HEAD:     91f73de (verifier-only storage-retention isolation)
 Runtime:      1.0.0-rc.4
 Runtime API:  0.1
 Cloud main:   9cd8f291e3dc5183e2e4504bd4a2bd5050c32b4b
@@ -27,7 +27,7 @@ disabled by normal Runtime policy.
 
 | Gate | 2026-10-07 status | Current evidence | Remaining acceptance |
 | --- | --- | --- | --- |
-| A1 exact packaged Runtime identity | **PASS locally** | Active component pin moved to Runtime `125c8fa`; release-components verifier PASS; packaged local bootstrap PASS; exact Runtime version/API/codeRoot/stateRoot verified | Clean-machine reproducibility waits for exact Runtime Git object publication |
+| A1 exact packaged Runtime identity | **PASS locally** | Active component pin moved to Runtime `edad522`; release-components verifier PASS; packaged local bootstrap PASS; exact Runtime version/API/codeRoot/stateRoot verified | Clean-machine reproducibility waits for exact Runtime Git object publication |
 | A2 Runtime execution access | **PASS automated path** | Runtime access client and effective-access tests PASS; readiness requires Runtime `READY`, not account identity alone | Re-run against next packaged friend-beta account/device |
 | A9 Runtime restart + reauthorization | **PASS deterministic recovery path** | Stored refresh-token session resumes Cloud account/lease and reprojects Runtime access to `READY` without interactive login; dedicated recovery tests PASS | Owner-assisted packaged Runtime restart/reopen still required before friend distribution |
 | A10 launchd repeated restart / error 5 | **PASS implementation + bootstrap repetition** | Controlled teardown wait, bounded bootstrap retry and healthy-current no-churn tests PASS; official local bootstrap verifier passed twice consecutively with current Runtime pin | Run packaged restart stress on the next artifact |
@@ -44,10 +44,10 @@ That SHA is historical evidence only.
 The active 1.1 local release baseline now pins:
 
 ```text
-125c8faf1bbc0fc9e7489af2e376836fba8db3f6
+edad5221302d098238b332aa15b44e240c6d8375
 ```
 
-Reliability P0.2 closed at `893a5a98f159ce98212dd728afabd8889630d26e`. The active `125c8fa` baseline preserves that closure and adds the managed-process admission fail-fast self-dogfood fix.
+Reliability P0.2 closed at `893a5a98f159ce98212dd728afabd8889630d26e`. Managed-process admission fail-fast landed at `125c8faf1bbc0fc9e7489af2e376836fba8db3f6`. The active `edad522` baseline preserves both and adds encrypted request-replay compaction with proactive retention.
 
 Validated with the current pin:
 
@@ -93,6 +93,42 @@ managedStartFailFast        = PASS
 The same OWL LAB session then launched the complete Desktop test/build gate as
 a durable managed process with `concurrencyWaitMs = 3`; it completed with exit
 code `0`, 62/62 test files and 289/289 tests PASS plus the production build.
+
+## Request replay retention follow-up
+
+Runtime `edad522` separates replayable receipts from long-lived duplicate-
+prevention evidence:
+
+```text
+*.state      = encrypted live receipt with bounded result/error replay payload
+*.tombstone  = encrypted minimal key/digest terminal identity; never re-executes
+```
+
+Production keeps the 7-day response replay window. Development defaults to a
+24-hour payload window so dogfood/test traffic cannot fill the live receipt
+budget. Expired receipts are proactively compacted at startup and incrementally
+thereafter. Tombstones do not consume the live receipt budget; both capacities
+remain fail-closed rather than evicting duplicate-prevention identities.
+
+Live DEV migration after loading `edad522`:
+
+```text
+before:  ~110 MB request-replay, ~7.4K live receipts, 0 tombstones
+startup: 404 compacted, 5,156,904 bytes reclaimed
+sweep:   5,231 more compacted, 66,610,164 bytes reclaimed
+after:   ~44 MB request-replay, 1,420 live receipts, 6,041 tombstones
+```
+
+Regression evidence:
+
+```text
+expiredPayloadCompactsToEncryptedTombstone = PASS
+expiredTombstoneNeverReexecutes            = PASS
+tombstonesDoNotConsumeLiveRecordCapacity   = PASS
+request cancellation                       = PASS
+fault recovery                              = PASS
+Runtime typecheck/build                     = PASS
+```
 
 ## A9 reconnect contract
 
@@ -171,7 +207,7 @@ Still requires current-Cloud revalidation:
 
 Still blocked by:
 
-- Runtime `125c8fa` not yet published to canonical origin;
+- Runtime `edad522` not yet published to canonical origin;
 - Desktop local commits not yet published;
 - clean-Mac friend-beta acceptance;
 - public signing/notarization credentials for a public release.
