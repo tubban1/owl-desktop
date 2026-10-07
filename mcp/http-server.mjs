@@ -514,6 +514,31 @@ export async function startOwlMcpHttpServer({
     runtimeBaseUrl,
   });
 
+  function healthSummary() {
+    pruneTransportSessions();
+    const rows = [...sessions.values()];
+    return {
+      sessionCount: sessions.size,
+      activeRequestCount: rows.reduce(
+        (sum, session) => sum + Number(session.activeRequestCount ?? 0),
+        0,
+      ),
+      sessionPolicy: {
+        idleTtlMs: boundedSessionIdleTtlMs,
+        ownerSupersedeGraceMs: boundedOwnerSupersedeGraceMs,
+        maxSessions: boundedMaxSessions,
+      },
+      continuation:
+        plannerContinuation?.healthSummary?.() ?? {
+          ownerCount: 0,
+          connectedOwnerCount: 0,
+          activeCheckpointCount: 0,
+          readyHandoffCount: 0,
+          implicitActiveCount: 0,
+        },
+    };
+  }
+
   function snapshot() {
     pruneTransportSessions();
     return {
@@ -570,6 +595,7 @@ export async function startOwlMcpHttpServer({
       pruneTransportSessions();
       return sessions.size;
     },
+    healthSummary,
     snapshot,
     close,
   };

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { awaitAbortable } from "../../shared/abortable-await.mjs";
 
 export function classifyTunnelDiagnostic(text) {
@@ -31,12 +31,45 @@ function parseTimestamp(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function tunnelIdFromCommand(command) {
+  const match = /(?:^|\s)--control-plane\.tunnel-id(?:=|\s+)(?:\"([^\"]+)\"|'([^']+)'|(\S+))/i.exec(
+    String(command ?? ""),
+  );
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+}
+
+function defaultTunnelProcessLister() {
+  if (process.platform === "win32") return [];
+  try {
+    const output = execFileSync("/bin/ps", ["-axo", "pid=,ppid=,command="], {
+      encoding: "utf8",
+      timeout: 1_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return output
+      .split(/\r?\n/)
+      .map((line) => {
+        const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+        if (!match) return null;
+        return {
+          pid: Number(match[1]),
+          ppid: Number(match[2]),
+          command: match[3] ?? "",
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export class TunnelSupervisor {
   constructor({
     onEvent = () => {},
     fetchImpl = fetch,
     random = Math.random,
     monotonicNow = () => performance.now(),
+    processLister = defaultTunnelProcessLister,
     restartBaseDelayMs = 1_000,
     restartMaxDelayMs = 30_000,
     healthCheckIntervalMs = 10_000,
@@ -48,6 +81,7 @@ export class TunnelSupervisor {
     this.fetchImpl = fetchImpl;
     this.random = random;
     this.monotonicNow = monotonicNow;
+    this.processLister = processLister;
     this.child = null;
     this.secretFile = null;
     this.healthUrlFile = null;
@@ -165,6 +199,29 @@ export class TunnelSupervisor {
         recovering: Boolean(this.recoveryPromise),
       },
     };
+  }
+
+  conflictingTunnelProcesses(tunnelId) {
+    if (!tunnelId?.trim()) return [];
+    const ownChildPid = this.child?.pid ?? null;
+    return (this.processLister?.() ?? []).filter((row) => {
+      if (!row || !Number.isFinite(Number(row.pid))) return false;
+      if (Number(row.pid) === Number(ownChildPid)) return false;
+      const command = String(row.command ?? "");
+      if (!command.includes("tunnel-client-runtime")) return false;
+      return tunnelIdFromCommand(command) === tunnelId;
+    });
+  }
+
+  assertSingleTunnelOwner(tunnelId) {
+    const conflicts = this.conflictingTunnelProcesses(tunnelId);
+    if (conflicts.length === 0) return;
+    const error = new Error(
+      `OWL Tunnel ${tunnelId.slice(0, 12)}… is already owned by another local tunnel client (pid ${conflicts[0].pid}). Stop the stale client before starting a replacement.`,
+    );
+    error.code = "TUNNEL_ID_ALREADY_ACTIVE";
+    error.conflictingPids = conflicts.map((item) => item.pid);
+    throw error;
   }
 
   validateConfig({
@@ -599,6 +656,7 @@ export class TunnelSupervisor {
       controlPlaneBaseUrl,
       pollTimeoutMs,
     });
+    this.assertSingleTunnelOwner(tunnelId);
 
     const tempDir = path.join(os.tmpdir(), "owl-desktop-tunnel");
     fs.mkdirSync(tempDir, { recursive: true, mode: 0o700 });
@@ -726,6 +784,7 @@ export class TunnelSupervisor {
       controlPlaneBaseUrl,
       pollTimeoutMs,
     });
+    this.assertSingleTunnelOwner(tunnelId);
     this.clearRestartTimer();
     this.config = {
       binaryPath,

@@ -30,7 +30,7 @@ declare global {
     owlDesktop: {
       environment(): Promise<DesktopEnvironment>;
       listActivity(): Promise<ActivityEntry[]>;
-      refreshRuntime(options?: { quiet?: boolean }): Promise<RuntimeSnapshot>;
+      refreshRuntime(options?: { quiet?: boolean; detailedMcp?: boolean }): Promise<RuntimeSnapshot>;
       approveRuntimeApproval(approvalId: string): Promise<unknown>;
       denyRuntimeApproval(approvalId: string): Promise<unknown>;
       monitorTaskDetail(

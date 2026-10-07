@@ -188,4 +188,92 @@ describe("PlannerContinuationStore", () => {
       plannerConnected: true,
     });
   });
+
+  it("deletes stale transport-only owners by default", () => {
+    const store = createStore();
+    const ownerId = "owl-owner:transport-only";
+    store.noteTransportActivity(
+      ownerId,
+      "transport-a",
+      "2026-10-01T21:00:00.000Z",
+      { ownerSource: "transport-session" },
+    );
+    store.noteTransportDisconnected(
+      ownerId,
+      "transport-a",
+      "idle_ttl",
+      "2026-10-01T21:00:01.000Z",
+    );
+
+    const result = store.garbageCollect(Date.parse("2026-10-01T21:11:30.000Z"));
+    expect(result.changed).toBe(true);
+    expect(store.get(ownerId)).toBeNull();
+  });
+
+  it("archives stale disconnected implicit workstreams when retention is requested", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-planner-continuation-"));
+    scratch.push(dir);
+    const store = new PlannerContinuationStore({
+      file: path.join(dir, "planner-continuation.json"),
+      implicitIdleTtlMs: 60_000,
+      archivedRetentionMs: 60 * 60_000,
+    });
+    const ownerId = "owl-owner:transient";
+    store.ensureImplicitWorkstream(
+      ownerId,
+      { clientKind: "mcp" },
+      "2026-10-01T21:00:00.000Z",
+    );
+    store.noteTransportActivity(
+      ownerId,
+      "transport-a",
+      "2026-10-01T21:00:01.000Z",
+      { ownerSource: "transport-session" },
+    );
+    store.noteTransportDisconnected(
+      ownerId,
+      "transport-a",
+      "idle_ttl",
+      "2026-10-01T21:00:02.000Z",
+    );
+
+    const result = store.garbageCollect(Date.parse("2026-10-01T21:02:30.000Z"));
+    expect(result.changed).toBe(true);
+    expect(store.get(ownerId)?.workstream).toMatchObject({
+      status: "archived",
+      archiveReason: "implicit_idle_gc",
+    });
+    expect(store.summary().owners.some((owner) => owner.ownerId === ownerId)).toBe(false);
+  });
+
+  it("does not archive disconnected implicit workstreams that have a durable checkpoint", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-planner-continuation-"));
+    scratch.push(dir);
+    const store = new PlannerContinuationStore({
+      file: path.join(dir, "planner-continuation.json"),
+      implicitIdleTtlMs: 60_000,
+    });
+    const ownerId = "owl-owner:durable";
+    store.ensureImplicitWorkstream(ownerId, {}, "2026-10-01T21:00:00.000Z");
+    store.checkpoint(
+      ownerId,
+      { goal: "Keep durable work", taskIds: ["task_1"] },
+      "2026-10-01T21:00:01.000Z",
+    );
+    store.noteTransportActivity(
+      ownerId,
+      "transport-a",
+      "2026-10-01T21:00:02.000Z",
+    );
+    store.noteTransportDisconnected(
+      ownerId,
+      "transport-a",
+      "idle_ttl",
+      "2026-10-01T21:00:03.000Z",
+    );
+
+    store.garbageCollect(Date.parse("2026-10-01T21:30:00.000Z"));
+    expect(store.get(ownerId)?.workstream?.status).toBe("active");
+    expect(store.summary().owners.some((owner) => owner.ownerId === ownerId)).toBe(true);
+  });
 });

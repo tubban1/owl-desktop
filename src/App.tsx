@@ -197,7 +197,10 @@ export default function App() {
     try {
       await window.owlDesktop.runtimeEventSync().catch(() => undefined);
       const [nextSnapshot, nextAgentRequests, nextCloudAccount] = await Promise.all([
-        window.owlDesktop.refreshRuntime({ quiet: !interactive }),
+        window.owlDesktop.refreshRuntime({
+          quiet: !interactive,
+          detailedMcp: page === "monitor",
+        }),
         window.owlDesktop.listAgentRequests({ limit: 100 }),
         window.owlDesktop.cloudAccountStatus(),
       ]);

@@ -1,10 +1,14 @@
 const API_VERSION = "0.1";
 
 export class RuntimeHttpClient {
-  constructor({ baseUrl, sessionId, token }) {
+  constructor({ baseUrl, sessionId, token, sessionKind = "durable", ownerSource = null }) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.sessionId = sessionId;
     this.token = token;
+    this.sessionKind = sessionKind === "transient" ? "transient" : "durable";
+    this.ownerSource = typeof ownerSource === "string" && ownerSource.trim()
+      ? ownerSource.trim().slice(0, 80)
+      : null;
   }
 
   async invoke(method, params, options = {}) {
@@ -27,6 +31,8 @@ export class RuntimeHttpClient {
         headers: {
           "content-type": "application/json",
           "x-owl-session-id": this.sessionId,
+          "x-owl-session-kind": this.sessionKind,
+          ...(this.ownerSource ? { "x-owl-owner-source": this.ownerSource } : {}),
           "x-owl-request-id": requestId,
           ...(normalized.idempotencyKey
             ? { "x-owl-idempotency-key": normalized.idempotencyKey }

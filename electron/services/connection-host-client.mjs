@@ -134,6 +134,24 @@ export class ConnectionHostClient {
     });
   }
 
+  diagnostics(options = {}) {
+    return this.request("/diagnostics", {
+      ...options,
+      timeoutMs: options.timeoutMs ?? 5_000,
+    });
+  }
+
+  events(afterSeq = 0, options = {}) {
+    const params = new URLSearchParams({
+      afterSeq: String(Math.max(0, Number(afterSeq) || 0)),
+      limit: String(Math.min(Math.max(Number(options.limit ?? 80) || 80, 1), 200)),
+    });
+    return this.request(`/events?${params.toString()}`, {
+      ...options,
+      timeoutMs: options.timeoutMs ?? 3_000,
+    });
+  }
+
   startTunnel(config, options = {}) {
     return this.request("/tunnel/start", {
       method: "POST",

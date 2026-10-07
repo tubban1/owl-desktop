@@ -125,8 +125,14 @@ function compactOwner(owner) {
 }
 
 export class PlannerContinuationStore {
-  constructor({ file }) {
+  constructor({
+    file,
+    implicitIdleTtlMs = 10 * 60_000,
+    archivedRetentionMs = 0,
+  }) {
     this.file = file;
+    this.implicitIdleTtlMs = Math.max(Number(implicitIdleTtlMs) || 0, 60_000);
+    this.archivedRetentionMs = Math.max(Number(archivedRetentionMs) || 0, 0);
   }
 
   read() {
@@ -222,7 +228,10 @@ export class PlannerContinuationStore {
     }
     const state = this.read();
     const owner = ownerRecord(state, ownerId);
-    if (owner.workstream && owner.workstream.status !== "completed") {
+    if (
+      owner.workstream &&
+      !["completed", "archived"].includes(owner.workstream.status)
+    ) {
       return compactOwner(owner);
     }
 
@@ -1075,6 +1084,91 @@ export class PlannerContinuationStore {
     return compactHandoff(this.read().handoffs?.[handoffId] ?? null);
   }
 
+  garbageCollect(nowMs = Date.now()) {
+    const state = this.read();
+    let changed = false;
+    const readyHandoffWorkstreams = new Set(
+      Object.values(state.handoffs ?? {})
+        .filter((handoff) => handoff?.status === "ready" && handoff?.sourceWorkstreamId)
+        .map((handoff) => handoff.sourceWorkstreamId),
+    );
+
+    for (const [ownerId, owner] of Object.entries(state.owners)) {
+      const workstream = owner?.workstream;
+      const transports = transportRows(owner);
+      const connected = transports.some((transport) => transport.connected === true);
+      const hasCheckpoint = Boolean(owner?.checkpoint);
+      const hasReadyHandoff = Boolean(
+        workstream?.workstreamId &&
+          readyHandoffWorkstreams.has(workstream.workstreamId),
+      );
+      const timestamps = [
+        owner.updatedAt,
+        workstream?.updatedAt,
+        workstream?.lastProgressAt,
+        workstream?.archivedAt,
+        ...transports.flatMap((transport) => [
+          transport.lastSeenAt,
+          transport.disconnectedAt,
+          transport.connectedAt,
+        ]),
+      ]
+        .map((value) => Date.parse(value ?? ""))
+        .filter(Number.isFinite);
+      const lastActivityMs = timestamps.length > 0 ? Math.max(...timestamps) : 0;
+      const staleUndurable =
+        !connected &&
+        !hasCheckpoint &&
+        !hasReadyHandoff &&
+        lastActivityMs > 0 &&
+        nowMs - lastActivityMs >= this.implicitIdleTtlMs;
+
+      if (workstream?.status === "archived" && !hasCheckpoint && !hasReadyHandoff) {
+        const archivedAt = Date.parse(workstream.archivedAt ?? "");
+        if (
+          this.archivedRetentionMs === 0 ||
+          (Number.isFinite(archivedAt) &&
+            nowMs - archivedAt >= this.archivedRetentionMs)
+        ) {
+          delete state.owners[ownerId];
+          changed = true;
+          continue;
+        }
+      }
+
+      if (
+        staleUndurable &&
+        (!workstream ||
+          (workstream.implicit === true && workstream.status === "active"))
+      ) {
+        if (this.archivedRetentionMs === 0) {
+          delete state.owners[ownerId];
+          changed = true;
+          continue;
+        }
+
+        const archivedAt = new Date(nowMs).toISOString();
+        owner.workstream = {
+          ...workstream,
+          schemaVersion: workstream?.schemaVersion ?? 1,
+          workstreamId: workstream?.workstreamId ?? ownerId,
+          implicit: true,
+          status: "archived",
+          archivedAt,
+          archiveReason: "implicit_idle_gc",
+          updatedAt: archivedAt,
+          completedAt: workstream?.completedAt ?? archivedAt,
+          progressBoundary: null,
+        };
+        owner.updatedAt = archivedAt;
+        changed = true;
+      }
+    }
+
+    if (changed) this.write(state);
+    return { changed, state };
+  }
+
   consumeHandoff(handoffId, consumerOwnerId, now = new Date().toISOString()) {
     if (!handoffId) throw new Error("Planner handoff ID is required.");
     if (!consumerOwnerId) throw new Error("Planner handoff consumer owner is required.");
@@ -1102,15 +1196,57 @@ export class PlannerContinuationStore {
       alreadyConsumed: false,
     };
   }
-  summary() {
-    const state = this.read();
+  healthSummary() {
     const nowMs = Date.now();
+    const { state } = this.garbageCollect(nowMs);
+    const owners = Object.values(state.owners);
+    const visibleOwners = owners.filter(
+      (owner) => owner?.workstream?.status !== "archived",
+    );
+    const activeCheckpoints = visibleOwners.filter(
+      (owner) =>
+        owner?.checkpoint && owner.checkpoint.status !== "completed",
+    );
+    const connectedOwnerCount = visibleOwners.filter((owner) =>
+      transportRows(owner).some((transport) => transport.connected === true),
+    ).length;
+    const readyHandoffCount = Object.values(state.handoffs ?? {}).filter(
+      (handoff) => handoff?.status === "ready",
+    ).length;
+    return {
+      ownerCount: visibleOwners.length,
+      connectedOwnerCount,
+      activeCheckpointCount: activeCheckpoints.length,
+      readyHandoffCount,
+      implicitActiveCount: visibleOwners.filter(
+        (owner) =>
+          owner?.workstream?.implicit === true &&
+          owner.workstream.status === "active",
+      ).length,
+      progressPolicy: {
+        recommendedUpdateIntervalMs: 10_000,
+        recommendedMaxToolStepsWithoutUpdate: 3,
+      },
+    };
+  }
+
+  summary() {
+    const nowMs = Date.now();
+    const { state } = this.garbageCollect(nowMs);
     const owners = Object.values(state.owners)
       .map((owner) => ({
         ...compactOwner(owner),
         continuity: this.continuityStatus(owner.ownerId, nowMs, state),
       }))
-      .filter(Boolean)
+      .filter(
+        (owner) =>
+          Boolean(owner) &&
+          !(
+            owner.workstream?.status === "archived" &&
+            !owner.checkpoint &&
+            owner.connectedTransportCount === 0
+          ),
+      )
       .sort(
         (a, b) =>
           Date.parse(

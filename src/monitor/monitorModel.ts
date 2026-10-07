@@ -94,6 +94,10 @@ export type MonitorModel = {
     running: number;
     succeeded: number;
     failed: number;
+    expectedStops?: number;
+    externalFailures?: number;
+    workloadFailures?: number;
+    runtimeFailures?: number;
     recovered: number;
   };
   skills: {
@@ -224,14 +228,39 @@ export function buildMonitorModel({
   const runningProcesses = processRows.filter(
     (process) => process.running === true,
   ).length;
-  const failedProcesses = processRows.filter(
+  const expectedStops = processRows.filter(
+    (process) => process.outcomeClass === "expected_termination",
+  ).length;
+  const externalFailures = processRows.filter((process) =>
+    ["auth", "network", "external_service", "provider"].includes(
+      String(process.outcomeClass ?? ""),
+    ),
+  ).length;
+  const workloadFailures = processRows.filter((process) =>
+    ["resource_pressure", "workload_failure", "unknown"].includes(
+      String(process.outcomeClass ?? ""),
+    ),
+  ).length;
+  const runtimeFailures = processRows.filter(
     (process) =>
+      process.outcomeClass === "runtime_failure" || process.status === "lost",
+  ).length;
+  const failedProcesses = processRows.filter((process) => {
+    const outcome = String(process.outcomeClass ?? "");
+    if (["success", "running", "expected_termination"].includes(outcome)) {
+      return false;
+    }
+    if (outcome) return true;
+    return (
       process.status === "failed" ||
       process.status === "lost" ||
-      (process.status === "exited" && number(process.exitCode) !== 0),
-  ).length;
+      (process.status === "exited" && number(process.exitCode) !== 0)
+    );
+  }).length;
   const succeededProcesses = processRows.filter(
-    (process) => process.status === "exited" && number(process.exitCode) === 0,
+    (process) =>
+      process.outcomeClass === "success" ||
+      (process.status === "exited" && number(process.exitCode) === 0),
   ).length;
   const recoveredProcesses = processRows.filter(
     (process) => process.recoveredAfterRestart === true,
@@ -281,6 +310,30 @@ export function buildMonitorModel({
       severity: "warning",
       title: `${needsReview} task${needsReview === 1 ? "" : "s"} need review`,
       detail: "Verification or side-effect resolution is incomplete.",
+    });
+  }
+  if (runtimeFailures > 0) {
+    attention.push({
+      id: "process-runtime-failure",
+      severity: "error",
+      title: `${runtimeFailures} Runtime process failure${runtimeFailures === 1 ? "" : "s"}`,
+      detail: "OWL lost managed-process execution truth; inspect Runtime recovery evidence before replacing work.",
+    });
+  }
+  if (externalFailures > 0) {
+    attention.push({
+      id: "process-external-failure",
+      severity: "warning",
+      title: `${externalFailures} external/provider failure${externalFailures === 1 ? "" : "s"}`,
+      detail: "Network, authentication or external-provider failure; Runtime itself may still be healthy.",
+    });
+  }
+  if (workloadFailures > 0) {
+    attention.push({
+      id: "process-workload-failure",
+      severity: "warning",
+      title: `${workloadFailures} workload failure${workloadFailures === 1 ? "" : "s"}`,
+      detail: "The command or local workload failed without proving an OWL control-plane failure.",
     });
   }
   const confirmationCount = agentRequests.filter(
@@ -458,6 +511,10 @@ export function buildMonitorModel({
       running: runningProcesses,
       succeeded: succeededProcesses,
       failed: failedProcesses,
+      expectedStops,
+      externalFailures,
+      workloadFailures,
+      runtimeFailures,
       recovered: recoveredProcesses,
     },
     skills: {

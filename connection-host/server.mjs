@@ -47,8 +47,11 @@ const fallbackOwnerId =
 fs.mkdirSync(userDataRoot, { recursive: true, mode: 0o700 });
 
 const events = [];
+let eventSequence = 0;
 function record(level, source, message, meta = {}) {
+  eventSequence += 1;
   events.unshift({
+    seq: eventSequence,
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     at: new Date().toISOString(),
     level,
@@ -202,6 +205,49 @@ app.get("/health", (_req, res) => {
     mcp: {
       status: "running",
       url: mcpServer.url,
+      ...mcpServer.healthSummary(),
+    },
+    tunnel: tunnelSupervisor.status(),
+    cloudMcp: {
+      configured: Boolean(cloudMcpConfig),
+      config: cloudMcpConfig,
+      consumer: cloudMcpConsumer?.snapshot?.() ?? null,
+    },
+    eventCursor: eventSequence,
+  });
+});
+
+app.get("/events", (req, res) => {
+  const afterSeq = Math.max(0, Number(req.query.afterSeq ?? 0) || 0);
+  const limit = Math.min(
+    Math.max(Number(req.query.limit ?? 80) || 80, 1),
+    200,
+  );
+  const rows = events
+    .filter((event) => Number(event.seq ?? 0) > afterSeq)
+    .sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0))
+    .slice(0, limit);
+  res.json({
+    ok: true,
+    cursor:
+      rows.length > 0
+        ? Number(rows[rows.length - 1].seq ?? afterSeq)
+        : afterSeq,
+    latestCursor: eventSequence,
+    events: rows,
+  });
+});
+
+app.get("/diagnostics", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "owl-connection-host",
+    pid: process.pid,
+    startedAt,
+    runtimeBaseUrl,
+    mcp: {
+      status: "running",
+      url: mcpServer.url,
       ...mcpServer.snapshot(),
     },
     tunnel: tunnelSupervisor.status(),
@@ -211,6 +257,7 @@ app.get("/health", (_req, res) => {
       consumer: cloudMcpConsumer?.snapshot?.() ?? null,
       completionStore: cloudMcpCompletionStore.snapshot(),
     },
+    eventCursor: eventSequence,
     events: events.slice(0, 120),
   });
 });

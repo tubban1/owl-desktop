@@ -36,6 +36,8 @@ function runtimeClient() {
     baseUrl: context.runtimeBaseUrl,
     sessionId: context.runtimeSessionId,
     token: context.runtimeToken,
+    sessionKind: context.ownerStable ? "durable" : "transient",
+    ownerSource: context.ownerSource ?? null,
   });
 }
 
@@ -730,55 +732,11 @@ function ensureImplicitWorkstream(context, toolName, args = {}) {
   });
 }
 
-function ensureContinuityHandoff(context, status) {
-  if (
-    !status ||
-    !["high", "critical"].includes(status.risk) ||
-    !context.runtimeSessionId ||
-    !context.plannerContinuation
-  ) {
-    return status;
-  }
-
-  let handoff = null;
-  if (!status.handoffReady) {
-    try {
-      handoff = context.plannerContinuation.prepareHandoff(
-        context.runtimeSessionId,
-        {
-          reason:
-            status.risk === "critical"
-              ? "continuity_critical"
-              : "continuity_high",
-          continuityRisk: status.risk,
-        },
-      );
-      context.onEvent?.("info", "Conversation handoff prepared", {
-        workstreamId: context.runtimeSessionId,
-        handoffId: handoff.id,
-        continuityRisk: status.risk,
-        reason: handoff.reason,
-      });
-    } catch (error) {
-      context.onEvent?.("warn", "Conversation handoff preparation failed", {
-        workstreamId: context.runtimeSessionId,
-        continuityRisk: status.risk,
-        code: error?.code ?? null,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      return status;
-    }
-  }
-
-  const refreshed =
-    context.plannerContinuation.continuityStatus?.(
-      context.runtimeSessionId,
-    ) ?? status;
-  const owner = context.plannerContinuation.get?.(context.runtimeSessionId);
-  return {
-    ...refreshed,
-    handoffId: handoff?.id ?? owner?.latestHandoffId ?? null,
-  };
+function ensureContinuityHandoff(_context, status) {
+  // Automatic context-risk driven handoff creation is intentionally disabled.
+  // Handoffs remain an explicit durability primitive via
+  // conversation_handoff_prepare / owl.continuity.prepare.
+  return status;
 }
 
 function recordConversationContinuity(

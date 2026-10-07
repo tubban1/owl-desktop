@@ -53,6 +53,36 @@ describe("TunnelSupervisor", () => {
     expect(classifyTunnelDiagnostic("connection refused")).toBe("warn");
     expect(classifyTunnelDiagnostic("startup timeout")).toBe("warn");
   });
+  it("fails closed when another local tunnel client already owns the same tunnel id", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-tunnel-owner-test-"));
+    scratch.push(dir);
+    const binary = createLongRunningFakeTunnel(dir);
+    const supervisor = new TunnelSupervisor({
+      processLister: () => [
+        {
+          pid: 4242,
+          ppid: 1,
+          command:
+            "/tmp/tunnel-client-runtime run --control-plane.tunnel-id tunnel_shared_123 --mcp.server-url url=http://127.0.0.1:8788/mcp",
+        },
+      ],
+    });
+    supervisors.push(supervisor);
+
+    await expect(
+      supervisor.start({
+        binaryPath: binary,
+        tunnelId: "tunnel_shared_123",
+        apiKey: "not-a-real-secret",
+        mcpUrl: "http://127.0.0.1:8790/mcp",
+      }),
+    ).rejects.toMatchObject({
+      code: "TUNNEL_ID_ALREADY_ACTIVE",
+      conflictingPids: [4242],
+    });
+    expect(supervisor.status().state).toBe("stopped");
+  });
+
   it("spawns a loopback-only tunnel and removes the ephemeral secret on stop", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-tunnel-test-"));
     scratch.push(dir);

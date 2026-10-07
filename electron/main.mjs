@@ -97,6 +97,7 @@ let mcpServer;
 let mcpState = { status: "stopped", url: null, error: null };
 let connectionHostClient;
 let connectionHostSnapshot = null;
+let connectionHostEventCursor = 0;
 let desktopCapabilityBridge;
 const seenConnectionHostEventIds = new Set();
 const activity = [];
@@ -114,7 +115,12 @@ const record = (level, source, message, meta = {}) => {
 };
 
 function ingestConnectionHostEvents(events = []) {
-  for (const event of [...events].reverse()) {
+  const ordered = [...events].sort(
+    (a, b) =>
+      Number(a?.seq ?? 0) - Number(b?.seq ?? 0) ||
+      Date.parse(a?.at ?? "") - Date.parse(b?.at ?? ""),
+  );
+  for (const event of ordered) {
     if (!event?.id || seenConnectionHostEventIds.has(event.id)) continue;
     seenConnectionHostEventIds.add(event.id);
     activity.unshift({
@@ -138,7 +144,20 @@ async function refreshConnectionHost() {
   try {
     const snapshot = await connectionHostClient.health();
     connectionHostSnapshot = snapshot;
-    ingestConnectionHostEvents(snapshot?.events ?? []);
+    const latestCursor = Math.max(0, Number(snapshot?.eventCursor ?? 0) || 0);
+    if (latestCursor < connectionHostEventCursor) {
+      connectionHostEventCursor = 0;
+    }
+    const eventBatch = await connectionHostClient
+      .events(connectionHostEventCursor, { limit: 80 })
+      .catch(() => null);
+    if (eventBatch?.events?.length) {
+      ingestConnectionHostEvents(eventBatch.events);
+    }
+    connectionHostEventCursor = Math.max(
+      connectionHostEventCursor,
+      Number(eventBatch?.cursor ?? connectionHostEventCursor) || 0,
+    );
     mcpState = {
       status: snapshot?.mcp?.status ?? "running",
       url: snapshot?.mcp?.url ?? null,
@@ -1401,6 +1420,10 @@ async function runtimeSnapshot(options = {}) {
   const connectionHost = externalConnectionHostEnabled
     ? await refreshConnectionHost()
     : null;
+  const connectionHostDetails =
+    externalConnectionHostEnabled && options.detailedMcp === true
+      ? await connectionHostClient?.diagnostics().catch(() => null)
+      : null;
 
   const online = info.status === "fulfilled";
   let effectiveRuntimeAccess =
@@ -1438,7 +1461,9 @@ async function runtimeSnapshot(options = {}) {
     mcp: externalConnectionHostEnabled
       ? {
           ...mcpState,
-          ...(connectionHost?.mcp ?? { sessionCount: 0, sessions: [] }),
+          ...(connectionHostDetails?.mcp ??
+            connectionHost?.mcp ?? { sessionCount: 0 }),
+          sessions: connectionHostDetails?.mcp?.sessions ?? [],
         }
       : {
           ...mcpState,
