@@ -17,8 +17,8 @@ actually closed.
 
 | Component | Revision | Publication state |
 | --- | --- | --- |
-| OWL Desktop | `becb35492d19e312f9631996e8c7b4d58f46d11b` | local main; 2 commits ahead of origin |
-| OWL Runtime | `893a5a98f159ce98212dd728afabd8889630d26e` | local main; 1 commit ahead of origin |
+| OWL Desktop | code baseline `940622f6b6fb985495f3bba825347035e7168442` | local main ahead of origin; release-record commit follows this code baseline |
+| OWL Runtime | `125c8faf1bbc0fc9e7489af2e376836fba8db3f6` | local main; 2 commits ahead of origin |
 | OWL Cloud | `9cd8f291e3dc5183e2e4504bd4a2bd5050c32b4b` | origin/main aligned |
 | OWL Worker | `dfd58b208bcb2294e32fb2bbbd2c2c1ccec15d1f` | frozen during serialized integration |
 | OWL Tunnel | vendor `0.0.15`, git `a390c168ff1b2d14e73a95991c186c6aba3ff5a0` | existing component contract |
@@ -43,6 +43,7 @@ This baseline must preserve:
 - incremental Connection Host event cursor;
 - classified managed-process failures;
 - macOS reclaimable-memory resource admission;
+- managed-process start admission fails fast before the MCP control-plane deadline when capacity is busy;
 - visibility-aware Monitor polling;
 - idle graph animation suspension.
 
@@ -57,7 +58,7 @@ owl-lab-workspace/RELIABILITY_P0_2_2026-10-07.md
 New local release staging must use:
 
 ```text
-893a5a98f159ce98212dd728afabd8889630d26e
+125c8faf1bbc0fc9e7489af2e376836fba8db3f6
 ```
 
 The historical 0.1.0 internal RC used `4e24c19f...`. That historical record is

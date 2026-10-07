@@ -12,8 +12,8 @@ This document is the current truth table. It does not rewrite the historical
 ## Exact local baseline
 
 ```text
-Desktop main: becb35492d19e312f9631996e8c7b4d58f46d11b
-Runtime main: 893a5a98f159ce98212dd728afabd8889630d26e
+Desktop code baseline: 940622f6b6fb985495f3bba825347035e7168442
+Runtime main:         125c8faf1bbc0fc9e7489af2e376836fba8db3f6
 Runtime:      1.0.0-rc.4
 Runtime API:  0.1
 Cloud main:   9cd8f291e3dc5183e2e4504bd4a2bd5050c32b4b
@@ -26,13 +26,13 @@ disabled by normal Runtime policy.
 
 | Gate | 2026-10-07 status | Current evidence | Remaining acceptance |
 | --- | --- | --- | --- |
-| A1 exact packaged Runtime identity | **PASS locally** | Active component pin moved to Runtime `893a5a9`; release-components verifier PASS; packaged local bootstrap PASS; exact Runtime version/API/codeRoot/stateRoot verified | Clean-machine reproducibility waits for exact Runtime Git object publication |
+| A1 exact packaged Runtime identity | **PASS locally** | Active component pin moved to Runtime `125c8fa`; release-components verifier PASS; packaged local bootstrap PASS; exact Runtime version/API/codeRoot/stateRoot verified | Clean-machine reproducibility waits for exact Runtime Git object publication |
 | A2 Runtime execution access | **PASS automated path** | Runtime access client and effective-access tests PASS; readiness requires Runtime `READY`, not account identity alone | Re-run against next packaged friend-beta account/device |
 | A9 Runtime restart + reauthorization | **PASS deterministic recovery path** | Stored refresh-token session resumes Cloud account/lease and reprojects Runtime access to `READY` without interactive login; dedicated recovery tests PASS | Owner-assisted packaged Runtime restart/reopen still required before friend distribution |
 | A10 launchd repeated restart / error 5 | **PASS implementation + bootstrap repetition** | Controlled teardown wait, bounded bootstrap retry and healthy-current no-churn tests PASS; official local bootstrap verifier passed twice consecutively with current Runtime pin | Run packaged restart stress on the next artifact |
 | A11 wrong Runtime / port owner | **PASS automated** | Foreign Runtime on configured port is rejected by identity-aware bootstrap test; DEV also refuses unknown/stale owner on its isolated port | Packaged artifact smoke on next candidate |
 | P0.2 session/tunnel lifecycle | **PASS live dogfood** | One authoritative Tunnel, transient Runtime session TTL/retention/cap, workstream GC, compact host health, error taxonomy and resource-admission fixes live-verified | Preserve in package baseline |
-| Source gate | **PASS** | Desktop full gate: 60/60 test files, 282/282 tests; TypeScript/Vite build PASS; `git diff --check` PASS | Re-run after subsequent P0/P1 edits |
+| Source gate | **PASS** | OWL LAB self-dogfood launched the Desktop full gate as a durable process: 62/62 test files, 289/289 tests; TypeScript/Vite build PASS; `git diff --check` PASS | Re-run after subsequent P0/P1 edits |
 
 ## Runtime release baseline correction
 
@@ -43,10 +43,10 @@ That SHA is historical evidence only.
 The active 1.1 local release baseline now pins:
 
 ```text
-893a5a98f159ce98212dd728afabd8889630d26e
+125c8faf1bbc0fc9e7489af2e376836fba8db3f6
 ```
 
-This is necessary because Reliability P0.2 lives in that Runtime revision.
+Reliability P0.2 closed at `893a5a98f159ce98212dd728afabd8889630d26e`. The active `125c8fa` baseline preserves that closure and adds the managed-process admission fail-fast self-dogfood fix.
 
 Validated with the current pin:
 
@@ -61,6 +61,37 @@ One bootstrap attempt immediately after universal native-component compilation
 returned a transient `fetch failed`. The same staged components passed a
 dedicated launchd debug bootstrap and then two official verifier runs. The
 health timeout was not widened based on that single transient observation.
+
+## Runtime self-dogfood follow-up
+
+While OWL LAB was used to modify and validate itself, one full Desktop gate
+launch exposed a control-plane deadline bug:
+
+```text
+start_process
+-> shell concurrency admission may wait 10,000 ms
+-> outer Runtime/MCP request deadline is also 10,000 ms
+-> capacity pressure could surface as Runtime request timed out
+```
+
+Runtime `125c8fa` fixes this by giving managed-process start a separate bounded
+admission wait (`2,000 ms` default, `5,000 ms` hard maximum). Capacity pressure
+now returns `SHELL_CAPACITY_BUSY` before the control-plane deadline instead of
+appearing as a hung Runtime call.
+
+Verifier evidence:
+
+```text
+managedStartAdmissionWaitMs = 1200
+sameWorkspaceThirdWaitMs    = 814
+siblingWorkspaceWaitMs      = 0
+capacityBusyWallMs          = 1204
+managedStartFailFast        = PASS
+```
+
+The same OWL LAB session then launched the complete Desktop test/build gate as
+a durable managed process with `concurrencyWaitMs = 3`; it completed with exit
+code `0`, 62/62 test files and 289/289 tests PASS plus the production build.
 
 ## A9 reconnect contract
 
@@ -139,7 +170,7 @@ Still requires current-Cloud revalidation:
 
 Still blocked by:
 
-- Runtime `893a5a9` not yet published to canonical origin;
+- Runtime `125c8fa` not yet published to canonical origin;
 - Desktop local commits not yet published;
 - clean-Mac friend-beta acceptance;
 - public signing/notarization credentials for a public release.
