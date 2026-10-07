@@ -88,23 +88,43 @@ the active dogfood environment.
 
 ### First-run onboarding / B1
 
-**PARTIAL — implementation exists, owner acceptance still open.**
+**IMPLEMENTED — automated lifecycle/model PASS; fresh packaged owner acceptance still open.**
 
-Current product already has:
+Current product now has:
 
+- a dedicated first-run shell that replaces the control-plane dashboard until
+  setup is explicitly completed;
+- persistent `onboardingInProgress / onboardingCompletedAt` lifecycle state;
+- migration protection so an already enrolled device is not forced back through
+  first-run setup;
 - aggregate readiness states:
   `LOCAL_RECOVERY / SETUP_REQUIRED / AUTHORIZATION_REQUIRED /
   CHATGPT_CONNECTION_REQUIRED / READY`;
-- one primary action for each state;
-- READY requires both local Runtime and execution access, not just account login;
-- Repair Runtime, Reauthorize and connectivity recovery actions.
+- a four-step setup projection:
+  Local Runtime → OWL LAB account/device → execution access → ChatGPT connection;
+- one primary action for the current setup state;
+- normal setup copy that requires no Terminal, port, Tunnel ID or API key;
+- packaged Runtime startup presented as `Preparing this Mac` instead of a false
+  recovery failure while the first Runtime probe is still pending;
+- READY requires both local Runtime and execution access plus remote transport;
+- explicit `Enter OWL LAB` completion before the normal dashboard appears;
+- Repair Runtime, Reauthorize and connectivity recovery actions for genuine
+  failures.
 
-Still required before claiming B1 PASS:
+Automated evidence:
 
-- prove a fresh user understands first run without Terminal/docs;
-- decide whether the current Home readiness flow is sufficient or whether a
-  dedicated first-run stepper is still required;
-- verify normal Settings hide transport internals and manual secrets.
+- onboarding lifecycle tests PASS;
+- onboarding readiness-step model tests PASS;
+- full Desktop gate after onboarding changes:
+  **62/62 test files, 289/289 tests PASS**;
+- TypeScript/Vite production build PASS;
+- `git diff --check` PASS.
+
+Still required before claiming B1 owner PASS:
+
+- fresh packaged profile walkthrough on a clean/secondary Mac;
+- confirm the user understands sign-in and ChatGPT connection without docs;
+- verify Advanced Settings remain unnecessary for the normal path.
 
 ### Cloud / managed transport
 

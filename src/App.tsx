@@ -9,6 +9,7 @@ import {
 import type { AccountMeta, ActivityEntry, AgentRequest, CloudAccountStatus, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
 import { deriveWorkState } from "./workState";
+import { buildOnboardingModel } from "./onboardingModel";
 import { MonitorPage } from "./monitor/MonitorPage";
 import { DevicesPage } from "./devices/DevicesPage";
 import {
@@ -191,6 +192,23 @@ export default function App() {
   ]);
 
   const readinessReady = productReadiness.state === "READY";
+  const onboardingModel = useMemo(
+    () =>
+      buildOnboardingModel({
+        runtimeReady: online,
+        accountReady,
+        executionReady,
+        mcpReady: snapshot?.mcp.status === "running",
+        remoteTransportReady,
+      }),
+    [
+      online,
+      accountReady,
+      executionReady,
+      snapshot?.mcp.status,
+      remoteTransportReady,
+    ],
+  );
 
   const refresh = async (interactive = true) => {
     if (interactive) setBusy(true);
@@ -417,6 +435,16 @@ export default function App() {
     }
   };
 
+  const completeOnboarding = async () => {
+    if (!readinessReady) return;
+    await saveSettings({
+      onboardingInProgress: false,
+      onboardingCompletedAt: new Date().toISOString(),
+    });
+    setNotice("Setup complete · OWL LAB is ready");
+    window.setTimeout(() => setNotice(""), 2400);
+  };
+
   const addSecret = async () => {
     if (!secretDraft.name.trim() || !secretDraft.value) return;
     await window.owlDesktop.upsertSecret(secretDraft);
@@ -577,6 +605,175 @@ export default function App() {
     settings?.wakeName,
     snapshot?.checkedAt,
   ]);
+
+  if (!settings || !env || !cloudAccount) {
+    return (
+      <div className="onboarding-shell loading">
+        <div className="onboarding-drag-region" />
+        <div className="onboarding-loading">
+          <div className="brand-mark">O</div>
+          <strong>Preparing OWL LAB…</strong>
+          <span>Checking this Mac and your saved setup.</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (settings.onboardingInProgress) {
+    const onboardingPreparingRuntime = snapshot === null;
+    const onboardingActionLabel = readinessReady
+      ? "Enter OWL LAB"
+      : onboardingPreparingRuntime
+        ? "Preparing this Mac…"
+        : readinessActionLabel;
+    const onboardingStatusTitle = onboardingPreparingRuntime
+      ? "Preparing the local Runtime"
+      : productReadiness.title;
+    const onboardingStatusDescription = onboardingPreparingRuntime
+      ? "OWL LAB is verifying the packaged Runtime and local execution environment."
+      : productReadiness.description;
+
+    return (
+      <div className="onboarding-shell">
+        <div className="onboarding-drag-region" />
+        <main className="onboarding-stage">
+          <header className="onboarding-brand">
+            <div className="brand-mark">O</div>
+            <div>
+              <strong>OWL LAB</strong>
+              <span>Desktop setup</span>
+            </div>
+          </header>
+
+          <section className="onboarding-card">
+            <div className="onboarding-hero">
+              <span className="eyebrow">FIRST RUN</span>
+              <h1>
+                {readinessReady
+                  ? "Your OWL is ready"
+                  : "Set up OWL LAB on this Mac"}
+              </h1>
+              <p>
+                OWL LAB prepares the local Runtime, verifies your account and
+                execution access, then connects ChatGPT. No Terminal, ports,
+                Tunnel IDs or API keys are required for normal setup.
+              </p>
+            </div>
+
+            <div className="onboarding-progress">
+              <div>
+                <span>Setup progress</span>
+                <strong>
+                  {onboardingModel.completedCount}/{onboardingModel.totalCount}
+                </strong>
+              </div>
+              <div className="onboarding-progress-track">
+                <span
+                  style={{
+                    width:
+                      String(
+                        Math.round(
+                          (onboardingModel.completedCount /
+                            onboardingModel.totalCount) *
+                            100,
+                        ),
+                      ) + "%",
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="onboarding-steps">
+              {onboardingModel.steps.map((step, index) => (
+                <article
+                  className={"onboarding-step " + step.state}
+                  key={step.id}
+                >
+                  <div className="onboarding-step-index">
+                    {step.state === "complete" ? (
+                      <CheckCircle2 size={16} />
+                    ) : step.state === "current" ? (
+                      <ArrowRight size={16} />
+                    ) : (
+                      <span>{index + 1}</span>
+                    )}
+                  </div>
+                  <div>
+                    <strong>{step.label}</strong>
+                    <span>{step.detail}</span>
+                  </div>
+                  <small>
+                    {step.state === "complete"
+                      ? "Ready"
+                      : step.state === "current"
+                        ? "Next"
+                        : "Pending"}
+                  </small>
+                </article>
+              ))}
+            </div>
+
+            <section
+              className={
+                "onboarding-readiness " +
+                (readinessReady ? "ready" : "attention")
+              }
+            >
+              <div>
+                {readinessReady ? (
+                  <CheckCircle2 size={20} />
+                ) : (
+                  <ShieldCheck size={20} />
+                )}
+                <div>
+                  <span>{productReadiness.label}</span>
+                  <strong>{onboardingStatusTitle}</strong>
+                  <p>{onboardingStatusDescription}</p>
+                </div>
+              </div>
+            </section>
+
+            <div className="onboarding-actions">
+              <button
+                className="primary onboarding-primary"
+                disabled={busy || onboardingPreparingRuntime}
+                onClick={() =>
+                  void (readinessReady
+                    ? completeOnboarding()
+                    : runReadinessAction())
+                }
+              >
+                {busy ? (
+                  <RefreshCw size={15} className="spin" />
+                ) : readinessReady ? (
+                  <CheckCircle2 size={15} />
+                ) : (
+                  <ArrowRight size={15} />
+                )}
+                {onboardingActionLabel}
+              </button>
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => void refresh()}
+              >
+                <RefreshCw size={14} />
+                Refresh status
+              </button>
+            </div>
+
+            <footer className="onboarding-footnote">
+              <ShieldCheck size={13} />
+              <span>
+                OWL LAB keeps Runtime execution authority local. Advanced
+                transport and diagnostic settings remain available after setup.
+              </span>
+            </footer>
+          </section>
+        </main>
+      </div>
+    );
+  }
 
   return <div className="app-shell">
     <aside className="sidebar">

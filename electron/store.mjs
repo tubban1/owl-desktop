@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { app, safeStorage } from "electron";
+import { normalizeOnboardingState } from "./services/onboarding-state.mjs";
 
 const readJson = (file, fallback) => {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return fallback; }
@@ -26,6 +27,7 @@ export class DesktopStore {
       path.join(os.homedir(), "Documents"),
       path.join(os.homedir(), "Downloads"),
     ].filter((candidate) => fs.existsSync(candidate));
+    const onboarding = normalizeOnboardingState(stored);
     const settings = {
       wakeName: "OWL",
       wakeAliases: ["OWL Runtime", "AgentOS"],
@@ -54,9 +56,16 @@ export class DesktopStore {
       cloudTelemetryEnabled: true,
       launchAtLogin: false,
       diagnosticsEnabled: true,
+      onboardingInProgress: onboarding.onboardingInProgress,
+      onboardingCompletedAt: onboarding.onboardingCompletedAt,
       sessionId: stored.sessionId || `owl-desktop:${randomUUID()}`,
       ...stored,
     };
+    settings.onboardingInProgress =
+      typeof stored.onboardingInProgress === "boolean"
+        ? stored.onboardingInProgress
+        : onboarding.onboardingInProgress;
+    settings.onboardingCompletedAt = onboarding.onboardingCompletedAt;
     settings.wakeName =
       typeof settings.wakeName === "string" && settings.wakeName.trim()
         ? settings.wakeName.trim().slice(0, 64)

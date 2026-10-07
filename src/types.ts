@@ -20,6 +20,8 @@ export type Settings = {
   cloudTelemetryEnabled: boolean;
   launchAtLogin: boolean;
   diagnosticsEnabled: boolean;
+  onboardingInProgress: boolean;
+  onboardingCompletedAt: string | null;
   sessionId: string;
 };
 
