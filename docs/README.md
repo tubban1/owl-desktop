@@ -6,7 +6,8 @@ This directory is the canonical product and integration documentation for OWL LA
 
 ### Current friend-beta / dogfood
 
-- [Friend Beta Findings](operations/FRIEND_BETA_FINDINGS_2026-10-01.md) — real-install problems, release blockers and optimization order.
+- [Friend Beta P0.3 Status](operations/FRIEND_BETA_P0_3_STATUS_2026-10-07.md) — current release truth table after Reliability P0.2; use this before historical findings.
+- [Friend Beta Findings](operations/FRIEND_BETA_FINDINGS_2026-10-01.md) — historical real-install findings and original blocker list.
 - [Friend Beta Test Plan](operations/FRIEND_BETA_TEST_PLAN_V1.md) — automated, owner-assisted and clean-Mac test matrix.
 - [Installation, Onboarding and Recovery V1](operations/ONBOARDING_AND_RECOVERY_V1.md) — target zero-config installation and recovery UX.
 - [Friend Beta Testing](operations/FRIEND_BETA_TESTING.md) — current beta status and tester instructions.

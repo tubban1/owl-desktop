@@ -4,7 +4,30 @@ Status: **I7 CLOSED — exact tested development set**.
 
 This file is the canonical compatibility record published by OWL Desktop. Compatibility is defined by exact tested contracts and revisions, not by "latest".
 
-## Tested set — 2026-10-01
+## Current local 1.1 baseline — 2026-10-07
+
+This is the active local release-integration baseline after Reliability P0.2.
+It supersedes the 2026-10-01 Runtime component pin for new local release
+assembly, while the older tested set remains below as historical RC evidence.
+
+| Component | Current local baseline | Evidence status |
+| --- | --- | --- |
+| OWL Desktop | main `becb35492d19e312f9631996e8c7b4d58f46d11b` | P0.2 reliability + Monitor idle-cost closure; local main ahead of origin by 2 |
+| OWL Runtime | main `893a5a98f159ce98212dd728afabd8889630d26e`, version `1.0.0-rc.4`, API `0.1` | Runtime session lifecycle v2, process error taxonomy and macOS resource admission verified locally; local main ahead of origin by 1 |
+| OWL Cloud | main `9cd8f291e3dc5183e2e4504bd4a2bd5050c32b4b` | source head recorded; Cloud release compatibility must be re-verified before 1.1 RC |
+| OWL Tunnel | vendor `0.0.15`, git `a390c168ff1b2d14e73a95991c186c6aba3ff5a0` | existing signed component contract unchanged |
+| Runtime Host | bundle `fan.fde.owl.runtime@1.0.0` | rebuilt from the active Runtime component pin |
+| OWL LAB Helper | bundle `fan.fde.owl.helper@1.0.0` | rebuilt from the active Runtime component pin |
+
+Important publication boundary:
+
+- the active Runtime component pin is `893a5a98f159ce98212dd728afabd8889630d26e`;
+- that Runtime commit is currently local-only because Git push remains disabled;
+- local Desktop release assembly may use the exact sibling Runtime checkout;
+- clean-machine/CI reproducibility remains blocked until that exact Runtime Git object is published to the canonical repository;
+- do not fall back to the older `4e24c19` pin merely because it is remotely fetchable.
+
+## Historical tested set — 2026-10-01
 
 | Component | Product / contract identity | Minimum supported | Maximum tested | Preferred / exact tested baseline |
 | --- | --- | --- | --- | --- |
@@ -66,7 +89,7 @@ Unsupported combinations are rejected before consequential Runtime work begins:
 4. Runtime remains the idempotency/approval/execution authority after compatibility acceptance.
 5. Skill Manager independently rejects higher unsupported Primitive ABI requirements.
 6. Tunnel release preparation verifies protocol identity, architecture, version, vendor git SHA and executable SHA256 before packaging.
-7. Runtime, Runtime Host and OWL LAB Helper release assembly is pinned to Runtime main `4e24c19`; a fresh checkout may fetch only that exact Git object and must verify it before build.
+7. Runtime, Runtime Host and OWL LAB Helper release assembly is pinned to the exact SHA in `OWL_RUNTIME_COMPONENT_V1.json`. The active local 1.1 pin is `893a5a98f159ce98212dd728afabd8889630d26e`; a clean checkout may fetch only that exact Git object and must fail closed while it remains unpublished.
 8. Signed release configuration is verified for the canonical `OWL LAB Desktop` name, Helper inclusion and mandatory notarization.
 
 ## Evidence
@@ -87,7 +110,7 @@ Current closure evidence includes:
 - I4 Cloud → Desktop → Runtime terminal projection;
 - I5 approve/deny exact Runtime receipt semantics;
 - I6 actual Cloud transport outage and reconnect with Runtime completing offline;
-- exact Runtime component pin `4e24c19fef12704eb5fe97c1283a3d8c32a4df4c` enforced before release staging;
+- historical 0.1.0 RC Runtime pin `4e24c19fef12704eb5fe97c1283a3d8c32a4df4c` remains preserved in its release evidence; current 1.1 local release staging enforces `893a5a98f159ce98212dd728afabd8889630d26e`;
 - reproducible OWL macOS icon generation and packaged `icon.icns`;
 - universal Runtime Host `fan.fde.owl.runtime@1.0.0` built as arm64+x86_64;
 - unsigned arm64 and x64 `.app` smoke packages verified with `npm run verify:packaged-smoke`;
@@ -96,7 +119,7 @@ Current closure evidence includes:
 
 ## Production rule
 
-Before OWL LAB Product 1.0 promotion, a shipped combination must preserve this exact information in release evidence:
+Before OWL LAB Product 1.1 promotion, a shipped combination must preserve this exact information in release evidence:
 
 - product/component version;
 - Git SHA or deployment revision;
