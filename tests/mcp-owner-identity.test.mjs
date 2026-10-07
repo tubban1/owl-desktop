@@ -49,13 +49,13 @@ async function connect(url, name) {
 }
 
 describe("MCP owner identity", () => {
-  it("derives a stable owner from an unlabelled MCP transport instead of the Desktop fallback", () => {
+  it("treats an unlabelled MCP transport as connection identity, not a durable owner", () => {
     const first = resolveOwnerIdentity({}, "transport-a", "desktop-global");
     const same = resolveOwnerIdentity({}, "transport-a", "desktop-global");
     const second = resolveOwnerIdentity({}, "transport-b", "desktop-global");
 
     expect(first).toMatchObject({
-      stable: true,
+      stable: false,
       source: "transport-session",
       clientKind: "mcp",
     });
@@ -76,7 +76,7 @@ describe("MCP owner identity", () => {
     expect(second.runtimeSessionId).toBe(first.runtimeSessionId);
   });
 
-  it("keeps implicit workstreams isolated across two headerless MCP sessions", async () => {
+  it("does not promote headerless transport sessions into durable implicit workstreams", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "owl-owner-identity-"));
     roots.push(root);
     const continuation = new PlannerContinuationStore({
@@ -102,15 +102,7 @@ describe("MCP owner identity", () => {
       (owner) => owner?.workstream?.implicit === true,
     );
 
-    expect(implicitOwners).toHaveLength(2);
-    expect(new Set(implicitOwners.map((owner) => owner.ownerId)).size).toBe(2);
-    expect(
-      implicitOwners.every((owner) => owner.ownerSource === "transport-session"),
-    ).toBe(true);
-    expect(
-      implicitOwners
-        .map((owner) => owner.workstream.totalToolSteps)
-        .sort((a, b) => a - b),
-    ).toEqual([1, 2]);
+    expect(implicitOwners).toHaveLength(0);
+    expect(Object.values(continuation.read().owners)).toHaveLength(0);
   }, 30_000);
 });

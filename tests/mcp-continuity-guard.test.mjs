@@ -51,7 +51,7 @@ async function startRuntime() {
 }
 
 describe("MCP Conversation Continuity guard", () => {
-  it("prepares a handoff before surfacing a HIGH progress-boundary warning", async () => {
+  it("does not auto-create a handoff from HIGH context risk", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "owl-continuity-guard-"));
     roots.push(root);
     const continuation = new PlannerContinuationStore({
@@ -130,29 +130,21 @@ describe("MCP Conversation Continuity guard", () => {
     });
     expect(blocked.isError).toBe(true);
 
-    const ready = continuation.latestHandoff();
-    expect(ready).toMatchObject({
-      status: "ready",
-      sourceWorkstreamId: source.ownerId,
-      continuityRisk: "high",
-      reason: "continuity_high",
-    });
+    expect(continuation.latestHandoff()).toBeNull();
 
     const payload = jsonText(blocked);
     expect(payload).toMatchObject({
       code: "PROGRESS_UPDATE_REQUIRED",
       progressBoundary: {
-        conversationContinuity: {
-          risk: "high",
-          state: "handoff_ready",
-          handoffReady: true,
-          handoffId: ready.id,
-          recommendedAction: "start_new_chat",
-        },
+        pending: true,
+        acknowledgementRequired: true,
       },
     });
-    expect(payload.progressBoundary.userVisibleProgress).toContain(
-      "Planner Handoff " + ready.id + " is ready",
+    expect(payload.progressBoundary).not.toHaveProperty(
+      "conversationContinuity",
+    );
+    expect(payload.progressBoundary.userVisibleProgress).not.toContain(
+      "Planner Handoff",
     );
   });
 });
