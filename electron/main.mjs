@@ -36,6 +36,7 @@ import { RuntimeAgentRequestEventBridge } from "./services/runtime-agent-request
 import { createTunnelRecoveryPlan } from "./services/tunnel-recovery-plan.mjs";
 import { ConnectivityHostLaunchAgent } from "./services/connectivity-host-launch-agent.mjs";
 import { buildManagedTunnelConfig } from "./services/managed-tunnel-config.mjs";
+import { recoverRuntimeAccessProjection } from "./services/runtime-access-recovery.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let storageLayout;
@@ -932,34 +933,28 @@ async function reauthorizeCloudAccount() {
 }
 
 async function recoverRuntimeAccessAfterReconnect() {
-  if (cloudAccountState.status !== "ready") return null;
   try {
     const service = cloudEnrollmentService ?? ensureCloudEnrollmentService();
-    service.recoverDeviceIdFromCredential();
-    const resumed = await service.resumeFromRefreshToken();
-    if (!resumed) return null;
+    const recovered = await recoverRuntimeAccessProjection({
+      cloudState: cloudAccountState,
+      enrollmentService: service,
+      projectRuntimeAccess: async ({
+        account,
+        access,
+        deviceId,
+        runtimeLease,
+      }) =>
+        await safeSyncRuntimeAccess(
+          account,
+          access,
+          deviceId,
+          runtimeLease,
+        ),
+    });
+    if (!recovered) return null;
 
-    const runtimeAccess = await safeSyncRuntimeAccess(
-      resumed.account ?? cloudAccountState.account ?? null,
-      resumed.access ?? null,
-      resumed.deviceId ?? cloudAccountState.deviceId ?? null,
-      resumed.runtimeLease ?? null,
-    );
-    cloudAccountState = {
-      ...cloudAccountState,
-      status: "ready",
-      account: resumed.account ?? cloudAccountState.account ?? null,
-      access: resumed.access ?? null,
-      entitlement:
-        resumed.entitlement ??
-        resumed.account?.entitlement ??
-        cloudAccountState.entitlement ??
-        null,
-      runtimeAccess,
-      deviceId: resumed.deviceId ?? cloudAccountState.deviceId ?? null,
-      lastErrorCode: null,
-      lastErrorMessage: null,
-    };
+    cloudAccountState = recovered.state;
+    const runtimeAccess = recovered.runtimeAccess;
     record("info", "runtime-access", "Runtime access recovered after reconnect", {
       state: runtimeAccess?.state ?? null,
       deviceId: cloudAccountState.deviceId,
