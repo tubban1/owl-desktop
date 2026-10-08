@@ -24,9 +24,9 @@ token rotation or Custom Tunnel API-key rotation.
 - Cloud `./node_modules/.bin/tsx --test test/control-plane.test.ts`:
   **30/30 PASS**, including old-key rejection, revoked-key rejection and
   owner authorization.
-- Desktop F10 focused regressions: **22/22 PASS** initially, then 9/9
+- Desktop F10 focused regressions: **22/22 PASS on initial run; 10/10 focused F10 tests after degraded-result gate** initially, then 9/9
   specialized rotate/revoke fault regressions after Runtime REVOKED correction.
-- Desktop full `npm run verify:dev`: **69/69 test files, 310/310 tests,
+- Desktop full `npm run verify:dev`: **69/69 test files, 311/311 tests,
   TypeScript/Vite build, git diff --check and durable-submit PASS**.
 - Runtime `npm run typecheck`: PASS.
 - Runtime `npm run verify:runtime-access-state`: PASS on arm64 Node 22.23.3.
@@ -36,6 +36,8 @@ token rotation or Custom Tunnel API-key rotation.
   production Runtime install was not changed.
 
 ## Failure handling
+- Explicit returned status running=false / ready=false is a rebind failure,
+  even when a Promise resolves without throwing.
 - Cloud rotate succeeds, one or more local rebinds fail: all rebinds are
   attempted; failure is reported as DEVICE_CREDENTIAL_REBIND_INCOMPLETE;
   stale Cloud MCP consumer stop is attempted if Cloud MCP rebind fails.

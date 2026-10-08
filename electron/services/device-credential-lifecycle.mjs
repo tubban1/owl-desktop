@@ -9,8 +9,17 @@ async function runStages(stages) {
   const results = {};
   const failures = [];
   for (const [name, action] of stages) {
-    try { results[name] = await action(); }
-    catch { failures.push(name); }
+    try {
+      const result = await action();
+      if (
+        (name === "cloudBridgeRebind" && result?.running === false) ||
+        (name === "cloudMcpRebind" && result?.ready === false) ||
+        (name === "managedTunnelRebind" && result?.projection?.managedTunnel?.available === false)
+      ) {
+        throw new Error("Transport has not re-established readiness.");
+      }
+      results[name] = result;
+    } catch { failures.push(name); }
   }
   return { results, failures };
 }

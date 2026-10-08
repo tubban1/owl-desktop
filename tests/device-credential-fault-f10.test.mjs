@@ -14,6 +14,21 @@ describe("F10 isolated credential partial failures", () => {
     })).rejects.toMatchObject({ code: "DEVICE_CREDENTIAL_REBIND_INCOMPLETE", failedStages: ["cloudBridgeRebind"] });
     expect(call).toEqual(["bridge", "mcp", "tunnel"]);
   });
+  it("does not treat an explicitly degraded rebind response as healthy", async () => {
+    const stopCloudMcp = vi.fn(async () => undefined);
+    await expect(rotate({
+      deviceId: "dev_1",
+      controlPlane: { rotateCurrentDeviceCredential: okRotate },
+      restartCloudBridge: async () => ({ running: false, status: "incompatible" }),
+      rebindCloudMcp: async () => ({ ready: false, state: "degraded" }),
+      stopCloudMcp,
+    })).rejects.toMatchObject({
+      code: "DEVICE_CREDENTIAL_REBIND_INCOMPLETE",
+      failedStages: ["cloudBridgeRebind", "cloudMcpRebind"],
+    });
+    expect(stopCloudMcp).toHaveBeenCalledOnce();
+  });
+
   it("stops the old Cloud consumer when rebind fails", async () => {
     const stopCloudMcp = vi.fn(async () => {});
     await expect(rotate({
