@@ -13,7 +13,7 @@ assembly, while the older tested set remains below as historical RC evidence.
 | Component | Current local baseline | Evidence status |
 | --- | --- | --- |
 | OWL Desktop | code baseline `940622f6b6fb985495f3bba825347035e7168442` | P0.3 first-run readiness onboarding + P0.2 reliability closure; local main ahead of origin |
-| OWL Runtime | release component `8f553f6e4a00e8e2d571086d89041d9d224a0b22`, version `1.0.0-rc.4`, API `0.1` | P0.2 lifecycle/error/resource fixes, managed-process admission fail-fast, encrypted replay-retention compaction and bounded managed-browser profile storage |
+| OWL Runtime | release component `45749cfb72223915e86f8f1ed30604cd1c386d84`, version `1.0.0-rc.4`, API `0.1` | P0.2 lifecycle/error/resource fixes, managed-process admission fail-fast, encrypted replay-retention compaction, bounded managed-browser profile storage and process-output argument clamping |
 | OWL Cloud | main `9cd8f291e3dc5183e2e4504bd4a2bd5050c32b4b` | source head recorded; Cloud release compatibility must be re-verified before 1.1 RC |
 | OWL Tunnel | vendor `0.0.15`, git `a390c168ff1b2d14e73a95991c186c6aba3ff5a0` | existing signed component contract unchanged |
 | Runtime Host | bundle `fan.fde.owl.runtime@1.0.0` | rebuilt from the active Runtime component pin |
@@ -21,7 +21,7 @@ assembly, while the older tested set remains below as historical RC evidence.
 
 Important publication boundary:
 
-- the active Runtime component pin is `8f553f6e4a00e8e2d571086d89041d9d224a0b22`;
+- the active Runtime component pin is `45749cfb72223915e86f8f1ed30604cd1c386d84`;
 - that Runtime commit is currently local-only because Git push remains disabled;
 - local Desktop release assembly may use the exact sibling Runtime checkout;
 - clean-machine/CI reproducibility remains blocked until that exact Runtime Git object is published to the canonical repository;
@@ -89,7 +89,7 @@ Unsupported combinations are rejected before consequential Runtime work begins:
 4. Runtime remains the idempotency/approval/execution authority after compatibility acceptance.
 5. Skill Manager independently rejects higher unsupported Primitive ABI requirements.
 6. Tunnel release preparation verifies protocol identity, architecture, version, vendor git SHA and executable SHA256 before packaging.
-7. Runtime, Runtime Host and OWL LAB Helper release assembly is pinned to the exact SHA in `OWL_RUNTIME_COMPONENT_V1.json`. The active local 1.1 pin is `8f553f6e4a00e8e2d571086d89041d9d224a0b22`; a clean checkout may fetch only that exact Git object and must fail closed while it remains unpublished.
+7. Runtime, Runtime Host and OWL LAB Helper release assembly is pinned to the exact SHA in `OWL_RUNTIME_COMPONENT_V1.json`. The active local 1.1 pin is `45749cfb72223915e86f8f1ed30604cd1c386d84`; a clean checkout may fetch only that exact Git object and must fail closed while it remains unpublished.
 8. Signed release configuration is verified for the canonical `OWL LAB Desktop` name, Helper inclusion and mandatory notarization.
 
 ## Evidence
@@ -110,7 +110,7 @@ Current closure evidence includes:
 - I4 Cloud → Desktop → Runtime terminal projection;
 - I5 approve/deny exact Runtime receipt semantics;
 - I6 actual Cloud transport outage and reconnect with Runtime completing offline;
-- historical 0.1.0 RC Runtime pin `4e24c19fef12704eb5fe97c1283a3d8c32a4df4c` remains preserved in its release evidence; Reliability P0.2 closed at `893a5a98f159ce98212dd728afabd8889630d26e`; managed-start self-dogfood fix landed at `125c8faf1bbc0fc9e7489af2e376836fba8db3f6`; encrypted replay-retention compaction landed at `edad5221302d098238b332aa15b44e240c6d8375`; current 1.1 local release staging enforces `8f553f6e4a00e8e2d571086d89041d9d224a0b22`;
+- historical 0.1.0 RC Runtime pin `4e24c19fef12704eb5fe97c1283a3d8c32a4df4c` remains preserved in its release evidence; Reliability P0.2 closed at `893a5a98f159ce98212dd728afabd8889630d26e`; managed-start self-dogfood fix landed at `125c8faf1bbc0fc9e7489af2e376836fba8db3f6`; encrypted replay-retention compaction landed at `edad5221302d098238b332aa15b44e240c6d8375`; current 1.1 local release staging enforces `45749cfb72223915e86f8f1ed30604cd1c386d84`;
 - reproducible OWL macOS icon generation and packaged `icon.icns`;
 - universal Runtime Host `fan.fde.owl.runtime@1.0.0` built as arm64+x86_64;
 - unsigned arm64 and x64 `.app` smoke packages verified with `npm run verify:packaged-smoke`;

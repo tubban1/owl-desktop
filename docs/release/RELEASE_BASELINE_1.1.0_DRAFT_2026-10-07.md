@@ -18,7 +18,7 @@ actually closed.
 | Component | Revision | Publication state |
 | --- | --- | --- |
 | OWL Desktop | code baseline `940622f6b6fb985495f3bba825347035e7168442` | local main ahead of origin; release-record commit follows this code baseline |
-| OWL Runtime | release pin `8f553f6e4a00e8e2d571086d89041d9d224a0b22` | release bytes include replay compaction and bounded managed-browser storage; Runtime repo remains ahead of origin |
+| OWL Runtime | release pin `45749cfb72223915e86f8f1ed30604cd1c386d84` | release bytes include replay compaction and bounded managed-browser storage; Runtime repo remains ahead of origin |
 | OWL Cloud | `9cd8f291e3dc5183e2e4504bd4a2bd5050c32b4b` | origin/main aligned |
 | OWL Worker | `dfd58b208bcb2294e32fb2bbbd2c2c1ccec15d1f` | frozen during serialized integration |
 | OWL Tunnel | vendor `0.0.15`, git `a390c168ff1b2d14e73a95991c186c6aba3ff5a0` | existing component contract |
@@ -46,6 +46,7 @@ This baseline must preserve:
 - managed-process start admission fails fast before the MCP control-plane deadline when capacity is busy;
 - request-replay payload retention compacts expired receipts into encrypted never-reexecute tombstones;
 - managed-browser storage is bounded: extensions/sync disabled by default, cache sizes capped, reclaimable cache/package bytes cleaned only after proving no surviving managed Chrome is using the profile;
+- agent-facing get_process_output tail_chars finite numeric requests are clamped to 1000–200000 before reading while invalid types and process identity remain validated;
 - visibility-aware Monitor polling;
 - idle graph animation suspension.
 
@@ -60,7 +61,7 @@ owl-lab-workspace/RELIABILITY_P0_2_2026-10-07.md
 New local release staging must use:
 
 ```text
-8f553f6e4a00e8e2d571086d89041d9d224a0b22
+45749cfb72223915e86f8f1ed30604cd1c386d84
 ```
 
 The historical 0.1.0 internal RC used `4e24c19f...`. That historical record is
