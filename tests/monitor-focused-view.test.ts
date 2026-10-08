@@ -14,18 +14,20 @@ const board = {
 };
 
 describe("Monitor Live Graph readable view", () => {
-  it("renders six readable evidence-based stages and keeps the technical graph collapsed by default", () => {
+  it("renders a legible connected Live Graph and keeps the technical topology collapsed by default", () => {
     const html = renderToStaticMarkup(
       createElement(LiveOperationsGraph, { snapshot: null, activity: [], board }),
     );
-    expect(html).toContain("FOLLOW ONE REQUEST");
-    expect(html).toContain("What happened, step by step");
-    expect(html).toContain("Live service status only");
-    expect(html).toContain("Not seen");
+    expect(html).toContain("FOCUSED LIVE GRAPH");
+    expect(html).toContain("Follow the real request and response");
+    expect(html).toContain("Six stage graph with evidence-based directional links");
+    expect(html).toContain("Contract only");
+    expect(html).toContain("No evidence");
     expect(html).toContain("TECHNICAL TOPOLOGY");
-    expect((html.match(/class="focused-stage /g) ?? []).length).toBe(6);
+    expect((html.match(/class="live-graph-node /g) ?? []).length).toBe(6);
+    expect((html.match(/<foreignObject /g) ?? []).length).toBe(6);
     expect(html).toMatch(/<details class="operations-network-shell operations-network-details">/);
     expect(html).not.toContain('<details open');
-    expect(html).toContain("Open technical topology below");
+    expect(html).toContain("TECHNICAL TOPOLOGY");
   });
 });

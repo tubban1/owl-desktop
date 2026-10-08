@@ -33,7 +33,7 @@ import {
   type OperationsWorkstreamSummary,
 } from "./operationsGraphModel";
 import { explainCurrentActivity } from "./activityExplanation";
-import { buildFocusedFlow } from "./focusedFlowModel";
+import { FocusedLiveGraph } from "./FocusedLiveGraph";
 
 const clock = (value?: string | null) =>
   value
@@ -502,10 +502,6 @@ export function LiveOperationsGraph({
   const focusedStream = model.currentWorkstreams.find((stream) => stream.id === focusedWorkstreamId) ?? null;
   const activeNode = model.nodes.find((node) => node.current && node.workstreamId === focusedWorkstreamId) ?? null;
   const explanation = explainCurrentActivity({ stream: focusedStream, interaction: activeInteraction, node: activeNode, now });
-  const focusedFlow = useMemo(
-    () => buildFocusedFlow(model, focusedWorkstreamId, activeInteraction),
-    [model, focusedWorkstreamId, activeInteraction],
-  );
   const running = model.runningInteractions.length > 0;
 
   return (
@@ -553,9 +549,9 @@ export function LiveOperationsGraph({
       <div className="focused-path-shell">
         <div className="focused-path-heading">
           <div>
-            <span className="eyebrow">FOLLOW ONE REQUEST</span>
-            <h4>What happened, step by step</h4>
-            <p>One step per system stage. Unobserved hops are explicitly identified; history is not shown as live execution.</p>
+            <span className="eyebrow">LIVE MONITOR</span>
+            <h4>Current Workstream</h4>
+            <p>One readable, animated communication graph per workstream. Select another workstream to follow its actual calls.</p>
           </div>
           {model.summaries.length > 0 && (
             <label className="focused-path-select">
@@ -568,28 +564,12 @@ export function LiveOperationsGraph({
             </label>
           )}
         </div>
-        <div className="focused-path-steps" aria-label="Focused OWL request stages">
-          {focusedFlow.map((step, index) => (
-            <article key={step.id} className={"focused-stage " + step.state + " " + step.evidence}>
-              <div className="focused-stage-meta">
-                <span className="focused-stage-number">{index + 1}</span>
-                <span>{step.label}</span>
-                <span className={"focused-stage-evidence " + step.evidence}>{step.evidence === "observed" ? "Observed" : step.evidence === "contract" ? "Inferred" : step.evidence === "status" ? "Status only" : "Not seen"}</span>
-              </div>
-              <strong title={step.title}>{step.title}</strong>
-              <p title={step.detail}>{step.detail}</p>
-              {step.note && <small className="focused-stage-note">{step.note}</small>}
-              {step.state === "running" && explanation.elapsedMs !== null && <small className="focused-stage-timer">Elapsed {duration(explanation.elapsedMs)}{explanation.prolonged ? " · Check progress" : ""}</small>}
-              {step.hiddenCount > 0 && <small className="focused-stage-count">+{step.hiddenCount} other historical / shared nodes hidden</small>}
-            </article>
-          ))}
-        </div>
-        <div className="focused-path-footer">
-          <span><i className="focused-key observed" />Observed event</span>
-          <span><i className="focused-key contract" />Inferred contract hop</span>
-          <span><i className="focused-key status" />Live service status only</span>
-          <span>Open technical topology below for every node and link.</span>
-        </div>
+        <FocusedLiveGraph
+          model={model}
+          workstreamId={focusedWorkstreamId}
+          interaction={activeInteraction}
+          now={now}
+        />
       </div>
 
       <details className="operations-network-shell operations-network-details">
