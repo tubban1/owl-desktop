@@ -63,6 +63,26 @@ function defaultTunnelProcessLister() {
   }
 }
 
+// Only reclaim a tunnel recorded by OWL itself, with unchanged process birth
+// identity and a dead former Host. Unknown/conflicting clients remain protected.
+function processBirth(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 1) return null;
+  try {
+    return execFileSync("/bin/ps", ["-p", String(pid), "-o", "lstart="], {
+      encoding: "utf8", timeout: 1000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null;
+  } catch { return null; }
+}
+
+function tunnelOwnerFile() {
+  return path.join(os.tmpdir(), "owl-desktop-tunnel", "owner-v1.json");
+}
+
+function readTunnelOwner() {
+  try { return JSON.parse(fs.readFileSync(tunnelOwnerFile(), "utf8")); }
+  catch { return null; }
+}
+
 export class TunnelSupervisor {
   constructor({
     onEvent = () => {},
@@ -211,6 +231,29 @@ export class TunnelSupervisor {
       if (!command.includes("tunnel-client-runtime")) return false;
       return tunnelIdFromCommand(command) === tunnelId;
     });
+  }
+
+  async reclaimVerifiedOrphan(tunnelId) {
+    const conflicts = this.conflictingTunnelProcesses(tunnelId);
+    if (!conflicts.length) return false;
+    const record = readTunnelOwner();
+    if (conflicts.length !== 1 || !record || record.version !== 1 ||
+        record.tunnelId !== tunnelId || record.pid !== conflicts[0].pid ||
+        !record.birth || processBirth(record.pid) !== record.birth ||
+        !record.hostBirth || processBirth(record.hostPid) === record.hostBirth ||
+        record.hostPid === process.pid ||
+        !String(conflicts[0].command).includes(record.binaryPath) ||
+        !String(conflicts[0].command).includes("--mcp.server-url")) return false;
+    this.onEvent("warn", "Reclaiming verified orphan tunnel", { pid: record.pid });
+    try { process.kill(record.pid, "SIGTERM"); } catch { return false; }
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (!processBirth(record.pid)) {
+        safeUnlink(tunnelOwnerFile());
+        return true;
+      }
+    }
+    return false; // fail closed, never SIGKILL an unverified process
   }
 
   assertSingleTunnelOwner(tunnelId) {
@@ -656,6 +699,7 @@ export class TunnelSupervisor {
       controlPlaneBaseUrl,
       pollTimeoutMs,
     });
+    await this.reclaimVerifiedOrphan(tunnelId);
     this.assertSingleTunnelOwner(tunnelId);
 
     const tempDir = path.join(os.tmpdir(), "owl-desktop-tunnel");
@@ -708,6 +752,13 @@ export class TunnelSupervisor {
     this.generation = generation;
     this.activeGeneration = generation;
     this.child = child;
+    if (child.pid && processBirth(child.pid)) {
+      fs.writeFileSync(tunnelOwnerFile(), JSON.stringify({
+        version: 1, tunnelId, pid: child.pid, birth: processBirth(child.pid),
+        hostPid: process.pid, hostBirth: processBirth(process.pid),
+        binaryPath,
+      }) + "\n", { mode: 0o600 });
+    }
     this.startedAt = new Date().toISOString();
     this.startedMonotonicAtMs = this.monotonicNow();
     this.lastExit = null;
@@ -730,6 +781,8 @@ export class TunnelSupervisor {
       });
     });
     child.once("exit", (code, signal) => {
+      const owner = readTunnelOwner();
+      if (owner?.pid === child.pid && owner?.hostPid === process.pid) safeUnlink(tunnelOwnerFile());
       this.lastExit = {
         at: new Date().toISOString(),
         code,
@@ -784,6 +837,7 @@ export class TunnelSupervisor {
       controlPlaneBaseUrl,
       pollTimeoutMs,
     });
+    await this.reclaimVerifiedOrphan(tunnelId);
     this.assertSingleTunnelOwner(tunnelId);
     this.clearRestartTimer();
     this.config = {
