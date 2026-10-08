@@ -34,7 +34,7 @@ const packagedBinary = path.resolve(
   process.env.OWL_PACKAGED_CONNECTIVITY_BINARY?.trim() ||
     path.join(
       root,
-      "release/smoke-arm64/mac-arm64/OWL LAB Desktop.app/Contents/MacOS/OWL LAB Desktop",
+      "release/mac-arm64/OWL LAB Desktop.app/Contents/MacOS/OWL LAB Desktop",
     ),
 );
 
@@ -223,6 +223,20 @@ export async function runPackagedConnectivityHostSoak() {
     throw new Error(
       `Soak ports are already occupied: MCP ${mcpPort}, control ${controlPort}`,
     );
+  }
+
+  // Never bootout an existing launchd job, even if it uses the test label.
+  // This guard runs before creating any temporary store or service.
+  try {
+    await execFileAsync("/bin/launchctl", ["print", `gui/${process.getuid()}/${label}`], {
+      timeout: 2_000, maxBuffer: 1024 * 1024,
+    });
+    throw new Error(`Refusing to replace an existing launchd job: ${label}`);
+  } catch (error) {
+    if (String(error?.message ?? "").includes("Refusing to replace")) throw error;
+    if (error?.code !== 113 && !/could not find service|service not found|unknown service/i.test(String(error?.stderr ?? ""))) {
+      throw new Error(`Unable to prove test launchd label is unused: ${label}`);
+    }
   }
 
   const soakRoot = fs.mkdtempSync(
