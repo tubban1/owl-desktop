@@ -108,7 +108,7 @@ describe("MCP Conversation Continuity guard", () => {
       requestDigest: "request-large",
       responseDigest: "response-large",
     });
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 12; index += 1) {
       continuation.recordWorkstreamToolStep(source.ownerId, {
         tool: "read_file",
         outcome: "success",

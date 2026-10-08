@@ -442,8 +442,9 @@ const CONTINUITY_DISCOVERY_TOOLS = new Set([
   "conversation_handoff_consume",
 ]);
 
-const WORKSTREAM_PROGRESS_MAX_STEPS = 3;
-const WORKSTREAM_PROGRESS_MAX_SILENCE_MS = 10_000;
+// Keep short interactive tool chains uninterrupted; durable tasks handle long work.
+const WORKSTREAM_PROGRESS_MAX_STEPS = 12;
+const WORKSTREAM_PROGRESS_MAX_SILENCE_MS = 60_000;
 
 const VERIFICATION_SPEC_SCHEMA = z.object({
   id: z.string().min(1).max(160),

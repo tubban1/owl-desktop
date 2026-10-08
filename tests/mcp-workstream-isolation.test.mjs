@@ -134,6 +134,11 @@ describe("MCP workstream isolation", () => {
       arguments: { workstream_id: a },
     });
 
+    for (let index = 3; index < 12; index += 1) {
+      const result = await client.callTool({ name: "runtime_info", arguments: { workstream_id: a } });
+      expect(result.isError).not.toBe(true);
+    }
+
     const blocked = await client.callTool({
       name: "runtime_info",
       arguments: { workstream_id: a },
@@ -146,9 +151,9 @@ describe("MCP workstream isolation", () => {
         workstreamId: a,
         pending: true,
         acknowledgementRequired: true,
-        toolStepsSinceProgress: 3,
-        recommendedUpdateIntervalMs: 10000,
-        recommendedMaxToolStepsWithoutUpdate: 3,
+        toolStepsSinceProgress: 12,
+        recommendedUpdateIntervalMs: 60000,
+        recommendedMaxToolStepsWithoutUpdate: 12,
         durableExecution: {
           recommended: true,
           preferredTool: "task_submit",
@@ -167,7 +172,7 @@ describe("MCP workstream isolation", () => {
         pending: true,
       },
     });
-    expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(3);
+    expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(12);
 
     const progress = jsonText(await client.callTool({
       name: "workstream_progress",
@@ -204,6 +209,7 @@ describe("MCP workstream isolation", () => {
       a,
       a,
       a,
+      ...Array(9).fill(a),
     ]);
 
     const ownerA = continuation.get(a);
@@ -214,7 +220,7 @@ describe("MCP workstream isolation", () => {
       workstream: {
         goal: "Build Monitor",
         toolStepsSinceProgress: 1,
-        totalToolSteps: 5,
+        totalToolSteps: 14,
       },
     });
     expect(ownerA.workstream.progressEvents.at(-1)).toMatchObject({
@@ -276,7 +282,7 @@ describe("MCP workstream isolation", () => {
     await client.connect(transport);
     closers.push(() => transport.close().catch(() => undefined));
 
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 12; index += 1) {
       const result = await client.callTool({
         name: "runtime_info",
         arguments: {},
@@ -299,8 +305,8 @@ describe("MCP workstream isolation", () => {
         workstreamId: actualOwnerId,
         implicit: true,
         status: "active",
-        toolStepsSinceProgress: 3,
-        totalToolSteps: 3,
+        toolStepsSinceProgress: 12,
+        totalToolSteps: 12,
       },
     });
 
@@ -314,8 +320,8 @@ describe("MCP workstream isolation", () => {
       code: "PROGRESS_UPDATE_REQUIRED",
       progressBoundary: {
         workstreamId: actualOwnerId,
-        toolStepsSinceProgress: 3,
-        recommendedUpdateIntervalMs: 10000,
+        toolStepsSinceProgress: 12,
+        recommendedUpdateIntervalMs: 60000,
         boundaryRecorded: false,
         acknowledgementRequired: true,
         pending: true,
@@ -347,7 +353,7 @@ describe("MCP workstream isolation", () => {
     expect(afterIdleSilence.isError).not.toBe(true);
     expect(continuation.get(actualOwnerId).workstream).toMatchObject({
       toolStepsSinceProgress: 1,
-      totalToolSteps: 4,
+      totalToolSteps: 13,
     });
 
     const interactionRequests = events.filter(
@@ -393,7 +399,7 @@ describe("MCP workstream isolation", () => {
     await client.connect(transport);
     closers.push(() => transport.close().catch(() => undefined));
 
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 12; index += 1) {
       const result = await client.callTool({
         name: "runtime_info",
         arguments: { workstream_id: ownerId },
