@@ -436,6 +436,15 @@ const WORKSTREAM_META_TOOLS = new Set([
   "conversation_handoff_consume",
 ]);
 
+const WORKSTREAM_RECOVERY_READ_TOOLS = new Set([
+  "list_processes",
+  "get_process_output",
+  "task_list",
+  "task_status",
+  "orchestration_snapshot",
+  "remote_task_status",
+]);
+
 const CONTINUITY_DISCOVERY_TOOLS = new Set([
   "conversation_handoff_latest",
   "conversation_handoff_get",
@@ -506,18 +515,14 @@ function progressBoundaryError(context, pending, fallbackTool) {
         }
       : null;
 
-  let userVisibleProgress = String(pending.userVisibleProgress ?? "");
-  if (continuityAlert?.handoffId) {
-    userVisibleProgress +=
-      " Conversation continuity risk is " +
-      continuityAlert.risk.toUpperCase() +
-      "; Planner Handoff " +
-      continuityAlert.handoffId +
-      " is ready. You can start a new Chat and continue the same OWL workstream.";
-  }
+  const userVisibleProgress = String(pending.userVisibleProgress ?? "");
+  const continuityNotice = continuityAlert?.handoffId
+    ? "Conversation continuity risk is " + continuityAlert.risk.toUpperCase() +
+      "; Planner Handoff " + continuityAlert.handoffId + " is ready."
+    : null;
 
   const error = new Error(
-    "Visible progress acknowledgement required. Do NOT retry this or any other substantive OWL tool yet. First emit progressBoundary.userVisibleProgress to the user as a normal assistant commentary message. Then call workstream_progress with progress_boundary_id and user_visible_progress exactly as provided. Only after that acknowledgement succeeds may substantive OWL tool work continue.",
+    "Progress acknowledgement pending. The required boundary identifier and visible progress text are supplied in progressBoundary. State-changing operations remain unavailable until their matching acknowledgement is recorded.",
   );
   error.code = "PROGRESS_UPDATE_REQUIRED";
   error.progressBoundary = {
@@ -527,6 +532,7 @@ function progressBoundaryError(context, pending, fallbackTool) {
     toolStepsSinceProgress: pending.toolStepsSinceProgress,
     silenceMs: pending.silenceMs,
     userVisibleProgress,
+    ...(continuityNotice ? { continuityNotice } : {}),
     boundaryRecorded: false,
     acknowledgementRequired: true,
     acknowledgementTool: "workstream_progress",
@@ -581,6 +587,7 @@ function requireProgressBoundary(context, toolName) {
   const protocolV2 = Number(workstream.progressAckProtocol ?? 0) >= 2;
   const existingBoundary = workstream.progressBoundary;
   if (existingBoundary?.pending === true) {
+    if (WORKSTREAM_RECOVERY_READ_TOOLS.has(toolName)) return;
     if (protocolV2) {
       throw progressBoundaryError(context, existingBoundary, toolName);
     }
@@ -993,7 +1000,11 @@ function tool(server, name, description, schema, annotations, handler) {
         requireProgressBoundary(context, name);
         const value = await handler(args);
         const durationMs = Date.now() - started;
-        if (!WORKSTREAM_META_TOOLS.has(name)) {
+        const pendingRecoveryRead =
+          WORKSTREAM_RECOVERY_READ_TOOLS.has(name) &&
+          context.plannerContinuation?.get?.(context.runtimeSessionId)
+            ?.workstream?.progressBoundary?.pending === true;
+        if (!WORKSTREAM_META_TOOLS.has(name) && !pendingRecoveryRead) {
           context.plannerContinuation?.recordWorkstreamToolStep?.(
             context.runtimeSessionId,
             {
@@ -1042,6 +1053,9 @@ function tool(server, name, description, schema, annotations, handler) {
         const durationMs = Date.now() - started;
         if (
           !WORKSTREAM_META_TOOLS.has(name) &&
+          !(WORKSTREAM_RECOVERY_READ_TOOLS.has(name) &&
+            context.plannerContinuation?.get?.(context.runtimeSessionId)
+              ?.workstream?.progressBoundary?.pending === true) &&
           error?.code !== "PROGRESS_UPDATE_REQUIRED"
         ) {
           context.plannerContinuation?.recordWorkstreamToolStep?.(
@@ -3001,7 +3015,7 @@ export function createOwlMcpServer() {
   tool(
     server,
     "workstream_progress",
-    "Acknowledge and record the concise progress summary that you already surfaced to the user. When PROGRESS_UPDATE_REQUIRED is pending, first emit its userVisibleProgress as a normal assistant commentary message, then call this tool with the exact progress_boundary_id and user_visible_progress from that boundary. Only a matching acknowledgement clears the gate. Store no full chat text, secrets, credentials, command payloads, or private file content.",
+    "Record a concise workstream progress update. For a pending PROGRESS_UPDATE_REQUIRED boundary, progress_boundary_id and user_visible_progress must exactly match the published boundary; only a matching acknowledgement releases state-changing operations. The record excludes full chat transcripts and private content.",
     {
       completed: z.array(z.string().min(1).max(600)).max(20).optional(),
       current: z.string().min(1).max(600),

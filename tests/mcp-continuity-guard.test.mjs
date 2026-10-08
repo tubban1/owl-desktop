@@ -146,5 +146,42 @@ describe("MCP Conversation Continuity guard", () => {
     expect(payload.progressBoundary.userVisibleProgress).not.toContain(
       "Planner Handoff",
     );
+
+    continuation.prepareHandoff(source.ownerId, {
+      reason: "continuity_high",
+      continuityRisk: "high",
+    });
+    const withHandoff = jsonText(await client.callTool({
+      name: "runtime_info",
+      arguments: { workstream_id: source.ownerId },
+    }));
+    expect(withHandoff.code).toBe("PROGRESS_UPDATE_REQUIRED");
+    expect(withHandoff.progressBoundary.boundaryId).toBe(
+      payload.progressBoundary.boundaryId,
+    );
+    expect(withHandoff.progressBoundary.userVisibleProgress).toBe(
+      payload.progressBoundary.userVisibleProgress,
+    );
+    expect(withHandoff.progressBoundary.continuityNotice).toContain(
+      "Planner Handoff",
+    );
+    expect(withHandoff.progressBoundary.conversationContinuity).toMatchObject({
+      handoffReady: true,
+      risk: "high",
+    });
+
+    const confirmed = jsonText(await client.callTool({
+      name: "workstream_progress",
+      arguments: {
+        workstream_id: source.ownerId,
+        current: "Visible handoff progress acknowledged",
+        progress_boundary_id: payload.progressBoundary.boundaryId,
+        user_visible_progress: withHandoff.progressBoundary.userVisibleProgress,
+      },
+    }));
+    expect(confirmed.acknowledgedBoundaryId).toBe(
+      payload.progressBoundary.boundaryId,
+    );
+    expect(continuation.get(source.ownerId).workstream.progressBoundary).toBeNull();
   });
 });

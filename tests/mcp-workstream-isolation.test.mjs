@@ -67,16 +67,23 @@ describe("MCP workstream isolation", () => {
       file: path.join(root, "planner-continuation.json"),
     });
     const runtime = await startRuntime();
+    const progressIngressEvents = [];
     const mcp = await startOwlMcpHttpServer({
       port: 0,
       runtimeBaseUrl: runtime.baseUrl,
       fallbackOwnerId: "desktop-shared-fallback",
       plannerContinuation: continuation,
+      onEvent(_level, message, meta) {
+        if (message === "MCP interaction request" &&
+            meta?.tool === "workstream_progress") {
+          progressIngressEvents.push({ tool: meta.tool, phase: meta.phase });
+        }
+      },
     });
     closers.push(() => mcp.close());
 
-    const client = new Client({ name: "shared-chat-transport", version: "0.1.0" });
-    const transport = new StreamableHTTPClientTransport(new URL(mcp.url));
+    let client = new Client({ name: "shared-chat-transport", version: "0.1.0" });
+    let transport = new StreamableHTTPClientTransport(new URL(mcp.url));
     await client.connect(transport);
     closers.push(() => transport.close().catch(() => undefined));
 
@@ -174,6 +181,43 @@ describe("MCP workstream isolation", () => {
     });
     expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(12);
 
+    for (const name of ["list_processes", "task_list"]) {
+      const read = await client.callTool({
+        name,
+        arguments: { workstream_id: a },
+      });
+      expect(read.isError).not.toBe(true);
+    }
+    expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(12);
+    expect(continuation.get(a).workstream.progressBoundary.boundaryId).toBe(
+      boundary.progressBoundary.boundaryId,
+    );
+
+    const rejected = jsonText(await client.callTool({
+      name: "workstream_progress",
+      arguments: {
+        workstream_id: a,
+        current: "Rejected mismatch",
+        progress_boundary_id: boundary.progressBoundary.boundaryId,
+        user_visible_progress: "Not the exact published progress",
+      },
+    }));
+    expect(rejected.code).toBe("PROGRESS_VISIBLE_UPDATE_REQUIRED");
+    expect(continuation.get(a).workstream.progressBoundary.pending).toBe(true);
+
+    await transport.close();
+    client = new Client({ name: "reconnected-chat", version: "0.1.0" });
+    transport = new StreamableHTTPClientTransport(new URL(mcp.url));
+    await client.connect(transport);
+    const recovered = await client.callTool({
+      name: "list_processes",
+      arguments: { workstream_id: a },
+    });
+    expect(recovered.isError).not.toBe(true);
+    expect(continuation.get(a).workstream.progressBoundary.boundaryId).toBe(
+      boundary.progressBoundary.boundaryId,
+    );
+
     const progress = jsonText(await client.callTool({
       name: "workstream_progress",
       arguments: {
@@ -195,6 +239,36 @@ describe("MCP workstream isolation", () => {
       recommended: true,
       preferredTool: "task_submit",
     });
+
+    const revision = continuation.get(a).checkpoint.revision;
+    const eventsCount = continuation.get(a).workstream.progressEvents.length;
+    const duplicate = jsonText(await client.callTool({
+      name: "workstream_progress",
+      arguments: {
+        workstream_id: a,
+        current: "Reporting progress before more tool work",
+        progress_boundary_id: boundary.progressBoundary.boundaryId,
+        user_visible_progress: boundary.progressBoundary.userVisibleProgress,
+      },
+    }));
+    expect(duplicate.acknowledgedBoundaryId).toBe(boundary.progressBoundary.boundaryId);
+    expect(continuation.get(a).checkpoint.revision).toBe(revision);
+    expect(continuation.get(a).workstream.progressEvents).toHaveLength(eventsCount);
+
+    const stale = jsonText(await client.callTool({
+      name: "workstream_progress",
+      arguments: {
+        workstream_id: a,
+        current: "Stale acknowledgement",
+        progress_boundary_id: "progress-boundary:wrong",
+        user_visible_progress: boundary.progressBoundary.userVisibleProgress,
+      },
+    }));
+    expect(stale.code).toBe("PROGRESS_ACK_STALE");
+    expect(progressIngressEvents).toHaveLength(5);
+    expect(progressIngressEvents.every((item) =>
+      item.tool === "workstream_progress" && item.phase === "request",
+    )).toBe(true);
 
     await client.callTool({
       name: "runtime_info",

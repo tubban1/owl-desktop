@@ -395,6 +395,16 @@ export class PlannerContinuationStore {
     }
 
     const pendingBoundary = owner.workstream.progressBoundary;
+    if (!pendingBoundary?.pending && input.progressBoundaryId) {
+      const prior = owner.workstream.lastAcknowledgedProgressBoundary;
+      if (prior?.boundaryId === input.progressBoundaryId &&
+          prior?.userVisibleProgress === input.userVisibleProgress) {
+        return compactOwner(owner);
+      }
+      const error = new Error("PROGRESS_ACK_STALE: no matching boundary.");
+      error.code = "PROGRESS_ACK_STALE";
+      throw error;
+    }
     if (pendingBoundary?.pending === true) {
       if (input.progressBoundaryId !== pendingBoundary.boundaryId) {
         const error = new Error(
@@ -443,6 +453,13 @@ export class PlannerContinuationStore {
       lastProgressAt: now,
       toolStepsSinceProgress: 0,
       progressBoundary: null,
+      lastAcknowledgedProgressBoundary: pendingBoundary?.pending
+        ? {
+            boundaryId: pendingBoundary.boundaryId,
+            userVisibleProgress: pendingBoundary.userVisibleProgress,
+            at: now,
+          }
+        : owner.workstream.lastAcknowledgedProgressBoundary ?? null,
       progressEvents: events,
     };
     const previous = owner.checkpoint;
