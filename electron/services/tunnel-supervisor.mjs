@@ -83,6 +83,29 @@ function readTunnelOwner() {
   catch { return null; }
 }
 
+// Remove only OWL-created artifacts whose embedded Host PID is no longer live.
+// Unknown files and artifacts of any live Host are never touched.
+export function pruneDeadHostTunnelArtifacts(dir = path.join(os.tmpdir(), "owl-desktop-tunnel")) {
+  if (process.platform === "win32") return 0;
+  let removed = 0;
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch { return 0; }
+  for (const name of entries) {
+    const match = /^(api-key|health-url)-(\d+)-([0-9a-f-]{36})(?:\.txt)?$/.exec(name);
+    if (!match) continue;
+    const hostPid = Number(match[2]);
+    if (!Number.isSafeInteger(hostPid) || hostPid <= 1 || hostPid === process.pid || processBirth(hostPid)) continue;
+    const file = path.join(dir, name);
+    try {
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== process.getuid() || (stat.mode & 0o077) !== 0) continue;
+      fs.unlinkSync(file);
+      removed++;
+    } catch { /* fail closed */ }
+  }
+  return removed;
+}
+
 export class TunnelSupervisor {
   constructor({
     onEvent = () => {},
@@ -704,6 +727,7 @@ export class TunnelSupervisor {
 
     const tempDir = path.join(os.tmpdir(), "owl-desktop-tunnel");
     fs.mkdirSync(tempDir, { recursive: true, mode: 0o700 });
+    pruneDeadHostTunnelArtifacts(tempDir);
     const secretFile = path.join(
       tempDir,
       `api-key-${process.pid}-${randomUUID()}`,
