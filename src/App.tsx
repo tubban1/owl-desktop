@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, Boxes, CheckCircle2, Cloud, Cpu, Gauge, HardDrive,
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
@@ -9,6 +9,7 @@ import {
 import type { AccountMeta, ActivityEntry, AgentRequest, CloudAccountStatus, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
 import { deriveWorkState } from "./workState";
+import { executionAccessView } from "./executionAccessView";
 import { buildOnboardingModel } from "./onboardingModel";
 import { MonitorPage } from "./monitor/MonitorPage";
 import { DevicesPage } from "./devices/DevicesPage";
@@ -114,12 +115,12 @@ export default function App() {
   const [logSource, setLogSource] = useState("all");
   const [logQuery, setLogQuery] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  const refreshInFlight = useRef<Promise<void> | null>(null);
 
   const online = snapshot?.mode === "live";
-  const runtimeAccess = snapshot?.runtimeAccess ?? cloudAccount?.runtimeAccess ?? null;
-  const executionReady =
-    online &&
-    (runtimeAccess?.mode === "compat" || runtimeAccess?.state === "READY");
+  const runtimeAccess = snapshot?.runtimeAccess ?? null;
+  const accessView = executionAccessView(online, runtimeAccess);
+  const executionReady = accessView === "ready";
   const cloudOnline = snapshot?.cloud.status === "connected";
   const accountReady = cloudAccount?.status === "ready";
   const accountConnected = cloudOnline && accountReady;
@@ -161,6 +162,14 @@ export default function App() {
         description: "Your local Runtime is reachable, but OWL LAB account setup is not complete.",
       };
     }
+    if (accessView === "verifying") {
+      return {
+        state: "AUTHORIZATION_CHECKING",
+        label: "Checking authorization",
+        title: "Verifying execution access",
+        description: "Runtime is reachable. Checking its current execution authorization before enabling new work.",
+      };
+    }
     if (!executionReady) {
       return {
         state: "AUTHORIZATION_REQUIRED",
@@ -194,6 +203,7 @@ export default function App() {
     settings?.connectivityMode,
     cloudAccount?.status,
     executionReady,
+    accessView,
   ]);
 
   const readinessReady = productReadiness.state === "READY";
@@ -216,10 +226,16 @@ export default function App() {
   );
 
   const refresh = async (interactive = true) => {
+    // Polling must never overlap a slow Runtime/Cloud snapshot; an older LOCKED
+    // response must not overwrite a later recovered READY state.
+    if (refreshInFlight.current) {
+      if (!interactive) return;
+      await refreshInFlight.current.catch(() => undefined);
+    }
     if (interactive) setBusy(true);
-    try {
+    const running = (async () => {
       await window.owlDesktop.runtimeEventSync().catch(() => undefined);
-      const [nextSnapshot, nextAgentRequests, nextCloudAccount] = await Promise.all([
+      const [runtimeResult, requestsResult, accountResult] = await Promise.allSettled([
         window.owlDesktop.refreshRuntime({
           quiet: !interactive,
           detailedMcp: page === "monitor",
@@ -227,11 +243,19 @@ export default function App() {
         window.owlDesktop.listAgentRequests({ limit: 100 }),
         window.owlDesktop.cloudAccountStatus(),
       ]);
-      setSnapshot(nextSnapshot);
-      setAgentRequests(nextAgentRequests);
-      setCloudAccount(nextCloudAccount);
+      // Runtime status is independent of optional agent inbox and account IPCs.
+      // Their individual failures must not freeze the readiness dashboard.
+      if (runtimeResult.status === "fulfilled") setSnapshot(runtimeResult.value);
+      else if (interactive) setNotice("Runtime status refresh failed; retrying on the next poll.");
+      if (requestsResult.status === "fulfilled") setAgentRequests(requestsResult.value);
+      if (accountResult.status === "fulfilled") setCloudAccount(accountResult.value);
       setNow(Date.now());
+    })();
+    refreshInFlight.current = running;
+    try {
+      await running;
     } finally {
+      if (refreshInFlight.current === running) refreshInFlight.current = null;
       if (interactive) setBusy(false);
     }
   };
@@ -356,8 +380,10 @@ export default function App() {
       ? "Repair Runtime"
       : productReadiness.state === "SETUP_REQUIRED"
         ? "Sign in"
-        : productReadiness.state === "AUTHORIZATION_REQUIRED"
-          ? "Reauthorize"
+        : productReadiness.state === "AUTHORIZATION_CHECKING"
+          ? "Refresh authorization"
+          : productReadiness.state === "AUTHORIZATION_REQUIRED"
+            ? "Reauthorize"
           : productReadiness.state === "CHATGPT_CONNECTION_REQUIRED"
             ? settings?.connectivityMode === "custom_tunnel"
               ? "Connect Tunnel"
@@ -404,6 +430,9 @@ export default function App() {
         await window.owlDesktop.cloudLogin();
         setNotice("Continue sign-in in your browser");
         window.setTimeout(() => setNotice(""), 2400);
+        return;
+      } else if (productReadiness.state === "AUTHORIZATION_CHECKING") {
+        await refresh(false);
         return;
       } else if (productReadiness.state === "AUTHORIZATION_REQUIRED") {
         const result = await window.owlDesktop.cloudReauthorize();
