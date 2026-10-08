@@ -9,7 +9,7 @@ describe("dev:full owner identity", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-dev-owner-"));
     const file = path.join(dir, "owner.json");
     try {
-      expect(ownerMatches({ version: 1, desktopRoot: "/x", pid: 999999, birth: "old" }, "/x")).toBe(false);
+      expect(ownerMatches({ version: 1, desktopRoot: "/x", pid: 99999, birth: "old" }, "/x")).toBe(false);
       expect(readDevOwner(file)).toBeNull();
       const record = writeDevOwner("/owl/desktop", file);
       expect(ownerMatches(record, "/owl/desktop")).toBe(false); // test runner is not dev-full

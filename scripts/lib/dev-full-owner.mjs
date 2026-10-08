@@ -9,7 +9,7 @@ export function processBirth(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 1) return null;
   try {
     return execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
-      encoding: "utf8", timeout: 2000,
+      encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"],
     }).trim() || null;
   } catch { return null; }
 }

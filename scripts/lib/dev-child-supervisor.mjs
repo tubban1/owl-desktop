@@ -12,6 +12,7 @@ export class DevChildSupervisor {
     this.logger = logger;
     this.onFatal = onFatal;
     this.children = new Set();
+    this.childGroups = new Map();
     this.restartTimers = new Set();
     this.shuttingDown = false;
   }
@@ -34,9 +35,10 @@ export class DevChildSupervisor {
         cwd,
         env: { ...this.baseEnv, ...env },
         stdio: "inherit",
-        detached: false,
+        detached: process.platform !== "win32",
       });
       this.children.add(child);
+      if (process.platform !== "win32" && child.pid) this.childGroups.set(child, child.pid);
       onLaunch(child);
       let terminationHandled = false;
 
@@ -44,6 +46,7 @@ export class DevChildSupervisor {
         if (terminationHandled) return;
         terminationHandled = true;
         this.children.delete(child);
+        this.childGroups.delete(child);
         if (this.shuttingDown) return;
 
         const detail = error
@@ -104,9 +107,14 @@ export class DevChildSupervisor {
 
     for (const child of this.children) {
       try {
-        child.kill(signal);
-      } catch {}
+        const group = this.childGroups.get(child);
+        if (group && group !== process.pid) process.kill(-group, signal);
+        else child.kill(signal);
+      } catch {
+        try { child.kill(signal); } catch {}
+      }
     }
     this.children.clear();
+    this.childGroups.clear();
   }
 }
