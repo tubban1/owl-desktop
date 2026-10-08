@@ -29,6 +29,29 @@ node scripts/verify-tunnel-fault-matrix-f6-f8.mjs
 
 Final exit code: **0**.
 
+## Independent acceptance rerun on committed HEAD
+
+After commit `6317660` was created, the same harness was rerun independently against the committed Desktop HEAD rather than relying only on the pre-commit acceptance run.
+
+Rerun provenance:
+
+- Desktop HEAD: `631766053cbf0dacc1a5d9aa820ea4e200e18442`
+- harness SHA256: `0bc17d62985290b626649dbffa928121d41e59b2e47a92aa4022ae321fa2938d`
+- rerun raw evidence SHA256: `f86c0947d2e42a0e018d1662f02644309db99dbd01cced7635271082c5cac1a4`
+- rerun exit code: **0**
+- F6/F7/F8: **PASS / PASS / PASS**
+- production listener PIDs before/after: unchanged
+- production Tunnel touched: **false**
+- production Tunnel credentials used: **false**
+
+Post-rerun regression gates:
+
+- Tunnel/Connectivity Host targeted regression: **6/6 files, 26/26 tests PASS**
+- Desktop full gate: **64/64 files, 291/291 tests PASS**
+- TypeScript/Vite build: **PASS**
+- `git diff --check`: **PASS**
+- durable-submit verification: **PASS**
+
 ## Isolation proof
 
 The harness assigns its own scratch `TMPDIR`, so Tunnel owner metadata,
