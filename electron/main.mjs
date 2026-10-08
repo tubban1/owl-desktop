@@ -38,6 +38,7 @@ import { createTunnelRecoveryPlan } from "./services/tunnel-recovery-plan.mjs";
 import { ConnectivityHostLaunchAgent } from "./services/connectivity-host-launch-agent.mjs";
 import { buildManagedTunnelConfig } from "./services/managed-tunnel-config.mjs";
 import { recoverRuntimeAccessProjection } from "./services/runtime-access-recovery.mjs";
+import { createRuntimeAccessRecoveryGate } from "./services/runtime-access-recovery-gate.mjs";
 import { createConnectivityWakeRecovery } from "./services/connectivity-wake-recovery.mjs";
 import { revokeDeviceCredentialLifecycle, rotateDeviceCredentialLifecycle } from "./services/device-credential-lifecycle.mjs";
 
@@ -916,7 +917,7 @@ async function reauthorizeCloudAccount() {
       };
     }
 
-    const recovered = await recoverRuntimeAccessAfterReconnect();
+    const recovered = await recoverRuntimeAccessAfterReconnect({ force: true });
     if (recovered?.state === "READY") {
       return {
         ...cloudAccountSnapshot(),
@@ -938,7 +939,15 @@ async function reauthorizeCloudAccount() {
   };
 }
 
-async function recoverRuntimeAccessAfterReconnect() {
+const runtimeAccessRecoveryGate = createRuntimeAccessRecoveryGate({
+  recover: async () => recoverRuntimeAccessAfterReconnectOnce(),
+});
+
+function recoverRuntimeAccessAfterReconnect({ force = false } = {}) {
+  return runtimeAccessRecoveryGate.run({ force });
+}
+
+async function recoverRuntimeAccessAfterReconnectOnce() {
   try {
     const service = cloudEnrollmentService ?? ensureCloudEnrollmentService();
     const recovered = await recoverRuntimeAccessProjection({
@@ -959,10 +968,20 @@ async function recoverRuntimeAccessAfterReconnect() {
     });
     if (!recovered) return null;
 
-    cloudAccountState = recovered.state;
     const runtimeAccess = recovered.runtimeAccess;
+    // A lease refresh was attempted, but an explicit LOCKED/REVOKED result
+    // is not a recovery. It must not create a misleading success event or
+    // recursively trigger the onCloudAccountUpdated refresh loop.
+    if (runtimeAccess?.state !== "READY") {
+      record("warn", "runtime-access", "Runtime access remains unavailable after lease refresh", {
+        state: runtimeAccess?.state ?? null,
+        reasonCode: runtimeAccess?.reasonCode ?? null,
+      });
+      return runtimeAccess ?? null;
+    }
+    cloudAccountState = recovered.state;
     record("info", "runtime-access", "Runtime access recovered after reconnect", {
-      state: runtimeAccess?.state ?? null,
+      state: runtimeAccess.state,
       deviceId: cloudAccountState.deviceId,
     });
     mainWindow?.webContents?.send(
@@ -1532,7 +1551,11 @@ async function runtimeSnapshot(options = {}) {
     effectiveRuntimeAccess?.state !== "READY"
   ) {
     const recovered = await recoverRuntimeAccessAfterReconnect();
-    if (recovered) effectiveRuntimeAccess = recovered;
+    if (recovered?.state === "READY") {
+      // Read Runtime's canonical current access after projection, not a
+      // cached Cloud snapshot or a failed attempt's temporary state.
+      effectiveRuntimeAccess = await client.runtimeAccess().catch(() => recovered);
+    }
   }
 
   const result = {
