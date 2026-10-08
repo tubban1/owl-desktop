@@ -33,6 +33,7 @@ import {
   type OperationsWorkstreamSummary,
 } from "./operationsGraphModel";
 import { explainCurrentActivity } from "./activityExplanation";
+import { buildFocusedFlow } from "./focusedFlowModel";
 
 const clock = (value?: string | null) =>
   value
@@ -482,7 +483,7 @@ export function LiveOperationsGraph({
       ));
   const focusedWorkstreamId = selectedStillExists
     ? selectedWorkstreamId
-    : (model.loopPaths[0]?.workstreamId ?? model.summaries[0]?.id ?? null);
+    : (model.summaries[0]?.id ?? model.loopPaths[0]?.workstreamId ?? null);
   const focusedSummary =
     model.summaries.find((item) => item.id === focusedWorkstreamId) ??
     model.summaries[0] ??
@@ -501,6 +502,10 @@ export function LiveOperationsGraph({
   const focusedStream = model.currentWorkstreams.find((stream) => stream.id === focusedWorkstreamId) ?? null;
   const activeNode = model.nodes.find((node) => node.current && node.workstreamId === focusedWorkstreamId) ?? null;
   const explanation = explainCurrentActivity({ stream: focusedStream, interaction: activeInteraction, node: activeNode, now });
+  const focusedFlow = useMemo(
+    () => buildFocusedFlow(model, focusedWorkstreamId, activeInteraction),
+    [model, focusedWorkstreamId, activeInteraction],
+  );
   const running = model.runningInteractions.length > 0;
 
   return (
@@ -545,17 +550,57 @@ export function LiveOperationsGraph({
         ))}
       </div>
 
-      <div className="operations-network-shell">
-        <div className="operations-network-head">
+      <div className="focused-path-shell">
+        <div className="focused-path-heading">
           <div>
-            <span className="eyebrow">REAL TOPOLOGY</span>
-            <strong>Observed traffic + explicit contract hops</strong>
-            <small className="network-legend">solid = observed · dotted = contract-inferred</small>
+            <span className="eyebrow">FOLLOW ONE REQUEST</span>
+            <h4>What happened, step by step</h4>
+            <p>One step per system stage. Unobserved hops are explicitly identified; history is not shown as live execution.</p>
           </div>
-          <span>
-            {model.nodes.length} nodes · {model.edges.length} links
-          </span>
+          {model.summaries.length > 0 && (
+            <label className="focused-path-select">
+              <span>Workstream</span>
+              <select value={focusedWorkstreamId ?? ""} onChange={(event) => setSelectedWorkstreamId(event.target.value || null)}>
+                {model.summaries.map((summary) => (
+                  <option key={summary.id} value={summary.id}>{summary.sourceLabel + " · " + summary.goal.slice(0, 60)}</option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
+        <div className="focused-path-steps" aria-label="Focused OWL request stages">
+          {focusedFlow.map((step, index) => (
+            <article key={step.id} className={"focused-stage " + step.state + " " + step.evidence}>
+              <div className="focused-stage-meta">
+                <span className="focused-stage-number">{index + 1}</span>
+                <span>{step.label}</span>
+                <span className={"focused-stage-evidence " + step.evidence}>{step.evidence === "observed" ? "Observed" : step.evidence === "contract" ? "Inferred" : step.evidence === "status" ? "Status only" : "Not seen"}</span>
+              </div>
+              <strong title={step.title}>{step.title}</strong>
+              <p title={step.detail}>{step.detail}</p>
+              {step.note && <small className="focused-stage-note">{step.note}</small>}
+              {step.state === "running" && explanation.elapsedMs !== null && <small className="focused-stage-timer">Elapsed {duration(explanation.elapsedMs)}{explanation.prolonged ? " · Check progress" : ""}</small>}
+              {step.hiddenCount > 0 && <small className="focused-stage-count">+{step.hiddenCount} other historical / shared nodes hidden</small>}
+            </article>
+          ))}
+        </div>
+        <div className="focused-path-footer">
+          <span><i className="focused-key observed" />Observed event</span>
+          <span><i className="focused-key contract" />Inferred contract hop</span>
+          <span><i className="focused-key status" />Live service status only</span>
+          <span>Open technical topology below for every node and link.</span>
+        </div>
+      </div>
+
+      <details className="operations-network-shell operations-network-details">
+        <summary className="operations-network-head">
+          <div>
+            <span className="eyebrow">TECHNICAL TOPOLOGY</span>
+            <strong>Show all observed nodes and inferred contract links (advanced)</strong>
+            <small className="network-legend">Edge labels appear on hover to prevent overlaps · solid = observed · dotted = inferred</small>
+          </div>
+          <span>{model.nodes.length} nodes · {model.edges.length} links <span aria-hidden="true">▾</span></span>
+        </summary>
 
         {model.groups.length === 0 ? (
           <div className="live-empty">
@@ -693,7 +738,7 @@ export function LiveOperationsGraph({
             </svg>
           </div>
         )}
-      </div>
+      </details>
 
       <div className="live-flow-legend">
         <span><i className="legend-dot active" /> executing / traffic</span>

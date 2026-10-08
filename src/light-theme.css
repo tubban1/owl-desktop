@@ -170,3 +170,61 @@ nav button.active { background: #e2f3e7 !important; color: #176239 !important; f
 /* Every observed tool remains inspectable, not just the top eight. */
 .stats-top-tools { max-height: 510px; overflow-y: auto; }
 .stats-tool-row { min-height: 23px; }
+
+/* Readable default: one workstream, six evidence-based stages rather than 30 overlapping SVG labels. */
+.focused-path-shell {
+  margin: 14px 0 12px;
+  padding: 20px;
+  border: 1px solid #d3e1d7;
+  border-radius: 13px;
+  background: #fff;
+}
+.focused-path-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; margin-bottom: 17px; }
+.focused-path-heading h4 { font-size: 17px; line-height: 1.3; color: #15352a; margin: 5px 0; }
+.focused-path-heading p { font-size: 12px; line-height: 1.5; color: #506d5b; margin: 3px 0 0; max-width: 600px; }
+.focused-path-select { min-width: 200px; max-width: 420px; display: grid; gap: 6px; flex: 1; color: #456451; font-weight: 600; font-size: 11px; }
+.focused-path-select select { width: 100%; min-height: 36px; padding: 7px 10px; border-radius: 8px; border: 1px solid #cbded1; color: #204636; background: #f9fcfa; font-size: 12px; }
+.focused-path-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.focused-stage { display: flex; flex-direction: column; gap: 9px; min-width: 0; min-height: 166px; padding: 16px; border: 1px solid #dce7df; border-radius: 11px; background: #f9fcfa; color: #203e30; box-shadow: 0 1px 1px rgba(20,61,34,.03); }
+.focused-stage.running { background: #ecf8ff; border: 2px solid #4d92bd; padding: 15px; }
+.focused-stage.attention { background: #fff5ef; border-color: #e0aa81; }
+.focused-stage.done { border-color: #b2d6ba; background: #f2fbf4; }
+.focused-stage.waiting { background: #fffaf0; border-color: #decba6; }
+.focused-stage-meta { display: flex; align-items: center; gap: 8px; color: #345d48; font-weight: 700; font-size: 12px; }
+.focused-stage-number { display: grid; place-items: center; width: 25px; height: 25px; flex: 0 0 25px; border-radius: 50%; background: #e1eee5; font-size: 12px; color: #1c5938; }
+.focused-stage.running .focused-stage-number { background: #cde9fd; color: #125686; }
+.focused-stage-evidence { margin-left: auto; font-size: 10px; border-radius: 5px; padding: 3px 6px; background: #e8eee9; font-weight: 600; white-space: nowrap; color: #506358; }
+.focused-stage-evidence.observed { background: #d7f2df; color: #165c32; }
+.focused-stage-evidence.contract { background: #edf1f7; color: #455a78; }
+.focused-stage-evidence.status { background: #f0f1ea; color: #6c6545; }
+.focused-stage strong { display: block; font-size: 16px; line-height: 1.3; color: #172e23; overflow-wrap: anywhere; }
+.focused-stage p { font-size: 12px; color: #466153; line-height: 1.55; margin: 0; overflow-wrap: anywhere; }
+.focused-stage-note { font-size: 11px; line-height: 1.45; color: #66786c; }
+.focused-stage-timer { color: #0d5c84; font-size: 12px; font-weight: 700; }
+.focused-stage-count { color: #708579; font-size: 10px; margin-top: auto; }
+.focused-path-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 19px; padding-top: 14px; color: #566d5f; font-size: 11px; }
+.focused-path-footer > span { display: inline-flex; align-items: center; gap: 5px; }
+.focused-key { width: 9px; height: 9px; display: inline-block; border-radius: 3px; background: #acc3b5; }
+.focused-key.observed { background: #65b47b; }
+.focused-key.contract { background: #99a9c6; }
+.focused-key.status { background: #bdbaa4; }
+/* The crowded engineering graph is opt-in. Its text is hover-revealed, not painted over every link. */
+.operations-network-details { margin: 10px 0 12px; }
+.operations-network-details > summary { cursor: pointer; list-style: none; background: #f7faf7 !important; color: #284838; }
+.operations-network-details > summary::-webkit-details-marker { display: none; }
+.operations-network-details > summary:hover { background: #eef5f0 !important; }
+.operations-network-details > summary strong { color: #193b2a !important; font-size: 12px !important; }
+.operations-network-details > summary .eyebrow { color: #4d715c !important; }
+.operations-network-details > summary > span { color: #466655 !important; font-size: 11px !important; white-space: nowrap; }
+.operations-network-details[open] > summary > span span { display: inline-block; transform: rotate(180deg); }
+.operations-network .network-edge-label,
+.operations-network .network-node-label,
+.operations-network .network-node-detail { opacity: 0; transition: opacity .12s; }
+.operations-network .network-edge-group:hover .network-edge-label,
+.operations-network .network-node:hover .network-node-label,
+.operations-network .network-node:hover .network-node-detail { opacity: 1; }
+.operations-network .network-node-label, .operations-network .network-node-detail,
+.operations-network .network-edge-label { paint-order: stroke; stroke: #fbfdfb !important; stroke-width: 5px; }
+.operations-network .network-edge-path { stroke-width: 1.5; }
+@media (max-width: 1200px) { .focused-path-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .focused-path-shell { padding: 13px; } .focused-path-steps { grid-template-columns: 1fr; } .focused-path-select { max-width: none; } .focused-stage { min-height: 125px; } }
