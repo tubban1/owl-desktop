@@ -61,6 +61,8 @@ export class CloudMcpCallConsumer {
     this.running = false;
     this.timer = null;
     this.tickPromise = null;
+    this.wakeEpoch = 0;
+    this.forceExecutorProbeAfterWake = false;
     this.failureCount = 0;
     this.lastPollAt = null;
     this.lastSuccessAt = null;
@@ -113,6 +115,26 @@ export class CloudMcpCallConsumer {
     this.timer.unref?.();
   }
 
+  markWakePending() {
+    this.wakeEpoch += 1;
+    this.lastSuccessAt = null;
+    this.forceExecutorProbeAfterWake = true;
+    this.failureCount = Math.max(1, this.failureCount);
+    this.lastError = {
+      at: new Date().toISOString(),
+      code: "CLOUD_WAKE_REVALIDATION_REQUIRED",
+      message: "Cloud MCP reachability must be re-proven after system resume.",
+    };
+    return this.snapshot();
+  }
+
+  async revalidateAfterWake({ alreadyInvalidated = false } = {}) {
+    if (!alreadyInvalidated) this.markWakePending();
+    await this.tickPromise?.catch(() => undefined);
+    if (!this.running) return this.snapshot();
+    return this.tick();
+  }
+
   tick() {
     if (this.tickPromise) return this.tickPromise;
     const run = this.runTick();
@@ -123,11 +145,18 @@ export class CloudMcpCallConsumer {
   }
 
   async runTick() {
+    const wakeEpoch = this.wakeEpoch;
     this.lastPollAt = new Date().toISOString();
     try {
-      await this.ensureExecutorReady();
+      await this.ensureExecutorReady(this.forceExecutorProbeAfterWake);
       const payload = await this.cloudClient.pullMcpCalls(this.batchLimit);
+      if (wakeEpoch !== this.wakeEpoch) {
+        const error = new Error("Pre-resume Cloud poll cannot prove post-resume readiness.");
+        error.code = "CLOUD_WAKE_PROOF_STALE";
+        throw error;
+      }
       const calls = Array.isArray(payload?.calls) ? payload.calls : [];
+      this.forceExecutorProbeAfterWake = false;
       this.failureCount = 0;
       this.lastError = null;
       this.lastSuccessAt = new Date().toISOString();
@@ -152,7 +181,7 @@ export class CloudMcpCallConsumer {
     }
   }
 
-  async ensureExecutorReady() {
+  async ensureExecutorReady(force = false) {
     if (typeof this.executor.probe !== "function") return;
     const snapshot = this.executor.snapshot?.() ?? null;
     const lastProofMs = snapshot?.lastProofAt ? Date.parse(snapshot.lastProofAt) : NaN;
@@ -160,7 +189,7 @@ export class CloudMcpCallConsumer {
       Number.isFinite(lastProofMs) &&
       Date.now() - lastProofMs < this.executorProbeIntervalMs &&
       !snapshot?.lastError;
-    if (proofFresh) return;
+    if (proofFresh && !force) return;
     await this.executor.probe();
     this.lastExecutorProbeAt = new Date().toISOString();
   }

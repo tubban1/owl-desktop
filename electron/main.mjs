@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, powerMonitor, shell } from "electron";
 import { configureOwlDesktopStorage } from "./storage-layout.mjs";
 import { DesktopStore } from "./store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
@@ -37,6 +37,7 @@ import { createTunnelRecoveryPlan } from "./services/tunnel-recovery-plan.mjs";
 import { ConnectivityHostLaunchAgent } from "./services/connectivity-host-launch-agent.mjs";
 import { buildManagedTunnelConfig } from "./services/managed-tunnel-config.mjs";
 import { recoverRuntimeAccessProjection } from "./services/runtime-access-recovery.mjs";
+import { createConnectivityWakeRecovery } from "./services/connectivity-wake-recovery.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let storageLayout;
@@ -2291,6 +2292,36 @@ async function runConnectivityHostOnly() {
     void reconcile();
   }, 15_000);
   reconciliationTimer.unref?.();
+
+  const wakeRecovery = createConnectivityWakeRecovery({
+    reconcile: async () => {
+      let recheckError = null;
+      try {
+        await client.wakeRecheck({ timeoutMs: 45_000 });
+      } catch (error) {
+        recheckError = error;
+      }
+      await reconcile();
+      if (recheckError) throw recheckError;
+    },
+    onEvent(level, message, meta) {
+      const payload = JSON.stringify({
+        level,
+        source: "wake-recovery",
+        message,
+        ...meta,
+      });
+      if (level === "warn") console.warn(payload);
+      else console.log(payload);
+    },
+  });
+  const onResume = () => {
+    void wakeRecovery.trigger("power_resume");
+  };
+  powerMonitor.on("resume", onResume);
+  app.once("before-quit", () => {
+    powerMonitor.removeListener("resume", onResume);
+  });
 
   console.log(
     JSON.stringify({

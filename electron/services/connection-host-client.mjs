@@ -152,6 +152,14 @@ export class ConnectionHostClient {
     });
   }
 
+  wakeRecheck(options = {}) {
+    return this.request("/connectivity/wake-recheck", {
+      method: "POST",
+      ...options,
+      timeoutMs: options.timeoutMs ?? 45_000,
+    });
+  }
+
   startTunnel(config, options = {}) {
     return this.request("/tunnel/start", {
       method: "POST",

@@ -8,6 +8,7 @@ import { PlannerContinuationStore } from "../electron/services/planner-continuat
 import { createDesktopBridgeRpc } from "./bridge-rpc.mjs";
 import { CloudHttpClient } from "../electron/services/cloud-http-client.mjs";
 import { CloudMcpCallConsumer } from "./cloud-mcp-call-consumer.mjs";
+import { recheckConnectivityAfterWake } from "./recheck-after-wake.mjs";
 import { CloudMcpCompletionStore } from "./cloud-mcp-completion-store.mjs";
 import { LocalMcpExecutor } from "./local-mcp-executor.mjs";
 
@@ -260,6 +261,18 @@ app.get("/diagnostics", (_req, res) => {
     eventCursor: eventSequence,
     events: events.slice(0, 120),
   });
+});
+
+app.post("/connectivity/wake-recheck", async (_req, res) => {
+  const result = await recheckConnectivityAfterWake({ tunnelSupervisor, cloudMcpConsumer });
+  record("info", "wake-recovery", "Connectivity Host re-probed after resume", {
+    tunnelChecked: result.tunnelChecked,
+    cloudMcpChecked: result.cloudMcpChecked,
+    tunnelReady: result.tunnel?.ready ?? null,
+    cloudMcpReady: result.cloudMcp?.ready ?? null,
+    errors: result.errors,
+  });
+  res.json({ ok: true, result });
 });
 
 app.post("/tunnel/start", async (req, res) => {

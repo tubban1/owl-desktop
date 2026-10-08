@@ -522,6 +522,13 @@ export class TunnelSupervisor {
     );
   }
 
+  markWakePending() {
+    if (this.desiredRunning && this.child) {
+      this.transitionReachability("recovering", "system_resume_pending_probe");
+    }
+    return this.status();
+  }
+
   async checkHealthNow() {
     const child = this.child;
     const generation = this.activeGeneration;
