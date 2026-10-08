@@ -72,6 +72,11 @@ declare global {
         } | null;
       }>;
       cloudListDevices(): Promise<CloudDeviceSummary[]>;
+      cloudRotateCurrentDeviceCredential(): Promise<{
+        deviceId: string;
+        rotated: true;
+      }>;
+      cloudRevokeCurrentDevice(): Promise<CloudDeviceSummary>;
       cloudListCommands(
         deviceId: string,
         limit?: number,

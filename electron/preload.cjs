@@ -26,6 +26,10 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   cloudSync: () => ipcRenderer.invoke("cloud:sync"),
   recoverConnectivity: () => ipcRenderer.invoke("connectivity:recover"),
   cloudListDevices: () => ipcRenderer.invoke("cloud:devices:list"),
+  cloudRotateCurrentDeviceCredential: () =>
+    ipcRenderer.invoke("cloud:device:credential:rotate"),
+  cloudRevokeCurrentDevice: () =>
+    ipcRenderer.invoke("cloud:device:revoke"),
   cloudListCommands: (deviceId, limit) =>
     ipcRenderer.invoke("cloud:commands:list", deviceId, limit),
   cloudCreateCommand: (deviceId, input) =>

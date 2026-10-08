@@ -17,7 +17,7 @@ import { IdentityVault } from "./services/identity-vault.mjs";
 import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
 import { CloudAccountAuth } from "./services/cloud-account-auth.mjs";
-import { CloudEnrollmentService } from "./services/cloud-enrollment-service.mjs";
+import { CloudEnrollmentService, cloudEnrollmentSecretNames } from "./services/cloud-enrollment-service.mjs";
 import { CloudControlPlaneService } from "./services/cloud-control-plane-service.mjs";
 import { RemoteSubmissionStore } from "./services/remote-submission-store.mjs";
 import { RemoteDeviceControlService } from "./services/remote-device-control-service.mjs";
@@ -38,6 +38,7 @@ import { ConnectivityHostLaunchAgent } from "./services/connectivity-host-launch
 import { buildManagedTunnelConfig } from "./services/managed-tunnel-config.mjs";
 import { recoverRuntimeAccessProjection } from "./services/runtime-access-recovery.mjs";
 import { createConnectivityWakeRecovery } from "./services/connectivity-wake-recovery.mjs";
+import { revokeDeviceCredentialLifecycle, rotateDeviceCredentialLifecycle } from "./services/device-credential-lifecycle.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let storageLayout;
@@ -1000,6 +1001,100 @@ async function logoutCloudAccount() {
   return cloudAccountSnapshot();
 }
 
+async function rotateCurrentCloudDeviceCredential() {
+  const settings = store.getSettings();
+  const deviceId = settings.cloudDeviceId?.trim();
+  if (!deviceId) {
+    throw new Error("This Mac is not enrolled as an OWL Cloud device.");
+  }
+
+  const result = await rotateDeviceCredentialLifecycle({
+    deviceId,
+    controlPlane: cloudControlPlane(),
+    restartCloudBridge: () => startCloudBridge(),
+    rebindCloudMcp: () => syncConnectionHostCloudMcp(),
+    stopCloudMcp: () => connectionHostClient?.stopCloudMcp(),
+    managedTunnelEnabled: settings.connectivityMode === "managed_tunnel",
+    restartManagedTunnel: () =>
+      reconcileManagedTunnel({
+        settings,
+        forceRestart: true,
+      }),
+  });
+
+  record("info", "cloud", "OWL Cloud device credential rotated", {
+    deviceId,
+    cloudMcpRebound: true,
+    managedTunnelRestarted: settings.connectivityMode === "managed_tunnel",
+    secretExposedToRenderer: false,
+  });
+  return result;
+}
+
+async function revokeCurrentCloudDevice() {
+  const settings = store.getSettings();
+  const deviceId = settings.cloudDeviceId?.trim();
+  if (!deviceId) {
+    throw new Error("This Mac is not enrolled as an OWL Cloud device.");
+  }
+
+  const { revokedDevice, runtimeAccess } =
+    await revokeDeviceCredentialLifecycle({
+      deviceId,
+      controlPlane: cloudControlPlane(),
+      deleteLocalCredential: async () => {
+        const credentialMeta = store
+          .listSecrets()
+          .find(
+            (entry) =>
+              entry.name === cloudEnrollmentSecretNames.deviceCredential &&
+              entry.project === cloudEnrollmentSecretNames.project,
+          );
+        if (credentialMeta) store.deleteSecret(credentialMeta.id);
+      },
+      stopCloudBridge: () => stopCloudBridge(),
+      stopCloudMcp: async () => {
+        if (externalConnectionHostEnabled) {
+          await connectionHostClient.stopCloudMcp();
+        }
+      },
+      stopTunnel: () => stopTunnel(),
+      updateLocalSettings: async () => {
+        store.updateSettings({
+          cloudDeviceId: "",
+          cloudEnabled: false,
+          ...(settings.connectivityMode === "custom_tunnel"
+            ? { tunnelEnabled: false, tunnelAutoStart: false }
+            : {}),
+        });
+      },
+      revokeRuntimeAccess: () =>
+        runtimeClient().revokeRuntimeAccess("CLOUD_DEVICE_REVOKED", {
+          idempotencyKey: `runtime-access-revoke:${deviceId}:device-revoked`,
+        }),
+    });
+
+  cloudAccountState = {
+    ...cloudAccountState,
+    status: cloudAccountState.account ? "ready" : "signed_out",
+    access: null,
+    runtimeAccess,
+    deviceId: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+  };
+  record("warn", "cloud", "This OWL Cloud device was revoked", {
+    deviceId,
+    runtimeAccess: runtimeAccess?.state ?? null,
+    customTunnelCredentialPreserved: true,
+  });
+  mainWindow?.webContents?.send(
+    "cloud:account-updated",
+    cloudAccountSnapshot(),
+  );
+  return revokedDevice;
+}
+
 function createAgentRequest(input) {
   if (!agentInbox) return null;
   const result = agentInbox.create(input);
@@ -1691,6 +1786,12 @@ function registerIpc() {
   });
   ipcMain.handle("cloud:devices:list", () =>
     cloudControlPlane().listDevices(),
+  );
+  ipcMain.handle("cloud:device:credential:rotate", () =>
+    rotateCurrentCloudDeviceCredential(),
+  );
+  ipcMain.handle("cloud:device:revoke", () =>
+    revokeCurrentCloudDevice(),
   );
   ipcMain.handle("cloud:commands:list", (_event, deviceId, limit) =>
     cloudControlPlane().listCommands(deviceId, limit),

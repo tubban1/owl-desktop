@@ -141,6 +141,20 @@ export class CloudHttpClient {
     });
   }
 
+  rotateDeviceCredential(userJwt, deviceId) {
+    return this.request(
+      `/v1/devices/${encodeURIComponent(deviceId)}/credential/rotate`,
+      { method: "POST", auth: "user", userJwt },
+    );
+  }
+
+  revokeDevice(userJwt, deviceId) {
+    return this.request(
+      `/v1/devices/${encodeURIComponent(deviceId)}/revoke`,
+      { method: "POST", auth: "user", userJwt },
+    );
+  }
+
   listCommands(userJwt, deviceId, limit = 50) {
     const bounded = Math.min(Math.max(Number(limit) || 50, 1), 100);
     return this.request(

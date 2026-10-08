@@ -95,13 +95,18 @@ function Capability({
 export function DevicesPage({
   accountReady,
   currentDeviceId,
+  onRotateCurrentDeviceCredential,
+  onRevokeCurrentDevice,
 }: {
   accountReady: boolean;
   currentDeviceId: string | null;
+  onRotateCurrentDeviceCredential: () => Promise<void>;
+  onRevokeCurrentDevice: () => Promise<void>;
 }) {
   const [devices, setDevices] = useState<CloudDeviceSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState<"rotate" | "revoke" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
 
@@ -150,6 +155,38 @@ export function DevicesPage({
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const rotateCurrentCredential = async () => {
+    setActionBusy("rotate");
+    try {
+      await onRotateCurrentDeviceCredential();
+      await loadDevices();
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  const revokeCurrentDevice = async () => {
+    const confirmed = window.confirm(
+      "Revoke this Mac from OWL LAB? Cloud Durable MCP and the local Tunnel process will stop, Runtime execution access will be revoked, and this device must enroll again. Your own Custom Tunnel API key will not be deleted.",
+    );
+    if (!confirmed) return;
+
+    setActionBusy("revoke");
+    try {
+      await onRevokeCurrentDevice();
+      await loadDevices();
+      setSelectedId(null);
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setActionBusy(null);
     }
   };
 
@@ -489,12 +526,36 @@ export function DevicesPage({
                 />
               </div>
 
+              {selected.deviceId === currentDeviceId && (
+                <div className="device-actions">
+                  <button
+                    className="secondary"
+                    disabled={actionBusy !== null}
+                    onClick={() => void rotateCurrentCredential()}
+                  >
+                    <RefreshCw
+                      size={14}
+                      className={actionBusy === "rotate" ? "spin" : ""}
+                    />
+                    Rotate device credential
+                  </button>
+                  <button
+                    className="secondary danger-text"
+                    disabled={actionBusy !== null}
+                    onClick={() => void revokeCurrentDevice()}
+                  >
+                    <Ban size={14} />
+                    Revoke this device
+                  </button>
+                </div>
+              )}
+
               <div className="device-product-note">
                 <ShieldCheck size={15} />
                 <p>
-                  This page describes device identity, authorization, presence and
-                  capability. Actual agent work is started and observed in Monitor
-                  or by a connected agent/Worker, not by a device test button.
+                  Sign out keeps this device enrolled. Revoke is different: it
+                  stops OWL Cloud remote access for this Mac and requires a new
+                  enrollment. A user-managed Custom Tunnel key is preserved.
                 </p>
               </div>
             </>

@@ -913,6 +913,14 @@ export default function App() {
         {page === "devices" && <DevicesPage
           accountReady={cloudAccount?.status === "ready"}
           currentDeviceId={cloudAccount?.deviceId ?? snapshot?.cloud.deviceId ?? null}
+          onRotateCurrentDeviceCredential={async () => {
+            await window.owlDesktop.cloudRotateCurrentDeviceCredential();
+            await refresh(false);
+          }}
+          onRevokeCurrentDevice={async () => {
+            await window.owlDesktop.cloudRevokeCurrentDevice();
+            await refresh(false);
+          }}
         />}
 
         {page === "sessions" && <>

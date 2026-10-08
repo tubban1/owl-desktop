@@ -146,6 +146,45 @@ export class CloudControlPlaneService {
     return devices.map(safeDevice).filter((device) => device.deviceId);
   }
 
+  assertCurrentDevice(deviceId) {
+    if (!deviceId) throw codedError("DEVICE_ID_REQUIRED", "deviceId is required.");
+    const currentDeviceId = this.store.getSettings?.()?.cloudDeviceId ?? null;
+    if (!currentDeviceId || currentDeviceId !== deviceId) {
+      throw codedError(
+        "CURRENT_DEVICE_REQUIRED",
+        "Credential lifecycle actions are limited to this enrolled OWL LAB device.",
+      );
+    }
+  }
+
+  async rotateCurrentDeviceCredential(deviceId) {
+    this.assertCurrentDevice(deviceId);
+    const userJwt = await this.userJwt();
+    const rotated = await this.cloudClient.rotateDeviceCredential(userJwt, deviceId);
+    if (
+      rotated?.deviceId !== deviceId ||
+      typeof rotated?.deviceCredential !== "string" ||
+      !rotated.deviceCredential.startsWith(`owldev1.${deviceId}.`)
+    ) {
+      throw codedError(
+        "DEVICE_CREDENTIAL_ROTATION_INVALID",
+        "OWL Cloud returned an invalid rotated device credential.",
+      );
+    }
+    this.store.upsertSecret({
+      name: cloudEnrollmentSecretNames.deviceCredential,
+      project: cloudEnrollmentSecretNames.project,
+      value: rotated.deviceCredential,
+    });
+    return { deviceId, rotated: true };
+  }
+
+  async revokeCurrentDevice(deviceId) {
+    this.assertCurrentDevice(deviceId);
+    const userJwt = await this.userJwt();
+    return safeDevice(await this.cloudClient.revokeDevice(userJwt, deviceId));
+  }
+
   async listCommands(deviceId, limit = 50) {
     if (!deviceId) throw codedError("DEVICE_ID_REQUIRED", "deviceId is required.");
     const userJwt = await this.userJwt();
