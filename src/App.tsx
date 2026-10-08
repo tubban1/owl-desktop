@@ -12,16 +12,20 @@ import { deriveWorkState } from "./workState";
 import { buildOnboardingModel } from "./onboardingModel";
 import { MonitorPage } from "./monitor/MonitorPage";
 import { DevicesPage } from "./devices/DevicesPage";
+import owlLogo from "../assets/owl-logo-ui.png";
+import { StatisticsPanel } from "./statistics/StatisticsPanel";
+import type { UsageStatisticsSnapshot } from "./statistics/statisticsModel";
 import {
   ApprovalAttention,
   pendingApprovals,
 } from "./approvals/ApprovalAttention";
 
-type Page = "overview" | "monitor" | "devices" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
+type Page = "overview" | "monitor" | "statistics" | "devices" | "sessions" | "agent-inbox" | "logs" | "runtime" | "skills" | "accounts" | "secrets" | "settings";
 
 const nav = [
   { id: "overview" as Page, label: "Home", icon: Gauge },
   { id: "monitor" as Page, label: "Monitor", icon: ChartNoAxesCombined },
+  { id: "statistics" as Page, label: "Statistics", icon: Activity },
   { id: "devices" as Page, label: "Devices", icon: Laptop },
   { id: "skills" as Page, label: "Skills", icon: Puzzle },
   { id: "accounts" as Page, label: "Account", icon: UserRound },
@@ -95,6 +99,7 @@ export default function App() {
   const [accounts, setAccounts] = useState<AccountMeta[]>([]);
   const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
   const [liveActivity, setLiveActivity] = useState<ActivityEntry[]>([]);
+  const [usageStats, setUsageStats] = useState<UsageStatisticsSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [secretDraft, setSecretDraft] = useState({ name: "", project: "global", value: "" });
   const [accountDraft, setAccountDraft] = useState({
@@ -494,6 +499,19 @@ export default function App() {
     };
   }, [page]);
 
+  useEffect(() => {
+    if (page !== "overview" && page !== "statistics") return;
+    let cancelled = false;
+    const poll = async () => {
+      if (document.hidden) return;
+      const stats = await window.owlDesktop.statistics().catch(() => null);
+      if (!cancelled && stats) setUsageStats(stats);
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 15000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [page]);
+
   const activityRows = useMemo(() => liveActivity.length > 0 ? liveActivity : (snapshot?.activity ?? []), [liveActivity, snapshot]);
   const logSources = useMemo(() => Array.from(new Set(activityRows.map((entry) => entry.source))).sort(), [activityRows]);
   const filteredActivityRows = useMemo(() => {
@@ -611,7 +629,7 @@ export default function App() {
       <div className="onboarding-shell loading">
         <div className="onboarding-drag-region" />
         <div className="onboarding-loading">
-          <div className="brand-mark">O</div>
+          <img className="brand-logo" src={owlLogo} alt="OWL LAB logo" />
           <strong>Preparing OWL LAB…</strong>
           <span>Checking this Mac and your saved setup.</span>
         </div>
@@ -778,7 +796,7 @@ export default function App() {
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="sidebar-drag-region" />
-      <div className="brand"><div className="brand-mark">O</div><div><strong>OWL LAB</strong><span>Desktop</span></div></div>
+      <div className="brand"><img className="brand-logo" src={owlLogo} alt="OWL LAB logo" /><div><strong>OWL LAB</strong><span>Desktop</span></div></div>
       <nav>{nav.map((item) => {
         const Icon = item.icon;
         return <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}><Icon size={17} /><span>{item.label}</span></button>;
@@ -885,6 +903,7 @@ export default function App() {
             <MetricCard label="Approvals" value={pendingRuntimeApprovals.length} caption="Need your decision" icon={ShieldCheck} />
             <MetricCard label="Device access" value={runtimeAccess?.state ?? "—"} caption={runtimeAccess?.grant?.signatureVerified ? "Cloud verified" : "Runtime gate"} icon={Laptop} />
           </div>
+          <StatisticsPanel stats={usageStats} />
           <div className="two-col">
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">SYSTEM HEALTH</span><h3>Connections</h3></div></div>
               <div className="component-list">
@@ -899,6 +918,11 @@ export default function App() {
               <div className="activity-list">{activityRows.slice(0, 5).map((entry) => <div key={entry.id}><span className={"log-dot " + entry.level} /><p><strong>{entry.message}</strong><small>{entry.source} · {formatTime(entry.at)}</small></p></div>)}{activityRows.length === 0 && <div className="empty">No local events yet.</div>}</div>
             </section>
           </div>
+        </>}
+
+        {page === "statistics" && <>
+          <SectionHeader title="Statistics" description="Understand when OWL works, which tools it uses, and where errors or delays occur." action={<button className="secondary" onClick={() => void window.owlDesktop.statistics().then(setUsageStats)}>Refresh statistics</button>} />
+          <StatisticsPanel stats={usageStats} />
         </>}
 
         {page === "monitor" && <MonitorPage

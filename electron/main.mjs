@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, powerMonitor, shell } from "electron";
 import { configureOwlDesktopStorage } from "./storage-layout.mjs";
 import { DesktopStore } from "./store.mjs";
+import { UsageStatisticsStore } from "./services/usage-statistics-store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
@@ -104,6 +105,7 @@ let connectionHostEventCursor = 0;
 let desktopCapabilityBridge;
 const seenConnectionHostEventIds = new Set();
 const activity = [];
+let usageStatistics = null;
 
 const record = (level, source, message, meta = {}) => {
   activity.unshift({
@@ -114,6 +116,7 @@ const record = (level, source, message, meta = {}) => {
     message,
     meta,
   });
+  usageStatistics?.ingest(activity[0]);
   if (activity.length > 200) activity.length = 200;
 };
 
@@ -134,6 +137,7 @@ function ingestConnectionHostEvents(events = []) {
       message: event.message ?? "Connection Host event",
       meta: event.meta ?? {},
     });
+    usageStatistics?.ingest(activity[0]);
   }
   while (seenConnectionHostEventIds.size > 800) {
     const oldest = seenConnectionHostEventIds.values().next().value;
@@ -1671,6 +1675,10 @@ function createWindow() {
 }
 
 function registerIpc() {
+  ipcMain.handle("desktop:statistics", async () => {
+    if (externalConnectionHostEnabled) await refreshConnectionHost();
+    return usageStatistics?.snapshot() ?? { since: new Date().toISOString(), days: [] };
+  });
   ipcMain.handle("desktop:activity:list", async () => {
     if (externalConnectionHostEnabled) await refreshConnectionHost();
     return activity.slice(0, 200);
@@ -2834,6 +2842,8 @@ if (packagedConnectivityHostSoakOnly) {
   });
 
   app.whenReady().then(async () => {
+    usageStatistics = new UsageStatisticsStore({ file: path.join(app.getPath("userData"), "usage-statistics-v1.json") });
+    for (const entry of [...activity].reverse()) usageStatistics.ingest(entry);
     store = new DesktopStore();
     if (app.isPackaged) {
       const token = connectivityHostControlToken({ create: true });
@@ -2987,6 +2997,7 @@ if (packagedConnectivityHostSoakOnly) {
   });
 
   app.on("before-quit", () => {
+    usageStatistics?.flush();
     void devAuthCallbackServer?.stop();
     void cloudBridge?.stop();
     runtimeAgentRequestEventBridge?.stop();

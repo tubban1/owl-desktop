@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -32,6 +32,7 @@ import {
   type OperationsState,
   type OperationsWorkstreamSummary,
 } from "./operationsGraphModel";
+import { explainCurrentActivity } from "./activityExplanation";
 
 const clock = (value?: string | null) =>
   value
@@ -341,6 +342,13 @@ function TaskSummaryCard({
       </div>
 
       <p>{summary.summaryText}</p>
+      <p className="ops-summary-explained">{summary.status === "completed"
+        ? "This workstream has finished. Check errors and the event history below for details."
+        : summary.status === "attention"
+          ? "OWL reported a problem. Review the failed call before continuing."
+          : summary.status === "waiting"
+            ? "The work is paused or awaiting another action; this does not automatically mean it failed."
+            : "This is the current work history. Tool calls are individual operations, not completed tasks."}</p>
 
       <div className="ops-summary-metrics">
         <div>
@@ -352,9 +360,9 @@ function TaskSummaryCard({
           <strong>{summary.runtimeActionCount}</strong>
         </div>
         <div>
-          <span>Tasks</span>
+          <span>Runtime tasks</span>
           <strong>
-            {summary.completedTaskCount}/{summary.taskCount}
+            {summary.taskCount === 0 ? "—" : summary.completedTaskCount + "/" + summary.taskCount}
           </strong>
         </div>
         <div>
@@ -423,6 +431,8 @@ function TaskSummaryCard({
         </>
       )}
 
+      <p className="ops-summary-definitions">MCP calls = operations requested through ChatGPT or other agents. Runtime actions = execution steps visible to Runtime. Runtime tasks = durable jobs; “—” means none recorded here. Errors = observed failed interactions, not necessarily a failed workstream.</p>
+
       <div className="ops-summary-time">
         <span>Started {clock(summary.startedAt)}</span>
         <ArrowRight size={11} />
@@ -456,6 +466,11 @@ export function LiveOperationsGraph({
   );
 
   const network = useMemo(() => buildNetworkLayout(model), [model]);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState<string | null>(
     null,
   );
@@ -482,6 +497,10 @@ export function LiveOperationsGraph({
   const latest = focusedWorkstreamId
     ? visibleInteractions[0] ?? null
     : model.latestInteraction;
+  const activeInteraction = visibleInteractions.find((item) => item.status === "running") ?? latest;
+  const focusedStream = model.currentWorkstreams.find((stream) => stream.id === focusedWorkstreamId) ?? null;
+  const activeNode = model.nodes.find((node) => node.current && node.workstreamId === focusedWorkstreamId) ?? null;
+  const explanation = explainCurrentActivity({ stream: focusedStream, interaction: activeInteraction, node: activeNode, now });
   const running = model.runningInteractions.length > 0;
 
   return (
@@ -500,6 +519,14 @@ export function LiveOperationsGraph({
           <strong>{running ? "Traffic running" : "Live"}</strong>
           <span>{model.interactions.length} interactions</span>
         </div>
+      </div>
+
+      <div className={"live-plain-status " + (explanation.attention ? "attention" : explanation.prolonged ? "prolonged" : "")} aria-live="polite">
+        <div className="live-plain-header"><strong>{explanation.title}</strong><span>{explanation.elapsedMs !== null ? "Current call: " + duration(explanation.elapsedMs) : explanation.lastUpdatedAt ? "Last update: " + clock(explanation.lastUpdatedAt) : "Waiting for events"}</span></div>
+        <p>{explanation.explanation}</p>
+        <div className="live-plain-details"><span><b>Current node:</b> {explanation.nodeLabel}</span>{explanation.tool && <span><b>Tool:</b> <code>{explanation.tool}</code></span>}{focusedStream && <span><b>Workstream:</b> {focusedStream.status}</span>}</div>
+        {explanation.note && <p className="live-plain-note">{explanation.note}</p>}
+        {focusedStream?.nextActions?.[0] && <p className="live-plain-next"><b>Next:</b> {focusedStream.nextActions[0]}</p>}
       </div>
 
       <div className="live-assurance-bar">
