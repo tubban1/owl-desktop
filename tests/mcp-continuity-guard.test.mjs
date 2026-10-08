@@ -170,15 +170,21 @@ describe("MCP Conversation Continuity guard", () => {
       risk: "high",
     });
 
+    const missingCurrent = jsonText(await client.callTool({
+      name: "workstream_progress",
+      arguments: { workstream_id: source.ownerId },
+    }));
+    expect(missingCurrent.code).toBe("PROGRESS_CURRENT_REQUIRED");
+
     const confirmed = jsonText(await client.callTool({
       name: "workstream_progress",
       arguments: {
         workstream_id: source.ownerId,
-        current: "Visible handoff progress acknowledged",
         progress_boundary_id: payload.progressBoundary.boundaryId,
         user_visible_progress: withHandoff.progressBoundary.userVisibleProgress,
       },
     }));
+    expect(confirmed.current).toBe(payload.progressBoundary.current);
     expect(confirmed.acknowledgedBoundaryId).toBe(
       payload.progressBoundary.boundaryId,
     );

@@ -531,6 +531,7 @@ function progressBoundaryError(context, pending, fallbackTool) {
     pending: true,
     toolStepsSinceProgress: pending.toolStepsSinceProgress,
     silenceMs: pending.silenceMs,
+    current: pending.current ?? null,
     userVisibleProgress,
     ...(continuityNotice ? { continuityNotice } : {}),
     boundaryRecorded: false,
@@ -3018,7 +3019,7 @@ export function createOwlMcpServer() {
     "Record a concise workstream progress update. For a pending PROGRESS_UPDATE_REQUIRED boundary, progress_boundary_id and user_visible_progress must exactly match the published boundary; only a matching acknowledgement releases state-changing operations. The record excludes full chat transcripts and private content.",
     {
       completed: z.array(z.string().min(1).max(600)).max(20).optional(),
-      current: z.string().min(1).max(600),
+      current: z.string().min(1).max(600).optional(),
       next_actions: z.array(z.string().min(1).max(600)).max(20).optional(),
       summary: z.string().min(1).max(1600).optional(),
       progress_boundary_id: z.string().min(1).max(220).optional(),
@@ -3047,11 +3048,21 @@ export function createOwlMcpServer() {
       status,
     }) => {
       const context = currentMcpRequestContext();
+      if (!current && !progress_boundary_id) {
+        const error = new Error("PROGRESS_CURRENT_REQUIRED: current is required for a new progress event.");
+        error.code = "PROGRESS_CURRENT_REQUIRED";
+        throw error;
+      }
+      const existing = plannerContinuation().get(context.runtimeSessionId);
+      const resolvedCurrent = current ??
+        existing?.workstream?.progressBoundary?.current ??
+        existing?.checkpoint?.phase ??
+        "Progress acknowledgement";
       const owner = plannerContinuation().progressWorkstream(
         context.runtimeSessionId,
         {
           ...(completed ? { completed } : {}),
-          current,
+          current: resolvedCurrent,
           ...(next_actions ? { nextActions: next_actions } : {}),
           ...(summary ? { summary } : {}),
           ...(progress_boundary_id
@@ -3067,7 +3078,7 @@ export function createOwlMcpServer() {
         completed?.length
           ? "Finished: " + completed.slice(0, 2).join("; ") + "."
           : null,
-        "Now: " + current + ".",
+        "Now: " + resolvedCurrent + ".",
         next_actions?.length
           ? "Next: " + next_actions.slice(0, 2).join("; ") + "."
           : null,
@@ -3078,7 +3089,7 @@ export function createOwlMcpServer() {
         lastProgressAt: owner.workstream?.lastProgressAt ?? null,
         toolStepsSinceProgress:
           owner.workstream?.toolStepsSinceProgress ?? 0,
-        current,
+        current: resolvedCurrent,
         nextActions: next_actions ?? [],
         acknowledgedBoundaryId: progress_boundary_id ?? null,
         userVisibleProgress: user_visible_progress ?? visibleProgress,

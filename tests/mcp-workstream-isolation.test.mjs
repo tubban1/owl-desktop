@@ -246,7 +246,6 @@ describe("MCP workstream isolation", () => {
       name: "workstream_progress",
       arguments: {
         workstream_id: a,
-        current: "Reporting progress before more tool work",
         progress_boundary_id: boundary.progressBoundary.boundaryId,
         user_visible_progress: boundary.progressBoundary.userVisibleProgress,
       },
