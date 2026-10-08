@@ -48,7 +48,9 @@
     "prepare:helper": "node scripts/prepare-helper-component.mjs",
     "prepare:release-components": "npm run prepare:tunnel && npm run prepare:runtime-node && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon",
     "verify:local-bootstrap-live": "node scripts/verify-local-bootstrap-live.mjs",
-    "prepare:runtime-node": "node scripts/prepare-runtime-node-component.mjs"
+    "prepare:runtime-node": "node scripts/prepare-runtime-node-component.mjs",
+    "dev:full:status": "node scripts/dev-full-control.mjs status",
+    "dev:full:stop": "node scripts/dev-full-control.mjs stop"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { DevChildSupervisor } from "./lib/dev-child-supervisor.mjs";
+import { writeDevOwner, removeDevOwner } from "./lib/dev-full-owner.mjs";
 
 const desktopRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -380,9 +381,11 @@ async function waitForDevRuntime(timeoutMs = 30_000) {
   );
 }
 
+let ownedDevRecord = null;
 function shutdown(code = 0) {
   if (childSupervisor.shuttingDown) return;
   childSupervisor.shutdown();
+  if (ownedDevRecord) removeDevOwner(ownedDevRecord);
   setTimeout(() => process.exit(code), 250).unref();
 }
 
@@ -490,6 +493,7 @@ if (!fs.existsSync(tunnelBinary)) {
 }
 
 try {
+  ownedDevRecord = writeDevOwner(desktopRoot);
   await assertPortFree(runtimeDevPort, "OWL Runtime DEV");
   await assertPortFree(mcpPort, "OWL MCP");
   await assertPortFree(connectionHostPort, "OWL Connection Host");
