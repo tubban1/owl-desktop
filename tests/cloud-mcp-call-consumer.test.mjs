@@ -47,6 +47,32 @@ describe("CloudMcpCallConsumer parity", () => {
     await consumer.stop();
   });
 
+  it("forwards read_image over Cloud without persisting its base64 content", async () => {
+    const callImage = { ...call(), toolName: "read_image", arguments: {path: "/authorized/img.jpg"} };
+    const encoded = Buffer.alloc(20000, 0xa5).toString("base64");
+    const result = { content: [{ type:"text", text:'{"mimeType":"image/jpeg"}' },
+      {type:"image", mimeType:"image/jpeg", data:encoded}] };
+    const cloudClient = {
+      pullMcpCalls: vi.fn(async()=>({calls:[callImage]})),
+      claimMcpCall: vi.fn(async()=>({...callImage,status:"executing"})),
+      completeMcpCall: vi.fn(async()=>({...callImage,status:"completed"})),
+    };
+    const completionStore = {get:vi.fn(()=>null),put:vi.fn(),delete:vi.fn()};
+    const events=[];
+    const consumer = new CloudMcpCallConsumer({
+      cloudClient,completionStore,
+      executor:{execute:vi.fn(async()=>result),snapshot:()=>null},
+      pollIntervalMs:60000,
+      onEvent:(level,message,meta)=>events.push({level,message,meta}),
+    });
+    await consumer.start();
+    expect(cloudClient.completeMcpCall).toHaveBeenCalledWith("mcp_1",expect.objectContaining({result}));
+    expect(completionStore.put).not.toHaveBeenCalled();
+    expect(JSON.stringify(events)).not.toContain(encoded);
+    expect(consumer.snapshot().processed).toBe(1);
+    await consumer.stop();
+  });
+
   it("skips a call already claimed by another connector", async () => {
     const conflict = Object.assign(new Error("claimed"), {
       code: "CONFLICT",

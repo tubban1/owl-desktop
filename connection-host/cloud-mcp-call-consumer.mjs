@@ -285,10 +285,29 @@ export class CloudMcpCallConsumer {
         ? { error: sanitizedError(executionError) }
         : { result };
 
-      await this.completionStore?.put?.(call.callId, {
-        requestDigest: call.requestDigest ?? null,
-        payload: completionPayload,
-      });
+      const containsNativeImage = !executionError &&
+        Array.isArray(result?.content) &&
+        result.content.some((block) => block?.type === "image");
+      // Image bytes are private user content. Read_image is idempotent,
+      // so we can safely retry it rather than persist image Base64 to
+      // the local unencrypted Cloud MCP completion journal.
+      if (containsNativeImage && call.toolName !== "read_image") {
+        const error = new Error("Native image responses from other tools require explicit binary transport support.");
+        error.code = "UNSUPPORTED_BINARY_COMPLETION";
+        throw error;
+      }
+      if (!containsNativeImage) {
+        await this.completionStore?.put?.(call.callId, {
+          requestDigest: call.requestDigest ?? null,
+          payload: completionPayload,
+        });
+      } else {
+        this.onEvent("info", "Cloud MCP read-only image forwarded without local binary journal", {
+          callId: call.callId,
+          toolName: call.toolName,
+          imageCount: result.content.filter((block) => block?.type === "image").length,
+        });
+      }
 
       try {
         await this.cloudClient.completeMcpCall(call.callId, {
