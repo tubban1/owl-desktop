@@ -1,4 +1,8 @@
 import http from "node:http";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { PlannerContinuationStore } from "../electron/services/planner-continuation-store.mjs";
 import { afterEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -8,6 +12,10 @@ const closers = [];
 const reconnectSoakCycles = Math.max(
   1,
   Math.min(Number(process.env.OWL_MCP_RECONNECT_SOAK_CYCLES) || 25, 500),
+);
+const bindingSoakCycles = Math.max(
+  1,
+  Math.min(Number(process.env.OWL_MCP_BIND_SOAK_CYCLES) || 15, 500),
 );
 
 afterEach(async () => {
@@ -22,7 +30,7 @@ async function rawInitialize(url, ownerId) {
     headers: {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
-      "x-owl-owner-id": ownerId,
+      ...(ownerId ? { "x-owl-owner-id": ownerId } : {}),
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -43,6 +51,25 @@ async function rawInitialize(url, ownerId) {
   expect(sessionId).toBeTruthy();
   await response.text();
   return sessionId;
+}
+
+async function rawCall(url, sessionId, method, params, id = 2) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      "mcp-session-id": sessionId,
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+  });
+  expect(response.status).toBe(200);
+  const body = await response.text();
+  const data = response.headers.get("content-type")?.includes("text/event-stream")
+    ? body.split(/\r?\n/).find((line) => line.startsWith("data: "))?.slice(6)
+    : body;
+  expect(data).toBeTruthy();
+  return JSON.parse(data);
 }
 
 async function startFakeRuntime() {
@@ -77,6 +104,60 @@ async function startFakeRuntime() {
 }
 
 describe("OWL MCP reconnect soak", () => {
+  it("reconciles old inactive transports when new no-header sessions bind the same workstream", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owl-mcp-rebind-"));
+    closers.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const continuation = new PlannerContinuationStore({
+      file: path.join(dir, "planner-continuation.json"),
+    });
+    const runtime = await startFakeRuntime();
+    const events = [];
+    let tick = 100;
+    const mcp = await startOwlMcpHttpServer({
+      port: 0,
+      runtimeBaseUrl: runtime.baseUrl,
+      plannerContinuation: continuation,
+      ownerSupersedeGraceMs: 1_000,
+      sessionIdleTtlMs: 60_000,
+      maxSessions: 8,
+      monotonicNow: () => tick,
+      onEvent: (level, message, meta) => events.push({ level, message, meta }),
+    });
+    closers.push(() => mcp.close());
+
+    const first = await rawInitialize(mcp.url);
+    const opened = await rawCall(mcp.url, first, "tools/call", {
+      name: "workstream_open",
+      arguments: { goal: "Long-lived chat workstream", label: "Chat A" },
+    });
+    expect(opened.error).toBeUndefined();
+    const workstreamId = JSON.parse(opened.result.content[0].text).workstreamId;
+    expect(workstreamId).toMatch(/^owl-workstream:/);
+    expect(mcp.snapshot().sessions[0].ownerSource).toBe("workstream-binding");
+
+    // Each new HTTP transport may start with no x-owl-owner-id header. It
+    // only gains its durable identity when the workstream is resumed.
+    for (let cycle = 0; cycle < bindingSoakCycles; cycle += 1) {
+      tick += 1_100;
+      const next = await rawInitialize(mcp.url);
+      const resumed = await rawCall(mcp.url, next, "tools/call", {
+        name: "workstream_open",
+        arguments: { goal: "Long-lived chat workstream", resume_workstream_id: workstreamId },
+      }, cycle + 3);
+      expect(resumed.error).toBeUndefined();
+      expect(JSON.parse(resumed.result.content[0].text).workstreamId).toBe(workstreamId);
+      const bound = mcp.snapshot().sessions;
+      expect(bound.map((session) => session.transportSessionId)).toEqual([next]);
+      expect(bound[0].runtimeSessionId).toBe(workstreamId);
+    }
+
+    expect(mcp.sessionCount()).toBe(1);
+    expect(events.filter((event) => event.message === "MCP transport session reclaimed" &&
+      event.meta?.reason === "session_cap")).toHaveLength(0);
+    expect(events.filter((event) => event.message === "MCP stale owner transports superseded")).toHaveLength(bindingSoakCycles);
+    expect(continuation.get(workstreamId).workstream.status).toBe("active");
+  }, 30_000);
+
   it("cleans up transport sessions across repeated reconnects", async () => {
     const runtime = await startFakeRuntime();
     const mcp = await startOwlMcpHttpServer({

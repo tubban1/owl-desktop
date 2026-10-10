@@ -374,6 +374,14 @@ export async function startOwlMcpHttpServer({
                   ownerSource: "workstream-binding",
                 },
               );
+              // A freshly initialized ChatGPT transport can be ephemeral until
+              // workstream_open / the first tool binds it to a durable owner.
+              // Reconcile old transports here too: without this, callers that
+              // re-initialize on every tool leave owner-bound sessions behind
+              // until session_cap or idle_ttl is reached.
+              // Supersession respects the grace period and NEVER closes a live
+              // GET event stream or in-flight tools/call.
+              reclaimSupersededOwnerSessions(workstreamId, transportSessionId);
             },
             unbindWorkstream: (workstreamId) => {
               if (

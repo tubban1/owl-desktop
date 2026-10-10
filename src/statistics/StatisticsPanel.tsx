@@ -40,6 +40,7 @@ export function StatisticsPanel({ stats }: { stats: UsageStatisticsSnapshot | nu
       <div><Network size={19}/><small>Session opens</small><strong>{fmt(model.total.sessionOpens)}</strong><span>New MCP transport sessions observed</span></div>
       <div><Network size={19}/><small>Session-cap evictions</small><strong>{fmt(model.total.capEvictions)}</strong><span>Inactive transports reclaimed at capacity</span></div>
       <div><Network size={19}/><small>Idle reclamations</small><strong>{fmt(model.total.idleReclaimed)}</strong><span>Idle transports reclaimed by TTL</span></div>
+      <div><Network size={19}/><small>Owner rebind cleanups</small><strong>{fmt(model.total.ownerSuperseded)}</strong><span>Inactive, superseded MCP transports safely released</span></div>
       {model.total.reconnects > 0 && <div><Network size={19}/><small>Legacy reclamations</small><strong>{fmt(model.total.reconnects)}</strong><span>Historical events previously labeled reconnections; causes unavailable</span></div>}
     </div>
     <div className="stats-charts">

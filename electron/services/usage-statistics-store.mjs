@@ -3,7 +3,7 @@ import path from "node:path";
 
 // Stores only counters and opaque interaction IDs. No prompts, payloads or credentials.
 const MAX_DEDUPE = 100_000;
-const freshDay = () => ({ calls: 0, successes: 0, errors: 0, workstreamOpens: 0, completedWorkstreams: 0, reconnects: 0, sessionOpens: 0, idleReclaimed: 0, capEvictions: 0, unknownReclaimed: 0, durationMs: 0, timedCalls: 0, tools: {} });
+const freshDay = () => ({ calls: 0, successes: 0, errors: 0, workstreamOpens: 0, completedWorkstreams: 0, reconnects: 0, sessionOpens: 0, idleReclaimed: 0, capEvictions: 0, unknownReclaimed: 0, ownerSuperseded: 0, durationMs: 0, timedCalls: 0, tools: {} });
 const validDay = (at) => {
   const ms = Date.parse(at ?? "");
   if (!Number.isFinite(ms)) return null;
@@ -33,8 +33,10 @@ export class UsageStatisticsStore {
       interactionId && typeof meta.tool === "string" && (phase === "request" || phase === "response");
     const isSessionOpen = event.source === "mcp" && event.message === "MCP transport session opened";
     const isSessionReclaim = event.source === "mcp" && event.message === "MCP transport session reclaimed";
-    if (!isCall && !isSessionOpen && !isSessionReclaim) return false;
-    const key = isSessionOpen || isSessionReclaim ? "session:" + event.id : interactionId + ":" + phase;
+    const isSupersession = event.source === "mcp" && event.message === "MCP stale owner transports superseded";
+    if (!isCall && !isSessionOpen && !isSessionReclaim && !isSupersession) return false;
+    const key = isSessionOpen || isSessionReclaim || isSupersession
+      ? "session:" + event.id : interactionId + ":" + phase;
     if (this.seen.has(key)) return false;
     this.seen.add(key);
     // Bounded replay protection; old events should not be replayed by the host after cursor advance.
@@ -43,6 +45,11 @@ export class UsageStatisticsStore {
     // Historical reconnects are legacy (unclassified) reclamations. Never
     // reinterpret them as real reconnects or silently reclassify old records.
     if (isSessionOpen) row.sessionOpens = (row.sessionOpens ?? 0) + 1;
+    if (isSupersession) {
+      const amount = Number(meta.reclaimedCount);
+      if (Number.isSafeInteger(amount) && amount > 0 && amount <= 128)
+        row.ownerSuperseded = (row.ownerSuperseded ?? 0) + amount;
+    }
     if (isSessionReclaim) {
       const field = meta.reason === "session_cap" ? "capEvictions" :
         meta.reason === "idle_ttl" ? "idleReclaimed" : "unknownReclaimed";

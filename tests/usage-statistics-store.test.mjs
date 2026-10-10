@@ -61,7 +61,13 @@ describe("Durable usage statistics", () => {
     store.ingest(evt("cap1","MCP transport session reclaimed","session_cap"));
     store.ingest(evt("idle1","MCP transport session reclaimed","idle_ttl"));
     store.ingest(evt("other","MCP transport session reclaimed","future_reason"));
-    expect(store.snapshot().days[0]).toMatchObject({reconnects:0,sessionOpens:1,capEvictions:1,idleReclaimed:1,unknownReclaimed:1});
+    const supersession = {id:"swap1",at:"2026-10-08T12:00:00Z",source:"mcp",
+      message:"MCP stale owner transports superseded",
+      meta:{reason:"owner_superseded",reclaimedCount:2,reclaimedTransportSessionIds:["sensitive-transport-id"]}};
+    store.ingest(supersession);
+    store.ingest(supersession);
+    expect(store.snapshot().days[0]).toMatchObject({reconnects:0,sessionOpens:1,capEvictions:1,idleReclaimed:1,unknownReclaimed:1,ownerSuperseded:2});
+    expect(JSON.stringify(store.snapshot())).not.toContain("sensitive-transport-id");
   });
   it("preserves historical unclassified reclamations during migration", () => {
     const {file}=make();
