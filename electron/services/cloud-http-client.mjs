@@ -224,6 +224,12 @@ export class CloudHttpClient {
     );
   }
 
+  grantFileDelivery(metadata) {
+    return this.request("/device/v1/file-deliveries/grants",{method:"POST",auth:"device",body:metadata});
+  }
+  revokeFileDelivery(id) {
+    return this.request("/device/v1/file-deliveries/"+encodeURIComponent(id)+"/revoke",{method:"POST",auth:"device"});
+  }
   connectivityBootstrap() {
     return this.request("/device/v1/connectivity/bootstrap", {
       method: "POST",

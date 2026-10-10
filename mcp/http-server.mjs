@@ -15,6 +15,7 @@ export async function startOwlMcpHttpServer({
   agentInbox,
   remoteDeviceControl,
   plannerContinuation,
+  fileDelivery = null,
   onEvent = () => {},
   sessionIdleTtlMs = 30 * 60_000,
   ownerSupersedeGraceMs = 60_000,
@@ -180,7 +181,7 @@ export async function startOwlMcpHttpServer({
   }
 
   function createTransportSession() {
-    const server = createOwlMcpServer();
+    const server = createOwlMcpServer({ fileDelivery });
     const session = {
       server,
       transport: null,

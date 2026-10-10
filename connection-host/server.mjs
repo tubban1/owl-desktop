@@ -11,6 +11,7 @@ import { CloudMcpCallConsumer } from "./cloud-mcp-call-consumer.mjs";
 import { recheckConnectivityAfterWake } from "./recheck-after-wake.mjs";
 import { CloudMcpCompletionStore } from "./cloud-mcp-completion-store.mjs";
 import { LocalMcpExecutor } from "./local-mcp-executor.mjs";
+import {sendAuthorizedFile} from "../mcp/send-file.mjs";
 
 function required(name, fallback = "") {
   const value = process.env[name]?.trim() || fallback;
@@ -117,6 +118,7 @@ const plannerContinuation = new PlannerContinuationStore({
 });
 plannerContinuation.recoverConnectedTransports("connection_host_restart");
 
+let fileDeliveryCloudClient=null;
 const mcpServer = await startOwlMcpHttpServer({
   port: mcpPort,
   runtimeBaseUrl,
@@ -126,6 +128,16 @@ const mcpServer = await startOwlMcpHttpServer({
   agentInbox: agentInboxProxy,
   remoteDeviceControl: remoteDeviceProxy,
   plannerContinuation,
+  fileDelivery: {
+    send:async (path,authorize)=>{
+      if(!fileDeliveryCloudClient)throw new Error("Sign in and enroll this device with OWL Cloud first.");
+      return sendAuthorizedFile(path,authorize,fileDeliveryCloudClient);
+    },
+    revoke:async id=>{
+      if(!fileDeliveryCloudClient)throw new Error("OWL Cloud device is not connected.");
+      return fileDeliveryCloudClient.revokeFileDelivery(id);
+    },
+  },
   onEvent(level, message, meta) {
     record(level, "mcp", message, meta);
   },
@@ -152,6 +164,7 @@ let cloudMcpConfig = null;
 
 async function stopCloudMcpConsumer() {
   const current = cloudMcpConsumer;
+  fileDeliveryCloudClient = null;
   cloudMcpConsumer = null;
   cloudMcpConfig = null;
   if (current) await current.stop();
@@ -182,6 +195,7 @@ async function configureCloudMcpConsumer(config = {}) {
   cloudMcpConfig = { baseUrl, deviceId };
   cloudMcpConsumer = consumer;
   await consumer.start();
+  fileDeliveryCloudClient = client;
   return consumer.snapshot();
 }
 

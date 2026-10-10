@@ -1138,7 +1138,7 @@ function tool(server, name, description, schema, annotations, handler) {
   );
 }
 
-export function createOwlMcpServer() {
+export function createOwlMcpServer({fileDelivery=null}={}) {
   const server = new McpServer(
     {
       name: "owl-mcp",
@@ -1376,6 +1376,39 @@ export function createOwlMcpServer() {
         { type: "text", text: JSON.stringify(safeMetadata) },
         { type: "image", data: image.data, mimeType: image.mimeType },
       ], safeMetadata);
+    },
+  );
+
+  tool(
+    server,
+    "send_file",
+    "ONLY for an explicit user request to send this exact local file. Upload 1 byte to 25 MiB to private S3, return a 15-minute download link usable on ChatGPT mobile. This is external file transfer, NOT a native ChatGPT attachment.",
+    {path:z.string().min(1),user_confirmed:z.literal(true)},
+    {title:"Send Private File Link",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    async ({path})=>{
+      if(!fileDelivery)throw new Error("File delivery unavailable");
+      const receipt=await fileDelivery.send(path,async requestedPath=>
+        primitiveResult(await invoke("primitive.call",{
+          primitive:"fs.stat",op:"get",args:{path:requestedPath},
+        })),
+      );
+      return new NativeMcpResult([{type:"text",text:JSON.stringify(receipt)}],{
+        fileName:receipt.fileName,size:receipt.size,
+        sha256:receipt.sha256,expiresAt:receipt.expiresAt,
+        deliveredAs:"private_https_link",
+      });
+    },
+  );
+
+  tool(
+    server,
+    "revoke_file_delivery",
+    "Revoke an issued private file link by deleting the object through authenticated OWL Cloud.",
+    {delivery_id:z.string().uuid()},
+    {title:"Revoke File Link",readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:true},
+    async ({delivery_id})=>{
+      if(!fileDelivery)throw new Error("File delivery unavailable");
+      return fileDelivery.revoke(delivery_id);
     },
   );
 
