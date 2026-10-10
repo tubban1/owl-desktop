@@ -55,6 +55,7 @@ describe("OWL MCP compatibility surface", () => {
       "list_directory",
       "list_directory_tree",
       "read_file",
+      "read_image",
       "read_multiple_files",
       "file_info",
       "search_files",

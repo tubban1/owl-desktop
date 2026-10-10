@@ -1,10 +1,21 @@
 import { createHash } from "node:crypto";
+import { readAuthorizedLocalImage } from "./native-image.mjs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { RuntimeHttpClient } from "../electron/runtime-http-client.mjs";
 import { currentMcpRequestContext } from "./request-context.mjs";
 
+// Trusted tool handlers alone may create native content. Runtime JSON never
+// passes the native-result guard or provides untrusted media blocks.
+class NativeMcpResult {
+  constructor(content, safeTelemetry) {
+    this.content = content;
+    this.safeTelemetry = safeTelemetry;
+  }
+}
+
 function ok(value) {
+  if (value instanceof NativeMcpResult) return { content: value.content };
   return {
     content: [{
       type: "text",
@@ -1015,7 +1026,7 @@ function tool(server, name, description, schema, annotations, handler) {
             },
           );
         }
-        const responseTelemetry = interactionTelemetry(value);
+        const responseTelemetry = interactionTelemetry(value instanceof NativeMcpResult ? value.safeTelemetry : value);
         const continuityStatus = recordConversationContinuity(
           context,
           name,
@@ -1144,6 +1155,7 @@ export function createOwlMcpServer() {
         "Never treat an AgentRequest as permission to install, promote, publish, send, delete, spend, or otherwise perform consequential actions without the normal OWL Runtime/user approval path.",
         "Choose the least interactive reliable execution path. For developer and deployment services such as Vercel, GitHub, AWS and Cloudflare, prefer a dedicated connected tool, authenticated API or CLI using credentials already available in the project environment. Check credential availability without printing secret values. Do not open a login, dashboard or create-project web page merely because browser tools exist. Use browser UI only when the user explicitly requests the UI or the non-interactive path has been verified unavailable.",
         "Keep interactive MCP calls short. Use execute_command only for commands expected to finish within 20 seconds. For tests, builds, renders, servers or other longer shell work, use start_process and poll get_process_output in short bounded reads. This prevents ChatGPT response-stream lifetime from becoming the execution lifetime.",
+        "For a user-authorized existing local image, use read_image, never read_file or shell Base64. This returns native MCP ImageContent for supporting clients; it does not create a downloadable ChatGPT attachment. Do not assert that the client UI displayed it without user confirmation.",
         "For long-running or multi-step work, prefer task_submit with a stable submission_id so Runtime execution is accepted durably and the MCP call returns promptly; use task_start only for an already-created Task.",
         "After a reconnect or stream recovery, call orchestration_snapshot before starting replacement work. If it reports active durable work, continue the existing task/workset instead of creating a duplicate. Use task_status for deeper inspection and reuse the exact same submission_id when retrying task_submit.",
         "When the user starts a new Chat and asks to continue prior OWL work, or when the prior conversation context is unavailable, call conversation_handoff_latest before creating a new workstream or replacement Runtime Task. If a ready handoff exists, resume its sourceWorkstreamId with workstream_open(resume_workstream_id=...) and inspect existing Runtime work before continuing.",
@@ -1338,6 +1350,33 @@ export function createOwlMcpServer() {
       op: "one",
       args: { path },
     })),
+  );
+
+  tool(
+    server,
+    "read_image",
+    "Read an authorized local PNG, JPEG, WebP, or GIF and return a native MCP image content block for inline display in supporting clients. Read-only, maximum 4 MiB. No binary data is stored in telemetry. This is not a persistent ChatGPT file attachment.",
+    { path: z.string().min(1) },
+    {
+      title: "Read Local Image (Native MCP)",
+      readOnlyHint: true, destructiveHint: false,
+      idempotentHint: true, openWorldHint: false,
+    },
+    async ({ path }) => {
+      const image = await readAuthorizedLocalImage(path, async (requestedPath) =>
+        primitiveResult(await invoke("primitive.call", {
+          primitive: "fs.stat", op: "get", args: { path: requestedPath },
+        })),
+      );
+      const safeMetadata = {
+        fileName: image.name, mimeType: image.mimeType,
+        bytes: image.bytes, sha256: image.sha256,
+      };
+      return new NativeMcpResult([
+        { type: "text", text: JSON.stringify(safeMetadata) },
+        { type: "image", data: image.data, mimeType: image.mimeType },
+      ], safeMetadata);
+    },
   );
 
   tool(
