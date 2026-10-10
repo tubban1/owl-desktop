@@ -37,7 +37,10 @@ export function StatisticsPanel({ stats }: { stats: UsageStatisticsSnapshot | nu
       <div><Activity size={19}/><small>MCP tool calls</small><strong>{fmt(model.total.calls)}</strong><span>Request events seen</span></div>
       <div><CheckCircle2 size={19}/><small>Tool response success</small><strong>{model.successRate === null ? "—" : model.successRate + "%"}</strong><span>Responses with a known outcome</span></div>
       <div><Clock3 size={19}/><small>Avg. tool response</small><strong>{duration(model.avgDurationMs)}</strong><span>Recorded response durations</span></div>
-      <div><Network size={19}/><small>Reconnections</small><strong>{fmt(model.total.reconnects)}</strong><span>Transport sessions reclaimed</span></div>
+      <div><Network size={19}/><small>Session opens</small><strong>{fmt(model.total.sessionOpens)}</strong><span>New MCP transport sessions observed</span></div>
+      <div><Network size={19}/><small>Session-cap evictions</small><strong>{fmt(model.total.capEvictions)}</strong><span>Inactive transports reclaimed at capacity</span></div>
+      <div><Network size={19}/><small>Idle reclamations</small><strong>{fmt(model.total.idleReclaimed)}</strong><span>Idle transports reclaimed by TTL</span></div>
+      {model.total.reconnects > 0 && <div><Network size={19}/><small>Legacy reclamations</small><strong>{fmt(model.total.reconnects)}</strong><span>Historical events previously labeled reconnections; causes unavailable</span></div>}
     </div>
     <div className="stats-charts">
       <div className="stats-chart">
@@ -56,6 +59,6 @@ export function StatisticsPanel({ stats }: { stats: UsageStatisticsSnapshot | nu
     </div>
     <div className="stats-insights"><AlertTriangle size={16}/><span><strong>Usage insight: </strong>{frequentErrors ? friendlyTool(frequentErrors.tool)+" had "+frequentErrors.errors+" error response(s). Review related events in Monitor." : busiest ? "Most active recorded day: "+busiest.day+" ("+busiest.calls+" calls). No tool errors recorded in this range." : "Waiting for the first recorded MCP interaction. Open Monitor to see live activity."}</span></div>
     {model.rows.length === 0 && <p className="stats-empty">No recorded data for this period. Charts will populate as OWL runs.</p>}
-    <p className="stats-footnote"><RefreshCw size={12}/> Counts are local, durable and based on observed events. Missing or truncated events cannot be reconstructed; a response without a request may affect success rate but not call count.</p>
+    <p className="stats-footnote"><RefreshCw size={12}/> Session reclamation is not an unexpected disconnect or a successful reconnect. Historical reasons are unknown. Counts are local, durable and based on observed events; a response without a request may affect success rate but not call count.</p>
   </section>;
 }

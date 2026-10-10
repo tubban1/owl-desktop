@@ -608,4 +608,42 @@ describe("buildWorkstreamBoard", () => {
     expect(chat?.messages.some((message) => message.id === "req_1")).toBe(false);
     expect(worker?.messages.some((message) => message.id === "req_1")).toBe(true);
   });
+  it("uses fresh activity rather than retained active checkpoint as execution proof", () => {
+    const input = snapshot();
+    input.tasks=[];
+    input.mcp.continuation.owners=[input.mcp.continuation.owners[0]];
+    input.mcp.sessions=[input.mcp.sessions[0]];
+    const owner=input.mcp.continuation.owners[0];
+    owner.checkpoint={...owner.checkpoint,taskIds:[],updatedAt:"2026-10-02T00:00:15.000Z"};
+    owner.workstream={
+      schemaVersion:1,workstreamId:owner.ownerId,clientKind:"chatgpt",status:"active",
+      goal:"Retained work",label:"Retained work",clientLabel:"Chat A",
+      createdAt:"2026-10-02T00:00:00.000Z",updatedAt:"2026-10-02T00:00:15.000Z",
+      completedAt:null,lastProgressAt:"2026-10-02T00:00:15.000Z",
+      totalToolSteps:1,toolStepsSinceProgress:1,progressEvents:[],recentTools:[],
+    };
+    const fresh=buildWorkstreamBoard({snapshot:input,agentRequests:[],now:Date.parse("2026-10-02T00:00:31Z")});
+    expect(fresh.streams[0]?.status).toBe("working");
+    const old=buildWorkstreamBoard({snapshot:input,agentRequests:[],now:Date.parse("2026-10-02T00:08:31Z")});
+    expect(old.workingCount).toBe(0);
+    expect(old.streams[0]?.status).toBe("idle");
+    expect(owner.workstream.status).toBe("active");
+    owner.workstream.progressBoundary={pending:true};
+    const blocked=buildWorkstreamBoard({snapshot:input,agentRequests:[],now:Date.parse("2026-10-02T00:08:31Z")});
+    expect(blocked.streams[0]?.status).toBe("attention");
+    expect(blocked.streams[0]?.currentAction).toContain("acknowledgement");
+    expect(owner.workstream.progressBoundary.pending).toBe(true);
+    // Explicit waiting on a user survives long dormancy and a disconnected transport.
+    owner.workstream.progressBoundary = null;
+    owner.workstream.status = "waiting_user";
+    owner.checkpoint.status = "waiting_user";
+    owner.plannerConnected = false;
+    input.mcp.sessions = [];
+    const waiting = buildWorkstreamBoard({
+      snapshot: input, agentRequests: [], now: Date.parse("2026-10-02T12:08:31Z"),
+    });
+    expect(waiting.streams[0]?.status).toBe("waiting");
+    expect(waiting.streams[0]?.isCurrent).toBe(true);
+  });
+
 });

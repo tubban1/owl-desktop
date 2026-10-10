@@ -482,6 +482,7 @@ export type PlannerWorkstream = {
   totalToolSteps: number;
   progressEvents: WorkstreamProgressEvent[];
   recentTools: WorkstreamToolEvent[];
+  progressBoundary?: { pending: boolean; current?: string | null } | null;
 };
 
 export type ConversationContinuityStatus = {

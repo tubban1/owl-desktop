@@ -12,6 +12,7 @@ import { deriveWorkState } from "./workState";
 import { executionAccessView } from "./executionAccessView";
 import { buildOnboardingModel } from "./onboardingModel";
 import { MonitorPage } from "./monitor/MonitorPage";
+import { buildWorkstreamBoard } from "./monitor/workstreamModel";
 import { DevicesPage } from "./devices/DevicesPage";
 import owlLogo from "../assets/owl-logo-ui.png";
 import { StatisticsPanel } from "./statistics/StatisticsPanel";
@@ -625,6 +626,10 @@ export default function App() {
           .join(" · ")
       : cloudAccount?.status?.replaceAll("_", " ") ?? "signed out";
 
+  const overviewExecution = useMemo(
+    () => buildWorkstreamBoard({ snapshot, agentRequests, now }),
+    [snapshot, agentRequests, now],
+  );
   const workState = useMemo(() => deriveWorkState({
     taskRows,
     runningProcesses,
@@ -927,7 +932,7 @@ export default function App() {
           />
 
           <div className="metrics-grid">
-            <MetricCard label="Workstreams" value={snapshot?.mcp.continuation?.activeCheckpointCount ?? 0} caption="Current agent work" icon={ChartNoAxesCombined} />
+            <MetricCard label="Executing workstreams" value={overviewExecution.workingCount} caption={overviewExecution.waitingCount + " waiting · " + overviewExecution.attentionCount + " need attention; retained checkpoints are not running work"} icon={ChartNoAxesCombined} />
             <MetricCard label="Background work" value={runningProcesses.length} caption="Running now" icon={Cpu} />
             <MetricCard label="Approvals" value={pendingRuntimeApprovals.length} caption="Need your decision" icon={ShieldCheck} />
             <MetricCard label="Device access" value={runtimeAccess?.state ?? "—"} caption={runtimeAccess?.grant?.signatureVerified ? "Cloud verified" : "Runtime gate"} icon={Laptop} />

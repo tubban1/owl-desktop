@@ -298,8 +298,11 @@ function streamStatus(
   connected: boolean,
   checkpointStatus: string | null,
   tasks: WorkstreamTask[],
+  recentWorkEvidence: boolean,
+  pendingProgressBoundary: boolean,
 ): MonitorWorkstream["status"] {
   const liveTasks = tasks.filter(projectedTaskIsLive);
+  if (pendingProgressBoundary) return "attention";
   if (
     liveTasks.some((task) =>
       ["failed", "blocked", "needs_review"].includes(task.status),
@@ -316,7 +319,8 @@ function streamStatus(
   ) {
     return "waiting";
   }
-  if (checkpointStatus === "active") return connected ? "working" : "disconnected";
+  // A connected transport or retained checkpoint is not an executing task.
+  if (checkpointStatus === "active") return connected ? (recentWorkEvidence ? "working" : "idle") : "disconnected";
   return connected ? "idle" : "disconnected";
 }
 
@@ -561,7 +565,14 @@ export function buildWorkstreamBoard({
       const checkpointStatus =
         workstream?.status ?? checkpoint?.status ?? null;
       const connected = owner.plannerConnected === true;
-      const status = streamStatus(connected, checkpointStatus, ownerTasks);
+      const lastPlannerActivity = Math.max(
+        timestamp(workstream?.updatedAt), timestamp(checkpoint?.updatedAt),
+        timestamp(workstream?.recentTools?.at(-1)?.at),
+      );
+      const recentWorkEvidence = lastPlannerActivity > 0 &&
+        now >= lastPlannerActivity && now - lastPlannerActivity <= 90_000;
+      const pendingBoundary = workstream?.progressBoundary?.pending === true;
+      const status = streamStatus(connected, checkpointStatus, ownerTasks, recentWorkEvidence, pendingBoundary);
       const checkpointTime = checkpoint?.updatedAt
         ? timestamp(checkpoint.updatedAt)
         : 0;
@@ -584,7 +595,10 @@ export function buildWorkstreamBoard({
         workstream?.progressEvents?.at(-1)?.current ??
         checkpoint?.phase ??
         "Waiting";
-      if (activeTask && ACTIVE_TASK_STATES.has(activeTask.status)) {
+      if (pendingBoundary && !activeTask) {
+        currentExecutor = "Agent / user";
+        currentAction = "Progress acknowledgement required to continue";
+      } else if (activeTask && ACTIVE_TASK_STATES.has(activeTask.status)) {
         currentExecutor = "OWL Runtime";
         currentAction = activeTask.current ?? activeTask.label;
       } else if (WAITING_CHECKPOINT_STATES.has(checkpointStatus ?? "")) {
@@ -607,7 +621,9 @@ export function buildWorkstreamBoard({
         status,
         isCurrent:
           connected ||
-          Boolean(workstream && workstream.status !== "completed") ||
+          pendingBoundary ||
+          WAITING_CHECKPOINT_STATES.has(checkpointStatus ?? "") ||
+          recentWorkEvidence ||
           ownerTasks.some(projectedTaskIsLive),
         goal:
           workstream?.goal ??

@@ -47,11 +47,33 @@ describe("Durable usage statistics", () => {
     restored.ingest({ id:"r1", at:"2026-10-08T12:00:00Z",source:"mcp",message:"MCP transport session reclaimed" });
     expect(restored.snapshot().days).toMatchObject([
       {day:"2026-10-07",calls:1,workstreamOpens:1},
-      {day:"2026-10-08",calls:1,completedWorkstreams:1,reconnects:1}
+      {day:"2026-10-08",calls:1,completedWorkstreams:1,reconnects:0,unknownReclaimed:1}
     ]);
     const week = summarizeUsage(restored.snapshot(),7,new Date("2026-10-08T12:00:00Z"));
     expect(week.total.calls).toBe(2);
     expect(week.total.completedWorkstreams).toBe(1);
+  });
+  it("separates opens, idle and capacity reclaims without inventing reconnects", () => {
+    const {store}=make();
+    const evt=(id,message,reason)=>({id,at:"2026-10-08T12:00:00Z",source:"mcp",message,meta:{reason}});
+    const open=evt("open1","MCP transport session opened");
+    store.ingest(open);store.ingest(open);
+    store.ingest(evt("cap1","MCP transport session reclaimed","session_cap"));
+    store.ingest(evt("idle1","MCP transport session reclaimed","idle_ttl"));
+    store.ingest(evt("other","MCP transport session reclaimed","future_reason"));
+    expect(store.snapshot().days[0]).toMatchObject({reconnects:0,sessionOpens:1,capEvictions:1,idleReclaimed:1,unknownReclaimed:1});
+  });
+  it("preserves historical unclassified reclamations during migration", () => {
+    const {file}=make();
+    fs.writeFileSync(file,JSON.stringify({version:1,startedAt:"2026-10-08T00:00:00Z",days:{
+      "2026-10-08":{calls:3,successes:2,errors:1,workstreamOpens:1,completedWorkstreams:1,reconnects:943,durationMs:100,timedCalls:2,tools:{}}
+    },seen:[]}));
+    const store=new UsageStatisticsStore({file,schedule:()=>1});
+    store.ingest({id:"cap2",at:"2026-10-08T12:00:00Z",source:"mcp",message:"MCP transport session reclaimed",meta:{reason:"session_cap"}});
+    const day=store.snapshot().days[0];
+    expect(day.reconnects).toBe(943);
+    expect(day.capEvictions).toBe(1);
+    expect(summarizeUsage(store.snapshot(),"all",new Date("2026-10-08T12:00:00Z")).total.capEvictions).toBe(1);
   });
   it("does not count unrelated logs or a response-only event as a tool call", () => {
     const {store} = make();
