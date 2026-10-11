@@ -146,6 +146,14 @@ describe("MCP workstream isolation", () => {
       expect(result.isError).not.toBe(true);
     }
 
+    const extraRead = await client.callTool({
+      name: "runtime_info",
+      arguments: { workstream_id: a },
+    });
+    expect(extraRead.isError).not.toBe(true);
+    expect(continuation.get(a).workstream.progressBoundary).toBeNull();
+    expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(13);
+
     const blocked = await client.callTool({
       name: "task_cancel",
       arguments: { workstream_id: a, task_id: "test-only" },
@@ -158,7 +166,7 @@ describe("MCP workstream isolation", () => {
         workstreamId: a,
         pending: true,
         acknowledgementRequired: true,
-        toolStepsSinceProgress: 12,
+        toolStepsSinceProgress: 13,
         recommendedUpdateIntervalMs: 60000,
         recommendedMaxToolStepsWithoutUpdate: 12,
         durableExecution: {
@@ -179,7 +187,7 @@ describe("MCP workstream isolation", () => {
         pending: true,
       },
     });
-    expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(12);
+    expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(13);
 
     for (const name of ["runtime_info", "runtime_diagnostics", "provider_status", "list_processes", "task_list"]) {
       const read = await client.callTool({
@@ -188,7 +196,7 @@ describe("MCP workstream isolation", () => {
       });
       expect(read.isError).not.toBe(true);
     }
-    expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(12);
+    expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(13);
     expect(continuation.get(a).workstream.progressBoundary.boundaryId).toBe(
       boundary.progressBoundary.boundaryId,
     );
@@ -292,7 +300,7 @@ describe("MCP workstream isolation", () => {
       a,
       a,
       a,
-      ...Array(10).fill(a),
+      ...Array(11).fill(a),
     ]);
 
     const ownerA = continuation.get(a);
@@ -303,7 +311,7 @@ describe("MCP workstream isolation", () => {
       workstream: {
         goal: "Build Monitor",
         toolStepsSinceProgress: 1,
-        totalToolSteps: 14,
+        totalToolSteps: 15,
       },
     });
     expect(ownerA.workstream.progressEvents.at(-1)).toMatchObject({

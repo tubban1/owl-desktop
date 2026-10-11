@@ -602,6 +602,9 @@ function requireProgressBoundary(context, toolName, args = {}) {
   const owner = context.plannerContinuation?.get?.(context.runtimeSessionId);
   const workstream = owner?.workstream;
   if (!workstream || workstream.status === "completed") return;
+  // The read-only exemption applies before creating a new boundary too.
+  // Otherwise the first read after the step/time threshold still fails.
+  if (isProgressSafeRead(toolName)) return;
 
   const protocolV2 = Number(workstream.progressAckProtocol ?? 0) >= 2;
   const existingBoundary = workstream.progressBoundary;
