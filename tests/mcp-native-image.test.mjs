@@ -63,7 +63,22 @@ describe("MCP native image transport",()=>{
     expect(result.content).toHaveLength(2);
     expect(result.content[0].type).toBe("text");
     expect(result.content[1]).toMatchObject({type:"image",mimeType:"image/png",data:png.toString("base64")});
+    // Old plugin sessions already expose read_multiple_files.
+    const legacy=await client.callTool({name:"read_multiple_files",arguments:{paths:[file]}});
+    expect(legacy.isError).not.toBe(true);
+    expect(legacy.content.find(x=>x.type==="image")).toMatchObject({
+      type:"image",mimeType:"image/png",data:png.toString("base64"),
+    });
+    expect(legacy.content.find(x=>x.type==="text")?.text).toContain("one.png");
+    const fallback=await client.callTool({
+      name:"report_external_tool_fallback",
+      arguments:{external_tool:"desktop_commander",reason_code:"MISSING_TOOL_SCHEMA",owl_tool:"read_image"},
+    });
+    expect(fallback.isError).not.toBe(true);
+    expect(events.some(x=>x.meta?.eventKind==="external_tool_fallback" &&
+      x.meta?.reasonCode==="MISSING_TOOL_SCHEMA")).toBe(true);
     const telemetry=JSON.stringify(events);
+    expect(telemetry).toContain("read_multiple_files");
     expect(telemetry).toContain("read_image");
     expect(telemetry).not.toContain(png.toString("base64"));
     expect(telemetry).toContain("image/png");

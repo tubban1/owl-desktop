@@ -3,7 +3,7 @@ import path from "node:path";
 
 // Stores only counters and opaque interaction IDs. No prompts, payloads or credentials.
 const MAX_DEDUPE = 100_000;
-const freshDay = () => ({ calls: 0, successes: 0, errors: 0, workstreamOpens: 0, completedWorkstreams: 0, reconnects: 0, sessionOpens: 0, idleReclaimed: 0, capEvictions: 0, unknownReclaimed: 0, ownerSuperseded: 0, durationMs: 0, timedCalls: 0, tools: {} });
+const freshDay = () => ({ calls: 0, successes: 0, errors: 0, workstreamOpens: 0, completedWorkstreams: 0, reconnects: 0, sessionOpens: 0, idleReclaimed: 0, capEvictions: 0, unknownReclaimed: 0, ownerSuperseded: 0, durationMs: 0, timedCalls: 0, externalFallbacks: 0, fallbackReasons: {}, tools: {} });
 const validDay = (at) => {
   const ms = Date.parse(at ?? "");
   if (!Number.isFinite(ms)) return null;
@@ -34,9 +34,10 @@ export class UsageStatisticsStore {
     const isSessionOpen = event.source === "mcp" && event.message === "MCP transport session opened";
     const isSessionReclaim = event.source === "mcp" && event.message === "MCP transport session reclaimed";
     const isSupersession = event.source === "mcp" && event.message === "MCP stale owner transports superseded";
-    if (!isCall && !isSessionOpen && !isSessionReclaim && !isSupersession) return false;
-    const key = isSessionOpen || isSessionReclaim || isSupersession
-      ? "session:" + event.id : interactionId + ":" + phase;
+    const isExternalFallback = event.source === "mcp" && meta.eventKind === "external_tool_fallback";
+    if (!isCall && !isSessionOpen && !isSessionReclaim && !isSupersession && !isExternalFallback) return false;
+    const key = isSessionOpen || isSessionReclaim || isSupersession || isExternalFallback
+      ? "event:" + event.id : interactionId + ":" + phase;
     if (this.seen.has(key)) return false;
     this.seen.add(key);
     // Bounded replay protection; old events should not be replayed by the host after cursor advance.
@@ -54,6 +55,14 @@ export class UsageStatisticsStore {
       const field = meta.reason === "session_cap" ? "capEvictions" :
         meta.reason === "idle_ttl" ? "idleReclaimed" : "unknownReclaimed";
       row[field] = (row[field] ?? 0) + 1;
+    }
+    if (isExternalFallback) {
+      row.externalFallbacks = (row.externalFallbacks ?? 0) + 1;
+      const reason = ["OWL_UNAVAILABLE","PROVIDER_UNAVAILABLE","MISSING_TOOL_SCHEMA",
+        "OWL_TOOL_FAILED","USER_REQUEST","OTHER"].includes(meta.reasonCode)
+        ? meta.reasonCode : "OTHER";
+      row.fallbackReasons ??= {};
+      row.fallbackReasons[reason] = (row.fallbackReasons[reason] ?? 0) + 1;
     }
     if (isCall) {
       const tool = meta.tool;

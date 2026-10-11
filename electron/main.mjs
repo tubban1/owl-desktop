@@ -39,6 +39,7 @@ import { ConnectivityHostLaunchAgent } from "./services/connectivity-host-launch
 import { buildManagedTunnelConfig } from "./services/managed-tunnel-config.mjs";
 import { recoverRuntimeAccessProjection } from "./services/runtime-access-recovery.mjs";
 import { createRuntimeAccessRecoveryGate } from "./services/runtime-access-recovery-gate.mjs";
+import { createRuntimeLeaseMaintenance } from "./services/runtime-lease-maintenance.mjs";
 import { createConnectivityWakeRecovery } from "./services/connectivity-wake-recovery.mjs";
 import { revokeDeviceCredentialLifecycle, rotateDeviceCredentialLifecycle } from "./services/device-credential-lifecycle.mjs";
 
@@ -75,6 +76,7 @@ let remoteSubmissionStore;
 let plannerContinuationStore;
 let cloudAccountAuth;
 let cloudEnrollmentService;
+let runtimeLeaseMaintenance;
 let devAuthCallbackServer;
 let pendingCloudAuthCallbackUrl = null;
 let agentInbox;
@@ -996,6 +998,26 @@ async function recoverRuntimeAccessAfterReconnectOnce() {
     });
     return null;
   }
+}
+
+function startRuntimeLeaseMaintenance() {
+  if (runtimeLeaseMaintenance) return;
+  runtimeLeaseMaintenance = createRuntimeLeaseMaintenance({
+    getCloudState: () => cloudAccountState,
+    inspectRuntimeAccess: () => runtimeClient().runtimeAccess(),
+    recover: () => recoverRuntimeAccessAfterReconnect(),
+    onEvent: (level, message, meta) => record(level, "runtime-access", message, meta),
+  });
+  runtimeLeaseMaintenance.start();
+  // Mac main process stays alive after closing the last window. This cannot
+  // depend on renderer Refresh or a ChatGPT conversation being open.
+  void runtimeLeaseMaintenance.check("startup");
+  const onWake = () => { void runtimeLeaseMaintenance?.check("power_resume"); };
+  powerMonitor.on("resume", onWake);
+  app.once("before-quit", () => {
+    powerMonitor.removeListener("resume", onWake);
+    runtimeLeaseMaintenance?.stop();
+  });
 }
 
 async function logoutCloudAccount() {
@@ -2973,6 +2995,7 @@ if (packagedConnectivityHostSoakOnly) {
       pendingCloudAuthCallbackUrl = null;
       await completeCloudAccountLogin(callbackUrl).catch(() => undefined);
     }
+    startRuntimeLeaseMaintenance();
     await startMcp();
     if (settings.autoConnectRuntime) {
       await startRuntimeEventBridge().catch((error) => {

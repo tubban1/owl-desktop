@@ -182,6 +182,17 @@ export async function startOwlMcpHttpServer({
 
   function createTransportSession() {
     const server = createOwlMcpServer({ fileDelivery });
+    // Announce the current tool registry to clients that support live
+    // notifications. ChatGPT may still cache connector schemas until its
+    // plugin connection is refreshed; legacy read_multiple_files remains
+    // usable for images while the client catalog catches up.
+    server.server.oninitialized = () => {
+      void server.server.sendToolListChanged().then(() => {
+        onEvent("info", "OWL MCP tool registry change announced", {
+          eventKind:"mcp_tool_surface_announced",
+        });
+      }).catch(() => undefined);
+    };
     const session = {
       server,
       transport: null,

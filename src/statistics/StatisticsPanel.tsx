@@ -37,12 +37,20 @@ export function StatisticsPanel({ stats }: { stats: UsageStatisticsSnapshot | nu
       <div><Activity size={19}/><small>MCP tool calls</small><strong>{fmt(model.total.calls)}</strong><span>Request events seen</span></div>
       <div><CheckCircle2 size={19}/><small>Tool response success</small><strong>{model.successRate === null ? "—" : model.successRate + "%"}</strong><span>Responses with a known outcome</span></div>
       <div><Clock3 size={19}/><small>Avg. tool response</small><strong>{duration(model.avgDurationMs)}</strong><span>Recorded response durations</span></div>
+      <div><AlertTriangle size={19}/><small>External tool fallbacks</small><strong>{fmt(model.total.externalFallbacks)}</strong><span>Only agent-reported departures from OWL, not all external plugin activity</span></div>
       <div><Network size={19}/><small>Session opens</small><strong>{fmt(model.total.sessionOpens)}</strong><span>New MCP transport sessions observed</span></div>
       <div><Network size={19}/><small>Session-cap evictions</small><strong>{fmt(model.total.capEvictions)}</strong><span>Inactive transports reclaimed at capacity</span></div>
       <div><Network size={19}/><small>Idle reclamations</small><strong>{fmt(model.total.idleReclaimed)}</strong><span>Idle transports reclaimed by TTL</span></div>
       <div><Network size={19}/><small>Owner rebind cleanups</small><strong>{fmt(model.total.ownerSuperseded)}</strong><span>Inactive, superseded MCP transports safely released</span></div>
       {model.total.reconnects > 0 && <div><Network size={19}/><small>Legacy reclamations</small><strong>{fmt(model.total.reconnects)}</strong><span>Historical events previously labeled reconnections; causes unavailable</span></div>}
     </div>
+    {model.fallbackReasons.length > 0 && <div className="stats-insights">
+      <AlertTriangle size={16}/><span>
+        <strong>Recorded OWL fallback reasons: </strong>
+        {model.fallbackReasons.map(item=>item.reason+" ("+item.count+")").join(" · ")}
+        . External tools used without reporting cannot be counted.
+      </span>
+    </div>}
     <div className="stats-charts">
       <div className="stats-chart">
         <h4>Tool calls by day</h4>

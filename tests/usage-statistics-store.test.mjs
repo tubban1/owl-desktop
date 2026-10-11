@@ -81,6 +81,19 @@ describe("Durable usage statistics", () => {
     expect(day.capEvictions).toBe(1);
     expect(summarizeUsage(store.snapshot(),"all",new Date("2026-10-08T12:00:00Z")).total.capEvictions).toBe(1);
   });
+  it("counts privacy-safe external fallback events once without persisting payloads", () => {
+    const {store}=make();
+    const evt={id:"f1",at:"2026-10-08T12:00:00.000Z",source:"mcp",
+      message:"OWL external tool fallback recorded",
+      meta:{eventKind:"external_tool_fallback",externalTool:"desktop_commander",
+        reasonCode:"MISSING_TOOL_SCHEMA",privatePath:"DO_NOT_SAVE"}};
+    expect(store.ingest(evt)).toBe(true);
+    expect(store.ingest(evt)).toBe(false);
+    expect(store.snapshot().days[0]).toMatchObject({
+      externalFallbacks:1,fallbackReasons:{MISSING_TOOL_SCHEMA:1},calls:0,
+    });
+    expect(JSON.stringify(store.snapshot())).not.toContain("DO_NOT_SAVE");
+  });
   it("does not count unrelated logs or a response-only event as a tool call", () => {
     const {store} = make();
     expect(store.ingest({id:"log",at:"2026-10-08T12:00:00Z",source:"desktop",message:"Hello"})).toBe(false);
