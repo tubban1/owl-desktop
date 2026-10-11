@@ -1,3 +1,4 @@
+import { activeManagedProcessCount } from "./services/usage-process-count.mjs";
 import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
@@ -1198,7 +1199,7 @@ async function buildCloudPresence() {
       String(approval?.state ?? approval?.status ?? "pending"),
     ),
   ).length;
-  const activeProcesses = collectionSize(processes, ["processes", "items"]);
+  const activeProcesses = activeManagedProcessCount(processes);
   const sampledAt = new Date().toISOString();
   const leaseExpiresAt = runtimeAccess?.grant?.expiresAt ?? null;
 
