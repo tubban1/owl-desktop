@@ -12,6 +12,7 @@ import { recheckConnectivityAfterWake } from "./recheck-after-wake.mjs";
 import { CloudMcpCompletionStore } from "./cloud-mcp-completion-store.mjs";
 import { LocalMcpExecutor } from "./local-mcp-executor.mjs";
 import {sendAuthorizedFile} from "../mcp/send-file.mjs";
+import { createHostDiagnosticJournal } from "./diagnostic-journal.mjs";
 
 function required(name, fallback = "") {
   const value = process.env[name]?.trim() || fallback;
@@ -47,10 +48,12 @@ const fallbackOwnerId =
   process.env.OWL_DESKTOP_FALLBACK_OWNER_ID?.trim() || undefined;
 
 fs.mkdirSync(userDataRoot, { recursive: true, mode: 0o700 });
+const hostDiagnostics = createHostDiagnosticJournal({ root: path.join(userDataRoot, "connectivity") });
 
 const events = [];
 let eventSequence = 0;
 function record(level, source, message, meta = {}) {
+  hostDiagnostics.record(level, source, message, meta);
   eventSequence += 1;
   events.unshift({
     seq: eventSequence,

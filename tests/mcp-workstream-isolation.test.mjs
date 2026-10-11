@@ -147,8 +147,8 @@ describe("MCP workstream isolation", () => {
     }
 
     const blocked = await client.callTool({
-      name: "runtime_info",
-      arguments: { workstream_id: a },
+      name: "task_cancel",
+      arguments: { workstream_id: a, task_id: "test-only" },
     });
     expect(blocked.isError).toBe(true);
     const boundary = jsonText(blocked);
@@ -169,8 +169,8 @@ describe("MCP workstream isolation", () => {
     });
 
     const stillBlocked = jsonText(await client.callTool({
-      name: "runtime_info",
-      arguments: { workstream_id: a },
+      name: "task_cancel",
+      arguments: { workstream_id: a, task_id: "test-only" },
     }));
     expect(stillBlocked).toMatchObject({
       code: "PROGRESS_UPDATE_REQUIRED",
@@ -181,7 +181,7 @@ describe("MCP workstream isolation", () => {
     });
     expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(12);
 
-    for (const name of ["list_processes", "task_list"]) {
+    for (const name of ["runtime_info", "runtime_diagnostics", "provider_status", "list_processes", "task_list"]) {
       const read = await client.callTool({
         name,
         arguments: { workstream_id: a },
@@ -192,6 +192,16 @@ describe("MCP workstream isolation", () => {
     expect(continuation.get(a).workstream.progressBoundary.boundaryId).toBe(
       boundary.progressBoundary.boundaryId,
     );
+
+    // Shell is potentially mutating even when the caller requests a read lease.
+    const shellBlocked = jsonText(await client.callTool({
+      name: "execute_command",
+      arguments: {
+        workstream_id: a, command: "echo read-only", cwd: "/tmp",
+        workspace_mode: "read",
+      },
+    }));
+    expect(shellBlocked.code).toBe("PROGRESS_UPDATE_REQUIRED");
 
     const rejected = jsonText(await client.callTool({
       name: "workstream_progress",
@@ -282,7 +292,7 @@ describe("MCP workstream isolation", () => {
       a,
       a,
       a,
-      ...Array(9).fill(a),
+      ...Array(10).fill(a),
     ]);
 
     const ownerA = continuation.get(a);
@@ -384,8 +394,8 @@ describe("MCP workstream isolation", () => {
     });
 
     const blocked = await client.callTool({
-      name: "runtime_info",
-      arguments: {},
+      name: "task_cancel",
+      arguments: { task_id: "test-only" },
     });
     expect(blocked.isError).toBe(true);
     const boundary = jsonText(blocked);
@@ -398,7 +408,7 @@ describe("MCP workstream isolation", () => {
         boundaryRecorded: false,
         acknowledgementRequired: true,
         pending: true,
-        retryTool: "runtime_info",
+        retryTool: "task_cancel",
       },
     });
     expect(boundary.progressBoundary.userVisibleProgress).toContain(
@@ -481,8 +491,8 @@ describe("MCP workstream isolation", () => {
     }
 
     const blocked = jsonText(await client.callTool({
-      name: "runtime_info",
-      arguments: { workstream_id: ownerId },
+      name: "task_cancel",
+      arguments: { workstream_id: ownerId, task_id: "test-only" },
     }));
     expect(blocked).toMatchObject({
       code: "PROGRESS_UPDATE_REQUIRED",

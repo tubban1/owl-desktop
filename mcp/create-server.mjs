@@ -447,14 +447,21 @@ const WORKSTREAM_META_TOOLS = new Set([
   "conversation_handoff_consume",
 ]);
 
+// Safe diagnosis must not be blocked by an unacknowledged progress prompt.
 const WORKSTREAM_RECOVERY_READ_TOOLS = new Set([
-  "list_processes",
-  "get_process_output",
-  "task_list",
-  "task_status",
-  "orchestration_snapshot",
-  "remote_task_status",
+  "runtime_info","runtime_health","runtime_diagnostics","provider_status",
+  "primitive_catalog","skill_catalog","get_capabilities","capability_manifest",
+  "get_audit_log","router_catalog","list_directory","read_file","file_info",
+  "search_files","read_multiple_files","list_directory_tree","git_status",
+  "git_diff","git_log","list_processes","get_process_output","task_list",
+  "task_status","orchestration_snapshot","remote_task_status","device_list",
+  "device_commands","agent_requests_status","agent_requests_list",
+  "browser_list_tabs","browser_snapshot","desktop_frontmost_app",
 ]);
+function isProgressSafeRead(name) {
+  // Never trust caller-supplied workspace_mode=read to make a shell safe.
+  return WORKSTREAM_RECOVERY_READ_TOOLS.has(name);
+}
 
 const CONTINUITY_DISCOVERY_TOOLS = new Set([
   "conversation_handoff_latest",
@@ -589,7 +596,7 @@ function legacyProgressBoundaryError(
   return error;
 }
 
-function requireProgressBoundary(context, toolName) {
+function requireProgressBoundary(context, toolName, args = {}) {
   if (WORKSTREAM_META_TOOLS.has(toolName)) return;
   if (!context.runtimeSessionId) return;
   const owner = context.plannerContinuation?.get?.(context.runtimeSessionId);
@@ -599,7 +606,7 @@ function requireProgressBoundary(context, toolName) {
   const protocolV2 = Number(workstream.progressAckProtocol ?? 0) >= 2;
   const existingBoundary = workstream.progressBoundary;
   if (existingBoundary?.pending === true) {
-    if (WORKSTREAM_RECOVERY_READ_TOOLS.has(toolName)) return;
+    if (isProgressSafeRead(toolName, args)) return;
     if (protocolV2) {
       throw progressBoundaryError(context, existingBoundary, toolName);
     }
@@ -1009,11 +1016,11 @@ function tool(server, name, description, schema, annotations, handler) {
         payload: requestTelemetry.preview,
       });
       try {
-        requireProgressBoundary(context, name);
+        requireProgressBoundary(context, name, args);
         const value = await handler(args);
         const durationMs = Date.now() - started;
         const pendingRecoveryRead =
-          WORKSTREAM_RECOVERY_READ_TOOLS.has(name) &&
+          isProgressSafeRead(name, args) &&
           context.plannerContinuation?.get?.(context.runtimeSessionId)
             ?.workstream?.progressBoundary?.pending === true;
         if (!WORKSTREAM_META_TOOLS.has(name) && !pendingRecoveryRead) {
@@ -1065,7 +1072,7 @@ function tool(server, name, description, schema, annotations, handler) {
         const durationMs = Date.now() - started;
         if (
           !WORKSTREAM_META_TOOLS.has(name) &&
-          !(WORKSTREAM_RECOVERY_READ_TOOLS.has(name) &&
+          !(isProgressSafeRead(name, args) &&
             context.plannerContinuation?.get?.(context.runtimeSessionId)
               ?.workstream?.progressBoundary?.pending === true) &&
           error?.code !== "PROGRESS_UPDATE_REQUIRED"

@@ -125,8 +125,8 @@ describe("MCP Conversation Continuity guard", () => {
     expect(readyBeforeBoundary).toBeNull();
 
     const blocked = await client.callTool({
-      name: "task_list",
-      arguments: { workstream_id: source.ownerId },
+      name: "task_cancel",
+      arguments: { workstream_id: source.ownerId, task_id: "test-only" },
     });
     expect(blocked.isError).toBe(true);
 
@@ -152,8 +152,8 @@ describe("MCP Conversation Continuity guard", () => {
       continuityRisk: "high",
     });
     const withHandoff = jsonText(await client.callTool({
-      name: "runtime_info",
-      arguments: { workstream_id: source.ownerId },
+      name: "task_cancel",
+      arguments: { workstream_id: source.ownerId, task_id: "test-only" },
     }));
     expect(withHandoff.code).toBe("PROGRESS_UPDATE_REQUIRED");
     expect(withHandoff.progressBoundary.boundaryId).toBe(
