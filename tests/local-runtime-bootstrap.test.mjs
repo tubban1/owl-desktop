@@ -111,11 +111,27 @@ function fixture() {
 }
 
 describe("LocalRuntimeBootstrap", () => {
+  it("refuses to enable Review with a bundled rc4 Runtime", () => {
+    const f=fixture();
+    f.settings.runtimePermissionModes={gitPush:"review"};
+    f.store.getHumanApprovalPublicKey=vi.fn(()=>"TEST_PUBLIC_KEY");
+    const bootstrap=new LocalRuntimeBootstrap({
+      resourcesPath:f.resources,desktopExecPath:"/Applications/OWL LAB Desktop.app",
+      store:f.store,homeDir:f.home,uid:501,runtimePort:8788,skipLaunchd:true,
+    });
+    expect(()=>bootstrap.ensureEnvironment()).toThrow(/RUNTIME_M6_SIGNED_APPROVAL/);
+    expect(fs.existsSync(path.join(f.home,".owl","runtime.env"))).toBe(false);
+  });
   it("applies only selected review capabilities with exact-action approval requirements", () => {
     const f=fixture();
     f.settings.runtimePermissionModes={
       gitPush:"review",shell:"blocked",delete:"blocked",rollback:"blocked",
     };
+    f.store.getHumanApprovalPublicKey=vi.fn(()=>"TEST_PUBLIC_KEY");
+    const componentFile=path.join(f.resources,"owl-runtime","component.json");
+    const component=JSON.parse(fs.readFileSync(componentFile,"utf8"));
+    component.capabilities={humanApprovalSignatureV1:true,scopedCapabilityV1:true};
+    fs.writeFileSync(componentFile,JSON.stringify(component));
     const bootstrap=new LocalRuntimeBootstrap({
       resourcesPath:f.resources,desktopExecPath:"/Applications/OWL LAB Desktop.app",
       store:f.store,homeDir:f.home,uid:501,runtimePort:8788,skipLaunchd:true,

@@ -24,17 +24,24 @@ describe("P0 Runtime permission policy",()=>{
  it("configures only selected capabilities and enforces exact Runtime action review",()=>{
   const env=new Map([["ALLOW_SHELL","false"],["ALLOW_DELETE","true"]]);
   applyRuntimePermissionModes(env,{runtimePermissionModes:{
-   gitPush:"review",shell:"blocked",delete:"blocked",rollback:"blocked"}});
+   gitPush:"review",shell:"blocked",delete:"blocked",rollback:"blocked"}},
+   {humanApprovalPublicKey:"TEST_PUBLIC_KEY",runtimeSignedApprovalSupported:true});
   expect(env.get("ALLOW_GIT_PUSH")).toBe("true");
   expect(env.get("ALLOW_SHELL")).toBe("false");
   expect(env.get("ALLOW_DELETE")).toBe("false");
   expect(env.get("ALLOW_ROLLBACK")).toBe("false");
+  expect(env.get("OWL_SCOPED_ACTION_ALLOWLIST")).toBe("git.push");
   const covered=env.get("OWL_APPROVAL_ACTIONS").split(",");
   for(const action of EXACT_APPROVAL_ACTIONS)expect(covered).toContain(action);
  });
+ it("refuses Review without signed Runtime 1.x support",()=>{
+  expect(()=>applyRuntimePermissionModes(new Map(),{runtimePermissionModes:{gitPush:"review"}},
+   {humanApprovalPublicKey:"TEST_PUBLIC_KEY"})).toThrow(/RUNTIME_M6_SIGNED_APPROVAL/);
+ });
  it("preserves extra approval actions, without removing mandatory ones",()=>{
   const env=new Map([["OWL_APPROVAL_ACTIONS","custom.action"]]);
-  applyRuntimePermissionModes(env,{runtimePermissionModes:{shell:"review"}});
+  applyRuntimePermissionModes(env,{runtimePermissionModes:{shell:"review"}},
+   {humanApprovalPublicKey:"TEST_PUBLIC_KEY",runtimeSignedApprovalSupported:true});
   expect(env.get("OWL_APPROVAL_ACTIONS").split(",")).toContain("custom.action");
   expect(env.get("OWL_APPROVAL_ACTIONS").split(",")).toContain("shell.exec");
  });

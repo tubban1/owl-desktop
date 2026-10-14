@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { app, safeStorage } from "electron";
 import { normalizeOnboardingState } from "./services/onboarding-state.mjs";
 import { normalizeRuntimePermissionModes, validateRuntimePermissionChange } from "./services/runtime-permissions.mjs";
+import {createHumanApprovalSigner} from "./services/human-approval-signer.mjs";
 
 const readJson = (file, fallback) => {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return fallback; }
@@ -18,8 +19,13 @@ export class DesktopStore {
   constructor({ root } = {}) {
     const userDataRoot = root ? path.resolve(root) : app.getPath("userData");
     this.settingsFile = path.join(userDataRoot, "settings.json");
+    this.approvalSigner=createHumanApprovalSigner({root:userDataRoot,secureStorage:safeStorage});
     this.secretsFile = path.join(userDataRoot, "secrets.json");
   }
+
+  getHumanApprovalPublicKey(){return this.approvalSigner.publicKey();}
+  ensureHumanApprovalSigner(){return this.approvalSigner.provision();}
+  signHumanApproval(approval){return this.approvalSigner.signApproval(approval);}
 
   getSettings() {
     const stored = readJson(this.settingsFile, {});

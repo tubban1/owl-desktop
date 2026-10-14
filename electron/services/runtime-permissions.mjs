@@ -18,11 +18,28 @@ export function validateRuntimePermissionChange(key,mode){
   throw new Error("INVALID_RUNTIME_PERMISSION_CHANGE");
  return {key,mode};
 }
-export function applyRuntimePermissionModes(env,settings){
+export function applyRuntimePermissionModes(env,settings,{
+ humanApprovalPublicKey=null,runtimeSignedApprovalSupported=false,
+}={}){
  const modes=normalizeRuntimePermissionModes(settings?.runtimePermissionModes);
  for(const [key,spec] of Object.entries(RUNTIME_PERMISSION_DEFINITIONS)){
   if(modes[key]==="inherit")continue;
   env.set(spec.env,modes[key]==="review"?"true":"false");
+ }
+ if(Object.values(modes).includes("review")){
+  if(!runtimeSignedApprovalSupported)throw new Error("RUNTIME_M6_SIGNED_APPROVAL_CAPABILITY_UNAVAILABLE");
+  if(!humanApprovalPublicKey)throw new Error("HUMAN_SIGNER_REQUIRED_FOR_REVIEW_CAPABILITY");
+  env.set("OWL_HUMAN_APPROVAL_PUBLIC_KEY_B64",humanApprovalPublicKey);
+  env.set("OWL_HUMAN_APPROVAL_ENFORCE","1");
+  env.set("OWL_SCOPED_CAPABILITIES","1");
+  const allowed=Object.entries(RUNTIME_PERMISSION_DEFINITIONS)
+    .filter(([key])=>modes[key]==="review")
+    .flatMap(([,spec])=>spec.actions);
+  env.set("OWL_SCOPED_ACTION_ALLOWLIST",[...new Set(allowed)].join(","));
+ }else if(Object.values(modes).some(mode=>mode!=="inherit")){
+  env.set("OWL_SCOPED_CAPABILITIES","0");
+  env.set("OWL_SCOPED_ACTION_ALLOWLIST","");
+  env.set("OWL_HUMAN_APPROVAL_ENFORCE","0");
  }
  const previous=(env.get("OWL_APPROVAL_ACTIONS")||"").split(",").map(s=>s.trim()).filter(Boolean);
  env.set("OWL_APPROVAL_ACTIONS",[...new Set([...previous,...EXACT_APPROVAL_ACTIONS])].join(","));

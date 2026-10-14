@@ -104,7 +104,7 @@ export class RuntimeHttpClient {
   approveApproval(approvalId, options = {}) {
     return this.invoke(
       "approvals.approve",
-      { approvalId, confirm: true },
+      { approvalId, confirm: true, ...(options.humanProof?{humanProof:options.humanProof}:{}) },
       {
         timeoutMs: options.timeoutMs ?? 120_000,
         requestId: options.requestId,

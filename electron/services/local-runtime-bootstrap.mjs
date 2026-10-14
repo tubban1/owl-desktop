@@ -463,7 +463,14 @@ export class LocalRuntimeBootstrap {
     if (!env.has("ALLOW_DELETE")) env.set("ALLOW_DELETE", "false");
     if (!env.has("ALLOW_SHELL")) env.set("ALLOW_SHELL", "false");
     if (!env.has("ALLOW_GUI")) env.set("ALLOW_GUI", "true");
-    applyRuntimePermissionModes(env, settings);
+    const component=JSON.parse(fs.readFileSync(
+      path.join(this.resourcesPath,"owl-runtime","component.json"),"utf8"));
+    applyRuntimePermissionModes(env, settings, {
+      humanApprovalPublicKey:this.store.getHumanApprovalPublicKey?.()??null,
+      runtimeSignedApprovalSupported:
+        component.capabilities?.humanApprovalSignatureV1===true &&
+        component.capabilities?.scopedCapabilityV1===true,
+    });
 
     let token = env.get("OWL_RUNTIME_API_TOKEN");
     if (!token) {

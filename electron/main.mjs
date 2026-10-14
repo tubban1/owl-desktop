@@ -1762,9 +1762,41 @@ function registerIpc() {
     if (typeof approvalId !== "string" || !approvalId.trim()) {
       throw new Error("APPROVAL_ID_REQUIRED");
     }
+    const approval=await runtimeClient().getApproval(approvalId.trim());
+    if(approval?.state!=="pending"||Date.parse(approval.expiresAt)<=Date.now())
+      throw new Error("APPROVAL_NOT_PENDING_OR_EXPIRED");
+    const modes=store.getSettings().runtimePermissionModes??{};
+    const reviewing=Object.values(modes).includes("review");
+    let humanProof;
+    if(reviewing){
+      if(!app.isPackaged || !createLocalRuntimeBootstrap(store.getSettings()))
+        throw new Error("SIGNED_APPROVAL_REQUIRES_MANAGED_PACKAGED_RUNTIME");
+      if(!store.getHumanApprovalPublicKey())
+        throw new Error("OS_HUMAN_SIGNER_NOT_PROVISIONED");
+      if(approval.review?.complete!==true)
+        throw new Error("EXACT_ACTION_ARGUMENT_PREVIEW_UNAVAILABLE");
+    }
+    const detail=approval.review?.fields
+      ? JSON.stringify(approval.review.fields,null,2)
+      : "Exact argument preview is unavailable in this Runtime.";
+    const {response}=await dialog.showMessageBox(mainWindow??undefined,{
+      type:"warning",buttons:["Cancel","Approve exact action"],
+      defaultId:0,cancelId:0,noLink:true,title:"OWL Runtime exact action approval",
+      message:`${approval.subject} · ${approval.riskLevel} risk`,
+      detail:`Task: ${approval.ownerTaskId??"direct"} / Step: ${approval.ownerStepId??"—"}
+Expires: ${approval.expiresAt}
+Fingerprint: ${approval.fingerprint}
+
+${detail}
+
+Only this single action will be approved.`,
+    });
+    if(response!==1)throw new Error("USER_DECLINED_ACTION_APPROVAL");
+    if(reviewing)humanProof=store.signHumanApproval(approval);
     const result = await runtimeClient().approveApproval(approvalId.trim(), {
       requestId: `desktop-approval:approve:${approvalId.trim()}:${Date.now().toString(36)}`,
       idempotencyKey: `desktop-approval:approve:${approvalId.trim()}`,
+      ...(humanProof?{humanProof}:{}),
     });
     record("info", "desktop", "Runtime approval granted", {
       approvalId: approvalId.trim(),
@@ -2068,6 +2100,7 @@ function registerIpc() {
       detail:"This preference does not grant a task approval. Exact Task/Step/arguments still require separate Runtime authorization. Saving never restarts your computer.",
     });
     if(response===1){
+      if(mode==="review")store.ensureHumanApprovalSigner();
       store.setRuntimePermission(key,mode);
       record("info","runtime","Permission preference saved, requires Runtime restart",{capability:key,mode});
     }
