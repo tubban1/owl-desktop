@@ -230,6 +230,8 @@ describe("LocalRuntimeBootstrap", () => {
     );
     expect(launchAgent).not.toContain("OWL LAB Desktop.app");
     expect(launchAgent).toContain(".owl/current/dist/server.js");
+    expect(launchAgent).not.toContain("<key>ProcessType</key>");
+    expect(launchAgent).not.toContain("<string>Background</string>");
     expect(result.runtimeNode).toMatchObject({
       nodeVersion: "v22.23.3",
       architecture: process.arch === "arm64" ? "arm64" : "x64",
