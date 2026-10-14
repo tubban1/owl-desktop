@@ -5,3 +5,6 @@ vendor
 .DS_Store
 *.log
 build/icon.icns
+
+# Downloaded Node runtime archives are a local build cache
+/build/download-cache/
