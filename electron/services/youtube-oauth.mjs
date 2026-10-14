@@ -33,6 +33,27 @@ export function checkYoutubeCallback({path,state}){
  if(!code||code.length>4096)error("YOUTUBE_OAUTH_CODE_MISSING");
  return code;
 }
+/** Return only a fixed safe code. Never surface Google's raw body or project IDs. */
+export function classifyYoutubeChannelHttpError(status,raw){
+ if(![401,403].includes(status)||typeof raw!=="string"||raw.length>8192)return null;
+ let data;
+ try{data=JSON.parse(raw);}catch{return null;}
+ const obj=data?.error;
+ if(!obj||typeof obj!=="object")return null;
+ const reasons=[
+  ...(Array.isArray(obj.errors)?obj.errors.slice(0,10).map(x=>x?.reason):[]),
+  ...(Array.isArray(obj.details)?obj.details.slice(0,10).map(x=>x?.reason):[]),
+ ];
+ const has=(...values)=>values.some(v=>reasons.includes(v));
+ if(has("SERVICE_DISABLED","accessNotConfigured"))return "YOUTUBE_OAUTH_CHANNEL_API_DISABLED";
+ if(has("quotaExceeded","dailyLimitExceeded","QUOTA_EXCEEDED"))return "YOUTUBE_OAUTH_CHANNEL_QUOTA_EXCEEDED";
+ if(has("insufficientPermissions","ACCESS_TOKEN_SCOPE_INSUFFICIENT"))return "YOUTUBE_OAUTH_CHANNEL_PERMISSION_DENIED";
+ if(has("rateLimitExceeded","userRateLimitExceeded","RATE_LIMIT_EXCEEDED"))return "YOUTUBE_OAUTH_CHANNEL_RATE_LIMITED";
+ if(has("youtubeSignupRequired"))return "YOUTUBE_OAUTH_CHANNEL_YOUTUBE_SIGNUP_REQUIRED";
+ if(has("channelForbidden"))return "YOUTUBE_OAUTH_CHANNEL_FORBIDDEN";
+ return null;
+}
+
 /** Diagnostic codes are stage-specific; never persist Google response bodies. */
 async function googleFetch(fetchImpl,url,options,stage){
  const uri=new URL(url);
@@ -41,6 +62,14 @@ async function googleFetch(fetchImpl,url,options,stage){
   error("YOUTUBE_OAUTH_ENDPOINT_BLOCKED");
  const res=await fetchImpl(uri.toString(),{...options,redirect:"manual",signal:AbortSignal.timeout(15000)});
  if(res.status<200||res.status>=300){
+  if(stage==="CHANNEL"&&(res.status===403||res.status===401)){
+   try{
+    const code=classifyYoutubeChannelHttpError(res.status,await res.text());
+    if(code)error(code);
+   }catch(e){
+    if(e instanceof Error&&e.message.startsWith("YOUTUBE_OAUTH_"))throw e;
+   }
+  }
   if(stage==="TOKEN"&&res.status===400){
    try{
     const body=await res.text();

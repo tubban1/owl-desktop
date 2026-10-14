@@ -1,6 +1,6 @@
 import {describe,it,expect,vi} from "vitest";
 import {youtubePkce,youtubeAuthorizationUrl,checkYoutubeCallback,
- finishYoutubeOauth,connectYoutubeBrowser} from "../electron/services/youtube-oauth.mjs";
+ finishYoutubeOauth,connectYoutubeBrowser,classifyYoutubeChannelHttpError} from "../electron/services/youtube-oauth.mjs";
 const clientId="12345678-testdesktopapp.apps.googleusercontent.com";
 const channelId="UC"+"a".repeat(22);
 function fakeGoogle({email="owner@example.com",channel=channelId,missingScopes=false,missingRefresh=false}={}){
@@ -97,6 +97,31 @@ describe("YouTube official OAuth desktop",()=>{
   const res=await finishYoutubeOauth({...base,fetchImpl:spy});
   expect(res.channelId).toBe(channelId);
   expect(JSON.stringify(res)).not.toContain(base.clientSecret);
+ });
+ it("maps only allowlisted Google/YouTube 403 reason codes, never raw error bodies",async()=>{
+  const cases=[
+   [{error:{errors:[{domain:"usageLimits",reason:"accessNotConfigured",message:"Project 123456 is secret"}]}},403,"YOUTUBE_OAUTH_CHANNEL_API_DISABLED"],
+   [{error:{status:"PERMISSION_DENIED",details:[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",reason:"SERVICE_DISABLED",metadata:{consumer:"projects/123456"}}]}},403,"YOUTUBE_OAUTH_CHANNEL_API_DISABLED"],
+   [{error:{errors:[{reason:"quotaExceeded"}]}},403,"YOUTUBE_OAUTH_CHANNEL_QUOTA_EXCEEDED"],
+   [{error:{errors:[{reason:"insufficientPermissions"}]}},403,"YOUTUBE_OAUTH_CHANNEL_PERMISSION_DENIED"],
+   [{error:{errors:[{reason:"rateLimitExceeded"}]}},403,"YOUTUBE_OAUTH_CHANNEL_RATE_LIMITED"],
+   [{error:{errors:[{reason:"channelForbidden"}]}},403,"YOUTUBE_OAUTH_CHANNEL_FORBIDDEN"],
+   [{error:{errors:[{reason:"youtubeSignupRequired"}]}},401,"YOUTUBE_OAUTH_CHANNEL_YOUTUBE_SIGNUP_REQUIRED"],
+  ];
+  for(const [body,status,code] of cases){
+   const raw=JSON.stringify(body);
+   expect(classifyYoutubeChannelHttpError(status,raw)).toBe(code);
+   const fake=fakeGoogle().fetch;
+   const params={clientId,code:"fake",redirectUri:"http://127.0.0.1:35419/oauth/youtube/callback",
+     verifier:youtubePkce().verifier,expectedEmail:"owner@example.com"};
+   await expect(finishYoutubeOauth({...params,fetchImpl:async(url,opts)=>
+     new URL(url).hostname==="www.googleapis.com"
+       ?new Response(raw,{status}):fake(url,opts)})).rejects.toThrow(code);
+  }
+  expect(classifyYoutubeChannelHttpError(403,JSON.stringify({error:{message:"private user token"}}))).toBeNull();
+  expect(classifyYoutubeChannelHttpError(403,"invalid")).toBeNull();
+  expect(classifyYoutubeChannelHttpError(403,"x".repeat(8193))).toBeNull();
+  expect(classifyYoutubeChannelHttpError(400,JSON.stringify({error:{errors:[{reason:"quotaExceeded"}]}}))).toBeNull();
  });
  it("refuses missing app ID before opening browser",async()=>{
   const browser=vi.fn();
