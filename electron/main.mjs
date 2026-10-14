@@ -2115,6 +2115,11 @@ Only this single action will be approved.`,
       {packaged:app.isPackaged}));
   ipcMain.handle("runtime-permissions:set", async (_event,key,mode) => {
     validateRuntimePermissionChange(key,mode);
+    if(key==="gitPush"&&mode==="enabled"){
+      store.setRuntimePermission(key,mode);
+      return {...runtimePermissionProjection(store.getSettings(),path.join(os.homedir(),".owl","runtime.env"),
+        {packaged:app.isPackaged}),changed:true};
+    }
     const {response}=await dialog.showMessageBox(mainWindow ?? undefined,{
       type:"warning",buttons:["Cancel",mode==="review"?"Require approval for each action":"Block capability"],
       defaultId:0,cancelId:0,noLink:true,title:"OWL Runtime permission",

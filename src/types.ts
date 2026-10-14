@@ -1,5 +1,5 @@
 export type RuntimePermissionKey = "gitPush" | "shell" | "delete" | "rollback";
-export type RuntimePermissionMode = "inherit" | "blocked" | "review";
+export type RuntimePermissionMode = "inherit" | "blocked" | "review" | "enabled";
 export type RuntimePermissionProjection = {
   version:number;packaged:boolean;restartRequired:boolean;approvalPolicyPending:boolean;changed?:boolean;
   liveRuntimeEffective:"unverified";approvalModeConfigured:boolean;message:string;

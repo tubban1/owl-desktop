@@ -207,7 +207,7 @@ declare global {
         nativeSessionPreferred: boolean;
       } | null>;
       getRuntimePermissions(): Promise<import("./types").RuntimePermissionProjection>;
-      setRuntimePermission(key:import("./types").RuntimePermissionKey,mode:"blocked"|"review"): Promise<import("./types").RuntimePermissionProjection>;
+      setRuntimePermission(key:import("./types").RuntimePermissionKey,mode:"blocked"|"review"|"enabled"): Promise<import("./types").RuntimePermissionProjection>;
       applyRuntimePermissions(): Promise<{applied:boolean;reason?:string}>;
       getSettings(): Promise<Settings>;
       pickAllowedFolders(): Promise<string[]>;

@@ -10,7 +10,7 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
  const [busy,setBusy]=useState(false),[message,setMessage]=useState("");
  const refresh=async()=>setData(await window.owlDesktop.getRuntimePermissions());
  useEffect(()=>{void refresh().catch(e=>setMessage(String(e)));},[]);
- const change=async(key:RuntimePermissionKey,mode:"blocked"|"review")=>{
+ const change=async(key:RuntimePermissionKey,mode:"blocked"|"review"|"enabled")=>{
   setBusy(true);setMessage("");
   try{
    const result=await window.owlDesktop.setRuntimePermission(key,mode);
@@ -33,7 +33,7 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
  return <section className="panel settings-panel">
   <div className="panel-heading"><div><span className="eyebrow">RUNTIME PERMISSIONS</span><h3>Permission center</h3></div>
    <button className="secondary" disabled={busy} onClick={()=>void refresh()}><RefreshCw size={15}/>Refresh</button></div>
-  <p className="panel-help">Every high-risk capability is separate. Review each action means eligible for exact Runtime Task/Step approval, not permission to do everything. The Cloud lease and folder/workspace scope still apply.</p>
+  <p className="panel-help">Git Push is enabled by default and does not need per-action approval. Delete, rollback and high-risk reviewed actions remain separately controlled. Cloud lease and workspace scope still apply.</p>
   <div className="about-grid">
    <span>Connected Runtime</span><code>{endpoint??"Unavailable"}</code>
    <span>Device authorization</span><strong>{access?.state??"Unknown"} · {access?.reasonCode??"Not checked"}</strong>
@@ -43,11 +43,17 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
   {data?.items.map(item=><div className="setting-row" key={item.key}>
    <div><strong>{item.label} ({item.envName})</strong>
     <span>Desktop config: {item.configured?"Enabled":"Disabled"} · {item.configuredSource}{item.pendingApply?" · Pending restart":""}</span>
-    <span>Connected Runtime: unverified. Protected actions need separate approval.</span></div>
+    <span>{item.key==="gitPush"?
+      "Git Push: enabled by default, no per-push approval. Manual Blocked setting overrides this.":
+      "Connected Runtime: unverified. Reviewed actions still need separate approval."}</span></div>
    <select className="setting-input compact-input" value={item.mode} disabled={busy}
-    onChange={e=>{const mode=e.target.value;if(mode==="blocked"||mode==="review")void change(item.key,mode);}}>
-    {item.mode==="inherit"&&<option value="inherit">Inherited setting</option>}
-    <option value="blocked">Blocked</option><option value="review">Review each action</option>
+    onChange={e=>{const mode=e.target.value;if(mode==="blocked"||mode==="review"||mode==="enabled")void change(item.key,mode);}}>
+    {item.mode==="inherit"&&<option value="inherit">{item.key==="gitPush"?"Enabled (default)":"Inherited setting"}</option>}
+    {item.key==="gitPush"?<>
+      <option value="enabled">Enabled · no approval</option><option value="blocked">Blocked</option>
+    </>:<>
+      <option value="blocked">Blocked</option><option value="review">Review each action</option>
+    </>}
    </select>
   </div>)}
   {message&&<p className="panel-help">{message}</p>}
@@ -57,7 +63,7 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
     {data?.restartRequired?"Saved setting differs from runtime.env":"No pending managed config changes"}</span>
   </div>
   <p className="panel-help">Development sessions may connect to another Runtime. This page never restarts unrelated processes or bypasses a locked lease, missing folder, or busy workspace.</p>
-  <p className="panel-help">Review safety: the current Runtime approval card identifies its Task/Step but does not show all command parameters. For Git Push, Shell or Delete, inspect the originating Task and exact target before approving. Action approval must remain a human-facing, authenticated operation.</p>
+  <p className="panel-help">For reviewed Shell, Delete or Rollback operations, inspect the originating Task and exact target before approving. Git Push is intentionally not part of routine human review.</p>
   <ApprovalAttention approvals={approvals} onApprove={onApprove} onDeny={onDeny}/>
  </section>;
 }

@@ -461,6 +461,7 @@ export class LocalRuntimeBootstrap {
     env.set("ALLOWED_DIRECTORIES", allowedDirectories.join(","));
     if (!env.has("ALLOW_WRITE")) env.set("ALLOW_WRITE", "true");
     if (!env.has("ALLOW_DELETE")) env.set("ALLOW_DELETE", "false");
+    // applyRuntimePermissionModes below migrates legacy false Git Push flags.
     if (!env.has("ALLOW_SHELL")) env.set("ALLOW_SHELL", "false");
     if (!env.has("ALLOW_GUI")) env.set("ALLOW_GUI", "true");
     const component=JSON.parse(fs.readFileSync(

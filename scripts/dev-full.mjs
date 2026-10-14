@@ -541,7 +541,8 @@ try {
       ALLOW_WRITE: process.env.ALLOW_WRITE || "true",
       ALLOW_SHELL: process.env.ALLOW_SHELL || "true",
       ALLOW_DELETE: process.env.ALLOW_DELETE || "false",
-      ALLOW_GIT_PUSH: process.env.ALLOW_GIT_PUSH || "false",
+      ALLOW_GIT_PUSH: desktopUserSettings.runtimePermissionModes?.gitPush==="blocked"
+        ? "false" : process.env.ALLOW_GIT_PUSH || "true",
       ALLOW_BROWSER: process.env.ALLOW_BROWSER || "true",
       ALLOW_GUI: process.env.ALLOW_GUI || "true",
     },
