@@ -2088,15 +2088,26 @@ Only this single action will be approved.`,
       throw Error("YOUTUBE_ACCOUNT_NOT_FOUND");
     const clientId=store.getSettings().youtubeOauthClientId?.trim();
     if(!clientId)throw Error("YOUTUBE_OAUTH_CLIENT_ID_REQUIRED");
-    const result=await connectYoutubeBrowser({
-      clientId,expectedEmail:account.identifier,
-      openExternal:async url=>shell.openExternal(url),
-    });
-    const saved=identityVault.saveYoutubeGrant(account.id,result,clientId);
-    record("info","publish-oauth","YouTube channel connected by user authorization",{
-      channelId:result.channelId,
-    });
-    return saved;
+    identityVault.noteYoutubeOauthAttempt(account.id);
+    try {
+      const result=await connectYoutubeBrowser({
+        clientId,expectedEmail:account.identifier,
+        openExternal:async url=>shell.openExternal(url),
+      });
+      const saved=identityVault.saveYoutubeGrant(account.id,result,clientId);
+      record("info","publish-oauth","YouTube channel connected by user authorization",{
+        channelId:result.channelId,
+      });
+      return saved;
+    }catch(error){
+      // Preserve only fixed-format diagnostic codes, never OAuth response data.
+      const raw=error instanceof Error?error.message:"";
+      const safeCode=/^YOUTUBE_OAUTH_[A-Z0-9_]{1,80}$/.test(raw)
+        ?raw:"YOUTUBE_OAUTH_CONNECTION_FAILED";
+      identityVault.noteYoutubeOauthAttempt(account.id,safeCode);
+      record("warn","publish-oauth","YouTube authorization incomplete",{code:safeCode});
+      throw Error(safeCode);
+    }
   });
   ipcMain.handle("accounts:list", () => identityVault.list());
   ipcMain.handle("accounts:upsert", (_event, input) => identityVault.upsert(input));

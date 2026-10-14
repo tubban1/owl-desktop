@@ -68,6 +68,8 @@ export type AccountMeta = {
   connectedTargetTitle?:string|null;
   connectedClientId?:string|null;
   verifiedEmail?:string|null;
+  lastYoutubeOauthError?:string|null;
+  lastYoutubeOauthErrorAt?:string|null;
   browserProfileId: string | null;
   notes: string;
   createdAt: string;

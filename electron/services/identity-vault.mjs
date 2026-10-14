@@ -108,6 +108,8 @@ export class IdentityVault {
       connectedTargetTitle: sameIdentity ? previous?.connectedTargetTitle ?? null : null,
       connectedClientId: sameIdentity ? previous?.connectedClientId ?? null : null,
       verifiedEmail: sameIdentity ? previous?.verifiedEmail ?? null : null,
+      lastYoutubeOauthError: sameIdentity ? previous?.lastYoutubeOauthError ?? null : null,
+      lastYoutubeOauthErrorAt: sameIdentity ? previous?.lastYoutubeOauthErrorAt ?? null : null,
     };
     if (!sameIdentity && previous?.oauthCipherText) {
       record.status = "needs_login";
@@ -146,6 +148,24 @@ export class IdentityVault {
     return sanitize(records[index]);
   }
 
+  noteYoutubeOauthAttempt(id, errorCode = null) {
+    const records=readJson(this.file,[]);
+    const index=records.findIndex(item=>item.id===id);
+    if(index<0)throw Error("YOUTUBE_ACCOUNT_RECORD_NOT_FOUND");
+    if(!["google","youtube"].includes(records[index].service?.toLowerCase().trim()))
+      throw Error("YOUTUBE_WRONG_SERVICE");
+    const safeError=errorCode===null?null:
+      /^YOUTUBE_OAUTH_[A-Z0-9_]{1,80}$/.test(errorCode)
+        ? errorCode : "YOUTUBE_OAUTH_CONNECTION_FAILED";
+    records[index]={...records[index],
+      lastYoutubeOauthError:safeError,
+      lastYoutubeOauthErrorAt:safeError?new Date().toISOString():null,
+      updatedAt:new Date().toISOString(),
+    };
+    writeJson(this.file,records);
+    return sanitize(records[index]);
+  }
+
   saveYoutubeGrant(id, verified, clientId) {
     const records = readJson(this.file, []);
     const index = records.findIndex(item => item.id === id);
@@ -165,6 +185,7 @@ export class IdentityVault {
       connectedTargetId:verified.channelId,connectedTargetTitle:verified.channelTitle,
       verifiedEmail:verified.verifiedEmail,
       connectedClientId:clientId,
+      lastYoutubeOauthError:null,lastYoutubeOauthErrorAt:null,
       lastAuthenticatedAt:new Date().toISOString(),
       expiresAt:verified.grant.expiresAt,updatedAt:new Date().toISOString(),
       cipherText:null,

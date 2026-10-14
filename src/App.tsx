@@ -43,6 +43,18 @@ const advancedNav = [
   { id: "secrets" as Page, label: "Secrets", icon: KeyRound },
 ];
 
+const youtubeOauthFailureHelp = (code:string):string => ({
+  YOUTUBE_OAUTH_SCOPES_MISSING:"Google did not grant both YouTube permissions. Reconnect and select Manage your YouTube videos AND View your YouTube account.",
+  YOUTUBE_OAUTH_CHANNEL_SELECTION_REQUIRED:"Google account has no single identifiable YouTube channel. Open YouTube with this Google account, confirm/create your channel, then reconnect.",
+  YOUTUBE_OAUTH_CHANNEL_INVALID:"Google returned an invalid YouTube channel. Check that the correct account has a channel.",
+  YOUTUBE_OAUTH_HTTP_403:"Google refused a required API request. Confirm YouTube Data API v3 is enabled and your Google account is an OAuth test user.",
+  YOUTUBE_OAUTH_REFRESH_TOKEN_REQUIRED:"Google did not provide an offline refresh token. Reconnect using the official Google consent screen.",
+  YOUTUBE_OAUTH_WRONG_GOOGLE_ACCOUNT:"The Google login does not match this OWL account email. Choose the correct account.",
+  YOUTUBE_OAUTH_EMAIL_UNVERIFIED:"Google has not verified the email address for this account.",
+  YOUTUBE_OAUTH_TIMEOUT:"Google consent timed out. Try Connect YouTube again.",
+  YOUTUBE_OAUTH_CONNECTION_FAILED:"Desktop could not complete Google/YouTube verification. Check the OAuth app settings and try again.",
+}[code] ?? "YouTube verification did not complete. Check Google consent and the YouTube channel, then retry.");
+
 const pretty = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
 const formatTime = (value?: string) => value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
 const formatLogSource = (value: string) => ({
@@ -497,7 +509,8 @@ export default function App() {
       setAccounts(await window.owlDesktop.listAccounts());
       setNotice(`YouTube connected: ${connected.connectedTargetTitle ?? connected.connectedTargetId}`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "YouTube authorization failed");
+      setAccounts(await window.owlDesktop.listAccounts());
+      setNotice("YouTube connection incomplete — see the explanation beside the account.");
     } finally {
       setBusy(false);
     }
@@ -1347,6 +1360,7 @@ export default function App() {
               <button className="secondary" disabled={busy || !settings?.youtubeOauthClientId?.trim()}
                 onClick={() => void saveSettings({youtubeOauthClientId:settings?.youtubeOauthClientId?.trim()??""})}>Save Client ID</button>
             </div>
+            <p className="panel-help">When Google asks which YouTube permissions to grant, select BOTH: manage YouTube videos and view your YouTube account. The browser callback is not a final success confirmation — look for the verified channel on this page.</p>
             <p className="panel-help">Instagram requires a separately configured Meta app and matching Professional account permissions. Adding a profile alone does not grant publishing access.</p>
           </section>
           <section className="panel secret-form account-form">
@@ -1370,6 +1384,11 @@ export default function App() {
                 account.connectedProvider === "youtube" ? "Reconnect required (OAuth app changed)" : account.status}</span>
               {account.connectedProvider === "youtube" && account.connectedTargetId &&
                 <small>{account.connectedTargetTitle} · {account.connectedTargetId}</small>}
+              {account.lastYoutubeOauthError &&
+                <small role="alert" className="oauth-inline-error">
+                  {youtubeOauthFailureHelp(account.lastYoutubeOauthError)}
+                  <span className="oauth-inline-code">{account.lastYoutubeOauthError}</span>
+                </small>}
             </div>
             <div className="row-actions">
               {["google","youtube"].includes(account.service.toLowerCase().trim()) &&

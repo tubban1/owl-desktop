@@ -93,7 +93,7 @@ export async function connectYoutubeBrowser({clientId,expectedEmail,openExternal
   if(used){res.writeHead(409).end("Already handled");return;}
   try{
    const code=checkYoutubeCallback({path:req.url,state:key.state});
-   used=true;res.writeHead(200).end("Authorization received. Return to OWL Desktop.");
+   used=true;res.writeHead(200).end("Google callback received. OWL Desktop is verifying YouTube permissions and your channel. Return to OWL Desktop for the final result.");
    complete(code);
   }catch{
    res.writeHead(400).end("Invalid authorization callback.");

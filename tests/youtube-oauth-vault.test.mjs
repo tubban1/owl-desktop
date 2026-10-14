@@ -21,12 +21,18 @@ describe("service identity OAuth credentials stay off renderer",()=>{
    const vault=new IdentityVault({file});
    const original=vault.upsert({service:"Google",label:"YouTube",identifier:"owner@example.com",
     authMethod:"password",secret:"SECRET_LEGACY_PASSWORD"});
+   const failed=vault.noteYoutubeOauthAttempt(original.id,"YOUTUBE_OAUTH_SCOPES_MISSING");
+   expect(failed.lastYoutubeOauthError).toBe("YOUTUBE_OAUTH_SCOPES_MISSING");
+   expect(failed.status).toBe("needs_login");
+   expect(vault.noteYoutubeOauthAttempt(original.id,"https://invalid.example?code=TOKEN").lastYoutubeOauthError)
+    .toBe("YOUTUBE_OAUTH_CONNECTION_FAILED");
    const connected=vault.saveYoutubeGrant(original.id,{
     channelId,channelTitle:"Test Channel",verifiedEmail:"owner@example.com",
     grant:{refreshToken:"SECRET_REFRESH",accessToken:"SECRET_ACCESS",
      scopes:["youtube.upload"],expiresAt:new Date(Date.now()+30000).toISOString()},
    },appId);
    expect(connected.connectedTargetId).toBe(channelId);
+   expect(connected.lastYoutubeOauthError).toBeNull();
    expect(connected.oauthCipherText).toBeUndefined();
    expect(connected.cipherText).toBeUndefined();
    expect(vault.list()[0].oauthCipherText).toBeUndefined();

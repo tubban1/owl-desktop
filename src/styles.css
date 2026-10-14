@@ -5637,3 +5637,8 @@ input:focus { border-color: #41634b; box-shadow: 0 0 0 3px rgba(78,128,92,.08); 
     flex-direction: column;
   }
 }
+
+
+/* Keep OAuth failures beside the account, visible after the browser returns. */
+.oauth-inline-error {display:block;max-width:440px;color:#a53a31;font-weight:600;white-space:normal;line-height:1.45;}
+.oauth-inline-code {display:block;color:#80504d;font-size:10px;font-family:monospace;margin-top:4px;overflow-wrap:anywhere;}
