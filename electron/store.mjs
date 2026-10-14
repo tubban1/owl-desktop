@@ -4,6 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { app, safeStorage } from "electron";
 import { normalizeOnboardingState } from "./services/onboarding-state.mjs";
+import { normalizeRuntimePermissionModes, validateRuntimePermissionChange } from "./services/runtime-permissions.mjs";
 
 const readJson = (file, fallback) => {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return fallback; }
@@ -86,11 +87,22 @@ export class DesktopStore {
             .filter((value) => fs.existsSync(value)),
         )]
       : standardFolders;
+    settings.runtimePermissionModes=normalizeRuntimePermissionModes(settings.runtimePermissionModes);
     if (!stored.sessionId) writeJson(this.settingsFile, settings);
     return settings;
   }
 
+  setRuntimePermission(key, mode) {
+    validateRuntimePermissionChange(key,mode);
+    const before=this.getSettings();
+    const next={...before,runtimePermissionModes:{...before.runtimePermissionModes,[key]:mode}};
+    writeJson(this.settingsFile,next);
+    return next;
+  }
   updateSettings(patch) {
+    if(patch && Object.prototype.hasOwnProperty.call(patch,"runtimePermissionModes"))
+      throw new Error("RUNTIME_PERMISSION_REQUIRES_DEDICATED_APPROVAL");
+
     const next = { ...this.getSettings(), ...patch };
     writeJson(this.settingsFile, next);
     return next;

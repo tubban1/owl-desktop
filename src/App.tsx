@@ -16,6 +16,7 @@ import { buildWorkstreamBoard } from "./monitor/workstreamModel";
 import { DevicesPage } from "./devices/DevicesPage";
 import owlLogo from "../assets/owl-logo-ui.png";
 import { StatisticsPanel } from "./statistics/StatisticsPanel";
+import { RuntimePermissionCenter } from "./permissions/RuntimePermissionCenter";
 import type { UsageStatisticsSnapshot } from "./statistics/statisticsModel";
 import {
   ApprovalAttention,
@@ -1379,6 +1380,9 @@ export default function App() {
             </div>
           </section>
 
+          <RuntimePermissionCenter approvals={snapshot?.approvals} access={runtimeAccess}
+            endpoint={snapshot?.runtimeEndpoint} onApprove={approveRuntimeApproval}
+            onDeny={denyRuntimeApproval} />
           <section className="panel settings-panel folder-settings">
             <div className="panel-heading">
               <div><span className="eyebrow">FILES & FOLDERS</span><h3>Folders OWL can access</h3></div>

@@ -1,4 +1,15 @@
+export type RuntimePermissionKey = "gitPush" | "shell" | "delete" | "rollback";
+export type RuntimePermissionMode = "inherit" | "blocked" | "review";
+export type RuntimePermissionProjection = {
+  version:number;packaged:boolean;restartRequired:boolean;approvalPolicyPending:boolean;changed?:boolean;
+  liveRuntimeEffective:"unverified";approvalModeConfigured:boolean;message:string;
+  items:Array<{key:RuntimePermissionKey;label:string;envName:string;
+    mode:RuntimePermissionMode;configured:boolean;configuredSource:string;
+    pendingApply:boolean;requiresExactRuntimeApproval:boolean;liveEffective:"unverified"}>;
+};
+
 export type Settings = {
+  runtimePermissionModes?: Partial<Record<RuntimePermissionKey,RuntimePermissionMode>>;
   wakeName: string;
   wakeAliases: string[];
   allowedDirectories: string[];

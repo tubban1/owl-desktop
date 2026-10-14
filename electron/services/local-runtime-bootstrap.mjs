@@ -4,6 +4,7 @@ import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
+import { applyRuntimePermissionModes } from "./runtime-permissions.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -462,6 +463,7 @@ export class LocalRuntimeBootstrap {
     if (!env.has("ALLOW_DELETE")) env.set("ALLOW_DELETE", "false");
     if (!env.has("ALLOW_SHELL")) env.set("ALLOW_SHELL", "false");
     if (!env.has("ALLOW_GUI")) env.set("ALLOW_GUI", "true");
+    applyRuntimePermissionModes(env, settings);
 
     let token = env.get("OWL_RUNTIME_API_TOKEN");
     if (!token) {

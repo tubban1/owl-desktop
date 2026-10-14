@@ -124,6 +124,9 @@ contextBridge.exposeInMainWorld("owlDesktop", {
     ipcRenderer.invoke("accounts:status", id, status, options),
   accountCapabilities: (id) =>
     ipcRenderer.invoke("accounts:capabilities", id),
+  getRuntimePermissions: () => ipcRenderer.invoke("runtime-permissions:get"),
+  setRuntimePermission: (key,mode) => ipcRenderer.invoke("runtime-permissions:set",key,mode),
+  applyRuntimePermissions: () => ipcRenderer.invoke("runtime-permissions:apply"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   pickAllowedFolders: () => ipcRenderer.invoke("settings:pick-folders"),
   updateSettings: (patch) => ipcRenderer.invoke("settings:update", patch),

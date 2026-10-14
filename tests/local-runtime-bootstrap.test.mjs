@@ -111,6 +111,28 @@ function fixture() {
 }
 
 describe("LocalRuntimeBootstrap", () => {
+  it("applies only selected review capabilities with exact-action approval requirements", () => {
+    const f=fixture();
+    f.settings.runtimePermissionModes={
+      gitPush:"review",shell:"blocked",delete:"blocked",rollback:"blocked",
+    };
+    const bootstrap=new LocalRuntimeBootstrap({
+      resourcesPath:f.resources,desktopExecPath:"/Applications/OWL LAB Desktop.app",
+      store:f.store,homeDir:f.home,uid:501,runtimePort:8788,skipLaunchd:true,
+    });
+    bootstrap.ensureEnvironment();
+    const env=fs.readFileSync(path.join(f.home,".owl","runtime.env"),"utf8");
+    expect(env).toContain("ALLOW_GIT_PUSH=true");
+    expect(env).toContain("ALLOW_SHELL=false");
+    expect(env).toContain("ALLOW_DELETE=false");
+    expect(env).toContain("ALLOW_ROLLBACK=false");
+    expect(env).toContain("OWL_APPROVAL_MODE=enforce");
+    expect(env).toContain("OWL_APPROVAL_ACTIONS=");
+    expect(env).toContain("git.push");
+    expect(env).toContain("shell.exec");
+    expect(env).toContain("tx.rollback");
+  });
+
   it("installs packaged components and prepares a safe local Runtime", async () => {
     const f = fixture();
     const bootstrap = new LocalRuntimeBootstrap({

@@ -11,6 +11,7 @@ import { RuntimeHttpClient } from "./runtime-http-client.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
 import { LocalRuntimeBootstrap } from "./services/local-runtime-bootstrap.mjs";
+import { runtimePermissionProjection, validateRuntimePermissionChange } from "./services/runtime-permissions.mjs";
 import { TunnelSupervisor } from "./services/tunnel-supervisor.mjs";
 import { tunnelTransportAvailable } from "./services/tunnel-availability.mjs";
 import { ConnectionHostClient } from "./services/connection-host-client.mjs";
@@ -2055,6 +2056,39 @@ function registerIpc() {
     identityVault.markStatus(id, status, options));
   ipcMain.handle("accounts:capabilities", (_event, id) =>
     identityVault.capabilities(id));
+  ipcMain.handle("runtime-permissions:get", () =>
+    runtimePermissionProjection(store.getSettings(),path.join(os.homedir(),".owl","runtime.env"),
+      {packaged:app.isPackaged}));
+  ipcMain.handle("runtime-permissions:set", async (_event,key,mode) => {
+    validateRuntimePermissionChange(key,mode);
+    const {response}=await dialog.showMessageBox(mainWindow ?? undefined,{
+      type:"warning",buttons:["Cancel",mode==="review"?"Require approval for each action":"Block capability"],
+      defaultId:0,cancelId:0,noLink:true,title:"OWL Runtime permission",
+      message:mode==="review"?"Allow this capability only with per-action Runtime review?":"Block this capability at next Runtime restart?",
+      detail:"This preference does not grant a task approval. Exact Task/Step/arguments still require separate Runtime authorization. Saving never restarts your computer.",
+    });
+    if(response===1){
+      store.setRuntimePermission(key,mode);
+      record("info","runtime","Permission preference saved, requires Runtime restart",{capability:key,mode});
+    }
+    return {...runtimePermissionProjection(store.getSettings(),path.join(os.homedir(),".owl","runtime.env"),
+      {packaged:app.isPackaged}),changed:response===1};
+  });
+  ipcMain.handle("runtime-permissions:apply", async () => {
+    if(!app.isPackaged)return {applied:false,reason:"DEV_FULL_RESTART_REQUIRED"};
+    const bootstrap=createLocalRuntimeBootstrap(store.getSettings());
+    if(!bootstrap)return {applied:false,reason:"NOT_DESKTOP_MANAGED_RUNTIME"};
+    const {response}=await dialog.showMessageBox(mainWindow ?? undefined,{
+      type:"warning",buttons:["Cancel","Apply and restart Runtime"],defaultId:0,cancelId:0,noLink:true,
+      title:"Restart OWL Runtime",message:"Apply capability changes to the managed Runtime?",
+      detail:"This briefly disconnects active sessions. Durable tasks are preserved. This does not approve any pending action.",
+    });
+    if(response!==1)return {applied:false,reason:"CANCELLED"};
+    bootstrap.ensureEnvironment();
+    await runtimeHostSupervisor().restartService();
+    record("info","runtime","Permission settings applied through controlled Runtime restart");
+    return {applied:true};
+  });
   ipcMain.handle("settings:get", () => store.getSettings());
   ipcMain.handle("settings:pick-folders", async () => {
     const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
