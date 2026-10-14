@@ -33,38 +33,57 @@ export function checkYoutubeCallback({path,state}){
  if(!code||code.length>4096)error("YOUTUBE_OAUTH_CODE_MISSING");
  return code;
 }
-async function googleFetch(fetchImpl,url,options){
+/** Diagnostic codes are stage-specific; never persist Google response bodies. */
+async function googleFetch(fetchImpl,url,options,stage){
  const uri=new URL(url);
  if(uri.protocol!=="https:"||uri.username||uri.password||uri.port||
   !["oauth2.googleapis.com","www.googleapis.com","openidconnect.googleapis.com"].includes(uri.hostname))
   error("YOUTUBE_OAUTH_ENDPOINT_BLOCKED");
- const result=await fetchImpl(uri.toString(),{...options,redirect:"manual",
-  signal:AbortSignal.timeout(15_000)});
- if(result.status<200||result.status>=300)error("YOUTUBE_OAUTH_HTTP_"+result.status);
- const data=await result.text();
- if(data.length>65536)error("YOUTUBE_OAUTH_RESPONSE_TOO_LARGE");
- const value=JSON.parse(data);
- if(!value||Array.isArray(value)||typeof value!=="object")error("YOUTUBE_OAUTH_INVALID_JSON");
- return value;
+ const res=await fetchImpl(uri.toString(),{...options,redirect:"manual",signal:AbortSignal.timeout(15000)});
+ if(res.status<200||res.status>=300){
+  if(stage==="TOKEN"&&res.status===400){
+   try{
+    const body=await res.text();
+    if(body.length<=8192){
+     const obj=JSON.parse(body);
+     if(typeof obj?.error_description==="string" &&
+        /(?:client_secret\s+(?:is\s+)?missing|missing\s+client_secret)/i.test(obj.error_description))
+      error("YOUTUBE_OAUTH_TOKEN_CLIENT_SECRET_REQUIRED");
+     if(obj?.error==="invalid_grant")error("YOUTUBE_OAUTH_TOKEN_INVALID_GRANT");
+    }
+   }catch(e){
+    if(e instanceof Error&&e.message.startsWith("YOUTUBE_OAUTH_"))throw e;
+   }
+  }
+  error("YOUTUBE_OAUTH_"+stage+"_HTTP_"+res.status);
+ }
+ const raw=await res.text();
+ if(raw.length>65536)error("YOUTUBE_OAUTH_"+stage+"_RESPONSE_TOO_LARGE");
+ let obj;try{obj=JSON.parse(raw);}catch{error("YOUTUBE_OAUTH_"+stage+"_INVALID_JSON");}
+ if(!obj||typeof obj!=="object"||Array.isArray(obj))
+  error("YOUTUBE_OAUTH_"+stage+"_INVALID_JSON");
+ return obj;
 }
-export async function finishYoutubeOauth({fetchImpl=fetch,clientId,code,redirectUri,verifier,expectedEmail}){
+export async function finishYoutubeOauth({fetchImpl=fetch,clientId,code,redirectUri,verifier,expectedEmail,clientSecret}){
+ const params=new URLSearchParams({client_id:clientId,code,redirect_uri:redirectUri,
+  code_verifier:verifier,grant_type:"authorization_code"});
+ if(clientSecret)params.set("client_secret",clientSecret);
  const token=await googleFetch(fetchImpl,"https://oauth2.googleapis.com/token",{
   method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
-  body:new URLSearchParams({client_id:clientId,code,redirect_uri:redirectUri,
-   code_verifier:verifier,grant_type:"authorization_code"}).toString()});
+  body:params.toString()},"TOKEN");
  if(typeof token.access_token!=="string"||typeof token.refresh_token!=="string"||
   !token.refresh_token||String(token.token_type).toLowerCase()!=="bearer")
   error("YOUTUBE_OAUTH_REFRESH_TOKEN_REQUIRED");
  const scopes=String(token.scope??"").split(/\s+/).filter(Boolean);
  if(!SCOPES.slice(0,2).every(x=>scopes.includes(x)))error("YOUTUBE_OAUTH_SCOPES_MISSING");
  const headers={Authorization:"Bearer "+token.access_token};
- const profile=await googleFetch(fetchImpl,"https://openidconnect.googleapis.com/v1/userinfo",{headers});
+ const profile=await googleFetch(fetchImpl,"https://openidconnect.googleapis.com/v1/userinfo",{headers},"USERINFO");
  if(profile.email_verified!==true||typeof profile.email!=="string")
   error("YOUTUBE_OAUTH_EMAIL_UNVERIFIED");
  if(expectedEmail?.includes("@")&&profile.email.toLowerCase()!==expectedEmail.trim().toLowerCase())
   error("YOUTUBE_OAUTH_WRONG_GOOGLE_ACCOUNT");
  const channels=await googleFetch(fetchImpl,
-  "https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true",{headers});
+  "https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true",{headers},"CHANNEL");
  if(!Array.isArray(channels.items)||channels.items.length!==1)
   error("YOUTUBE_OAUTH_CHANNEL_SELECTION_REQUIRED");
  const channel=channels.items[0];
@@ -76,7 +95,7 @@ export async function finishYoutubeOauth({fetchImpl=fetch,clientId,code,redirect
    accessToken:token.access_token,refreshToken:token.refresh_token,
    scopes,expiresAt:new Date(Date.now()+Math.max(1,Math.min(3600,Number(token.expires_in)||3600))*1000).toISOString()}};
 }
-export async function connectYoutubeBrowser({clientId,expectedEmail,openExternal,fetchImpl=fetch,timeoutMs=180_000}){
+export async function connectYoutubeBrowser({clientId,clientSecret,expectedEmail,openExternal,fetchImpl=fetch,timeoutMs=180_000}){
  if(!/^[0-9]+-[a-z0-9_-]+\.apps\.googleusercontent\.com$/.test(clientId??""))
   error("YOUTUBE_OAUTH_CLIENT_ID_REQUIRED");
  const key=youtubePkce();
@@ -113,6 +132,6 @@ export async function connectYoutubeBrowser({clientId,expectedEmail,openExternal
   });
   const code=await Promise.race([result,deadline]);
   return await finishYoutubeOauth({fetchImpl,clientId,code,redirectUri,
-   verifier:key.verifier,expectedEmail});
+   verifier:key.verifier,expectedEmail,clientSecret});
  }finally{if(timer)clearTimeout(timer);server.close();}
 }

@@ -66,6 +66,38 @@ describe("YouTube official OAuth desktop",()=>{
    await expect(finishYoutubeOauth({...params,fetchImpl:google.fetch})).rejects.toThrow(pattern);
   }
  });
+ it("classifies Google 400 separately for token and YouTube channel",async()=>{
+  const base={clientId,code:"FAKE",redirectUri:"http://127.0.0.1:35419/oauth/youtube/callback",
+   verifier:youtubePkce().verifier,expectedEmail:"owner@example.com"};
+  const missing=vi.fn(async ()=>new Response(JSON.stringify({
+   error:"invalid_request",error_description:"client_secret is missing."}),{status:400}));
+  await expect(finishYoutubeOauth({...base,fetchImpl:missing})).rejects.toThrow("YOUTUBE_OAUTH_TOKEN_CLIENT_SECRET_REQUIRED");
+  const invalid=vi.fn(async()=>new Response(JSON.stringify({error:"invalid_grant"}),{status:400}));
+  await expect(finishYoutubeOauth({...base,fetchImpl:invalid})).rejects.toThrow("YOUTUBE_OAUTH_TOKEN_INVALID_GRANT");
+  const generic=vi.fn(async()=>new Response(JSON.stringify({error:"invalid_request"}),{status:400}));
+  await expect(finishYoutubeOauth({...base,fetchImpl:generic})).rejects.toThrow("YOUTUBE_OAUTH_TOKEN_HTTP_400");
+  const fake=fakeGoogle().fetch;
+  await expect(finishYoutubeOauth({...base,fetchImpl:async (url,opts)=>{
+   if(new URL(url).hostname==="www.googleapis.com")
+    return new Response(JSON.stringify({error:{message:"secret details"}}),{status:400});
+   return fake(url,opts);
+  }})).rejects.toThrow("YOUTUBE_OAUTH_CHANNEL_HTTP_400");
+ });
+ it("sends optional client secret only to token endpoint",async()=>{
+  const base={clientId,code:"FAKE",redirectUri:"http://127.0.0.1:35419/oauth/youtube/callback",
+   verifier:youtubePkce().verifier,expectedEmail:"owner@example.com",
+   clientSecret:"GOCSPX-SYNTHETIC_ONLY"};
+  const fake=fakeGoogle().fetch;
+  const spy=vi.fn(async (url,opts)=>{
+   if(new URL(url).hostname==="oauth2.googleapis.com")
+    expect(new URLSearchParams(opts.body).get("client_secret")).toBe(base.clientSecret);
+   else expect(JSON.stringify(opts)).not.toContain(base.clientSecret);
+   return fake(url,opts);
+  });
+  const res=await finishYoutubeOauth({...base,fetchImpl:spy});
+  expect(res.channelId).toBe(channelId);
+  expect(JSON.stringify(res)).not.toContain(base.clientSecret);
+ });
  it("refuses missing app ID before opening browser",async()=>{
   const browser=vi.fn();
   await expect(connectYoutubeBrowser({clientId:"",openExternal:browser})).rejects.toThrow(/CLIENT_ID_REQUIRED/);

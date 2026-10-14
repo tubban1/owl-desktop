@@ -51,6 +51,12 @@ const youtubeOauthFailureHelp = (code:string):string => ({
   YOUTUBE_OAUTH_REFRESH_TOKEN_REQUIRED:"Google did not provide an offline refresh token. Reconnect using the official Google consent screen.",
   YOUTUBE_OAUTH_WRONG_GOOGLE_ACCOUNT:"The Google login does not match this OWL account email. Choose the correct account.",
   YOUTUBE_OAUTH_EMAIL_UNVERIFIED:"Google has not verified the email address for this account.",
+  YOUTUBE_OAUTH_TOKEN_CLIENT_SECRET_REQUIRED:"Google token exchange requires a Desktop OAuth Client Secret for this app. Save the matching secret below (from Google Cloud Console), then reconnect.",
+  YOUTUBE_OAUTH_TOKEN_INVALID_GRANT:"Google rejected the one-time authorization code. Close old callback tabs, check the Desktop OAuth client, and start a new connection.",
+  YOUTUBE_OAUTH_TOKEN_HTTP_400:"Google rejected the token exchange (400). Verify this is a Desktop OAuth client. If Google requires its Client Secret, save it below and reconnect.",
+  YOUTUBE_OAUTH_CHANNEL_HTTP_400:"Google token exchange succeeded, but YouTube channel query returned HTTP 400. Check YouTube Data API v3 and the account's channel.",
+  YOUTUBE_OAUTH_CHANNEL_HTTP_403:"Google granted a token but YouTube channel API denied access. Enable YouTube Data API v3 and verify granted YouTube permissions.",
+  YOUTUBE_OAUTH_USERINFO_HTTP_400:"Google token exchange succeeded, but Google userinfo request returned HTTP 400.",
   YOUTUBE_OAUTH_TIMEOUT:"Google consent timed out. Try Connect YouTube again.",
   YOUTUBE_OAUTH_CONNECTION_FAILED:"Desktop could not complete Google/YouTube verification. Check the OAuth app settings and try again.",
 }[code] ?? "YouTube verification did not complete. Check Google consent and the YouTube channel, then retry.");
@@ -112,6 +118,8 @@ export default function App() {
   const [cloudAccount, setCloudAccount] = useState<CloudAccountStatus | null>(null);
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [accounts, setAccounts] = useState<AccountMeta[]>([]);
+  const [youtubeClientSecretDraft,setYoutubeClientSecretDraft]=useState("");
+  const [youtubeClientSecretConfigured,setYoutubeClientSecretConfigured]=useState(false);
   const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
   const [liveActivity, setLiveActivity] = useState<ActivityEntry[]>([]);
   const [usageStats, setUsageStats] = useState<UsageStatisticsSnapshot | null>(null);
@@ -129,6 +137,16 @@ export default function App() {
   const [logSource, setLogSource] = useState("all");
   const [logQuery, setLogQuery] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  useEffect(()=>{
+    let live=true;
+    setYoutubeClientSecretConfigured(false);
+    if(settings?.youtubeOauthClientId?.trim()){
+      void window.owlDesktop.getYoutubeClientSecretStatus().then(v=>{
+        if(live)setYoutubeClientSecretConfigured(v.configured);
+      }).catch(()=>{});
+    }
+    return ()=>{live=false;};
+  },[settings?.youtubeOauthClientId]);
   const refreshInFlight = useRef<Promise<void> | null>(null);
 
   const online = snapshot?.mode === "live";
@@ -1360,6 +1378,31 @@ export default function App() {
               <button className="secondary" disabled={busy || !settings?.youtubeOauthClientId?.trim()}
                 onClick={() => void saveSettings({youtubeOauthClientId:settings?.youtubeOauthClientId?.trim()??""})}>Save Client ID</button>
             </div>
+            <div className="secret-form">
+              <div className="grow">
+                <label>Google Desktop OAuth Client Secret (only if Google requires it)</label>
+                <input type="password" autoComplete="off" aria-label="Google Desktop OAuth Client Secret"
+                  placeholder={youtubeClientSecretConfigured ? "Saved securely for this Client ID" : "Optional · not the Google account password"}
+                  value={youtubeClientSecretDraft}
+                  onChange={event=>setYoutubeClientSecretDraft(event.target.value)}/>
+              </div>
+              <button className="secondary" disabled={busy || !youtubeClientSecretDraft.trim() || !settings?.youtubeOauthClientId?.trim()}
+                onClick={()=>void(async()=>{
+                  setBusy(true);
+                  try{
+                    // Persist the selected Client ID first, then encrypt the
+                    // matching Client Secret in Electron's OS-backed vault.
+                    await saveSettings({youtubeOauthClientId:settings?.youtubeOauthClientId?.trim()??""});
+                    await window.owlDesktop.saveYoutubeClientSecret(youtubeClientSecretDraft);
+                    setYoutubeClientSecretDraft("");
+                    setYoutubeClientSecretConfigured(true);
+                    setNotice("Google OAuth Client Secret encrypted locally.");
+                  }catch{
+                    setNotice("Unable to encrypt the Google Client Secret. Check Desktop OAuth configuration.");
+                  }finally{setBusy(false);}
+                })()}>Save Client Secret</button>
+            </div>
+            <p className="panel-help">This secret is saved only in the OS-encrypted local vault, tied to the Google Desktop Client ID; it is never shown again. Do not enter your Google account password.</p>
             <p className="panel-help">When Google asks which YouTube permissions to grant, select BOTH: manage YouTube videos and view your YouTube account. The browser callback is not a final success confirmation — look for the verified channel on this page.</p>
             <p className="panel-help">Instagram requires a separately configured Meta app and matching Professional account permissions. Adding a profile alone does not grant publishing access.</p>
           </section>

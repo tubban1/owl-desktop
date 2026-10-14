@@ -184,6 +184,8 @@ declare global {
       tunnelStop(): Promise<TunnelStatus>;
       listAccounts(): Promise<AccountMeta[]>;
       connectYoutubeAccount(id:string): Promise<AccountMeta>;
+      getYoutubeClientSecretStatus(): Promise<{configured:boolean}>;
+      saveYoutubeClientSecret(value:string): Promise<{configured:boolean}>;
       upsertAccount(input: {
         id?: string;
         service: string;

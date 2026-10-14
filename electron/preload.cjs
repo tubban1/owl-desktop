@@ -119,6 +119,8 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   tunnelStop: () => ipcRenderer.invoke("tunnel:stop"),
   listAccounts: () => ipcRenderer.invoke("accounts:list"),
   connectYoutubeAccount: (id) => ipcRenderer.invoke("accounts:youtube-connect",id),
+  getYoutubeClientSecretStatus: () => ipcRenderer.invoke("accounts:youtube-client-secret-status"),
+  saveYoutubeClientSecret: (value) => ipcRenderer.invoke("accounts:youtube-client-secret-save",value),
   upsertAccount: (input) => ipcRenderer.invoke("accounts:upsert", input),
   deleteAccount: (id) => ipcRenderer.invoke("accounts:delete", id),
   setAccountStatus: (id, status, options) =>

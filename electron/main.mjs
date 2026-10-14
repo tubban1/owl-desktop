@@ -2082,6 +2082,19 @@ Only this single action will be approved.`,
   ipcMain.handle("tunnel:status", () => tunnelStatus());
   ipcMain.handle("tunnel:start", () => startTunnel());
   ipcMain.handle("tunnel:stop", () => stopTunnel());
+  ipcMain.handle("accounts:youtube-client-secret-status", () => {
+    const id=store.getSettings().youtubeOauthClientId?.trim();
+    return {configured:!!id && !!store.readSecret("GOOGLE_YOUTUBE_OAUTH_CLIENT_SECRET",id)};
+  });
+  ipcMain.handle("accounts:youtube-client-secret-save", (_event,value) => {
+    const id=store.getSettings().youtubeOauthClientId?.trim();
+    if(!/^[0-9]+-[a-z0-9_-]+\.apps\.googleusercontent\.com$/.test(id??""))
+      throw Error("YOUTUBE_OAUTH_CLIENT_ID_REQUIRED");
+    if(typeof value!=="string"||value.length<8||value.length>512||/[\s\u0000-\u001f]/.test(value))
+      throw Error("YOUTUBE_OAUTH_CLIENT_SECRET_INVALID");
+    store.upsertSecret({name:"GOOGLE_YOUTUBE_OAUTH_CLIENT_SECRET",project:id,value});
+    return {configured:true};
+  });
   ipcMain.handle("accounts:youtube-connect", async (_event,id) => {
     const account=identityVault.get(id);
     if(!account||!["google","youtube"].includes(account.service.toLowerCase().trim()))
@@ -2091,7 +2104,9 @@ Only this single action will be approved.`,
     identityVault.noteYoutubeOauthAttempt(account.id);
     try {
       const result=await connectYoutubeBrowser({
-        clientId,expectedEmail:account.identifier,
+        clientId,
+        clientSecret:store.readSecret("GOOGLE_YOUTUBE_OAUTH_CLIENT_SECRET",clientId),
+        expectedEmail:account.identifier,
         openExternal:async url=>shell.openExternal(url),
       });
       const saved=identityVault.saveYoutubeGrant(account.id,result,clientId);
