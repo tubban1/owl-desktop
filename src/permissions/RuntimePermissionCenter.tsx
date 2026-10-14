@@ -57,6 +57,7 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
     {data?.restartRequired?"Saved setting differs from runtime.env":"No pending managed config changes"}</span>
   </div>
   <p className="panel-help">Development sessions may connect to another Runtime. This page never restarts unrelated processes or bypasses a locked lease, missing folder, or busy workspace.</p>
+  <p className="panel-help">Review safety: the current Runtime approval card identifies its Task/Step but does not show all command parameters. For Git Push, Shell or Delete, inspect the originating Task and exact target before approving. Action approval must remain a human-facing, authenticated operation.</p>
   <ApprovalAttention approvals={approvals} onApprove={onApprove} onDeny={onDeny}/>
  </section>;
 }

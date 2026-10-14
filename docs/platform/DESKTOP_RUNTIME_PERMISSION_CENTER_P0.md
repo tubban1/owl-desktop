@@ -27,3 +27,7 @@ Limitations and remaining gates:
 - Packaged macOS manual acceptance needed: correct remote Git effect, denial, lease expiry, workspace lock, multiple sessions, on-demand approval and selected Runtime endpoint.
 
 Do not claim this permission center is already active in the current installed Desktop.
+
+## P0 release blocker — human-readable approval evidence
+
+Current Runtime public approval data includes fingerprint/action/task/step, but NOT all actual arguments (Shell command, Git remote/branch, delete path). A fingerprint binds the request but is not enough for the person to verify intent. Desktop now warns to inspect the Task first. Before production release, implement redacted exact-argument preview plus privileged human-presence approval signing; assess whether generic authenticated Runtime RPC approvals.approve could be called by a task-initiating actor. Do not claim this safety gate is complete.
