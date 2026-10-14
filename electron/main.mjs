@@ -17,6 +17,7 @@ import { tunnelTransportAvailable } from "./services/tunnel-availability.mjs";
 import { ConnectionHostClient } from "./services/connection-host-client.mjs";
 import { startDesktopCapabilityBridge } from "./services/desktop-capability-bridge.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
+import { connectYoutubeBrowser } from "./services/youtube-oauth.mjs";
 import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
 import { CloudAccountAuth } from "./services/cloud-account-auth.mjs";
@@ -2081,11 +2082,32 @@ Only this single action will be approved.`,
   ipcMain.handle("tunnel:status", () => tunnelStatus());
   ipcMain.handle("tunnel:start", () => startTunnel());
   ipcMain.handle("tunnel:stop", () => stopTunnel());
+  ipcMain.handle("accounts:youtube-connect", async (_event,id) => {
+    const account=identityVault.get(id);
+    if(!account||!["google","youtube"].includes(account.service.toLowerCase().trim()))
+      throw Error("YOUTUBE_ACCOUNT_NOT_FOUND");
+    const clientId=store.getSettings().youtubeOauthClientId?.trim();
+    if(!clientId)throw Error("YOUTUBE_OAUTH_CLIENT_ID_REQUIRED");
+    const result=await connectYoutubeBrowser({
+      clientId,expectedEmail:account.identifier,
+      openExternal:async url=>shell.openExternal(url),
+    });
+    const saved=identityVault.saveYoutubeGrant(account.id,result,clientId);
+    record("info","publish-oauth","YouTube channel connected by user authorization",{
+      channelId:result.channelId,
+    });
+    return saved;
+  });
   ipcMain.handle("accounts:list", () => identityVault.list());
   ipcMain.handle("accounts:upsert", (_event, input) => identityVault.upsert(input));
   ipcMain.handle("accounts:delete", (_event, id) => identityVault.delete(id));
-  ipcMain.handle("accounts:status", (_event, id, status, options) =>
-    identityVault.markStatus(id, status, options));
+  ipcMain.handle("accounts:status", (_event,id,status,options) => {
+    const account=identityVault.get(id);
+    if(status==="ready"&&["google","youtube","instagram"].includes(
+      String(account?.service??"").toLowerCase().trim()))
+      throw Error("OFFICIAL_OAUTH_VERIFICATION_REQUIRED");
+    return identityVault.markStatus(id,status,options);
+  });
   ipcMain.handle("accounts:capabilities", (_event, id) =>
     identityVault.capabilities(id));
   ipcMain.handle("runtime-permissions:get", () =>

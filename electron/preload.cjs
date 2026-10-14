@@ -118,6 +118,7 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   tunnelStart: () => ipcRenderer.invoke("tunnel:start"),
   tunnelStop: () => ipcRenderer.invoke("tunnel:stop"),
   listAccounts: () => ipcRenderer.invoke("accounts:list"),
+  connectYoutubeAccount: (id) => ipcRenderer.invoke("accounts:youtube-connect",id),
   upsertAccount: (input) => ipcRenderer.invoke("accounts:upsert", input),
   deleteAccount: (id) => ipcRenderer.invoke("accounts:delete", id),
   setAccountStatus: (id, status, options) =>

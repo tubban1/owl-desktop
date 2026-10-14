@@ -33,6 +33,7 @@ function sanitize(record) {
     cipherText: _cipherText,
     refreshCipherText: _refreshCipherText,
     recoveryCipherText: _recoveryCipherText,
+    oauthCipherText: _oauthCipherText,
     ...meta
   } = record;
   return meta;
@@ -80,6 +81,8 @@ export class IdentityVault {
       );
     }
 
+    const sameIdentity = previous && previous.service === service.trim() &&
+      previous.identifier === identifier.trim() && previous.authMethod === authMethod;
     const record = {
       id: previous?.id ?? id ?? randomUUID(),
       service: service.trim(),
@@ -99,7 +102,18 @@ export class IdentityVault {
         : previous?.cipherText ?? null,
       refreshCipherText: previous?.refreshCipherText ?? null,
       recoveryCipherText: previous?.recoveryCipherText ?? null,
+      oauthCipherText: sameIdentity ? previous?.oauthCipherText ?? null : null,
+      connectedProvider: sameIdentity ? previous?.connectedProvider ?? null : null,
+      connectedTargetId: sameIdentity ? previous?.connectedTargetId ?? null : null,
+      connectedTargetTitle: sameIdentity ? previous?.connectedTargetTitle ?? null : null,
+      connectedClientId: sameIdentity ? previous?.connectedClientId ?? null : null,
+      verifiedEmail: sameIdentity ? previous?.verifiedEmail ?? null : null,
     };
+    if (!sameIdentity && previous?.oauthCipherText) {
+      record.status = "needs_login";
+      record.lastAuthenticatedAt = null;
+      record.expiresAt = null;
+    }
 
     if (index >= 0) records[index] = record;
     else records.push(record);
@@ -129,6 +143,34 @@ export class IdentityVault {
       expiresAt,
     };
     writeJson(this.file, records);
+    return sanitize(records[index]);
+  }
+
+  saveYoutubeGrant(id, verified, clientId) {
+    const records = readJson(this.file, []);
+    const index = records.findIndex(item => item.id === id);
+    if(index<0)throw Error("YOUTUBE_ACCOUNT_RECORD_NOT_FOUND");
+    if(!["google","youtube"].includes(records[index].service.toLowerCase().trim()))
+      throw Error("YOUTUBE_WRONG_SERVICE");
+    if(!safeStorage.isEncryptionAvailable())
+      throw Error("YOUTUBE_OS_SECURE_STORAGE_UNAVAILABLE");
+    if(!/^[0-9]+-[a-z0-9_-]+\.apps\.googleusercontent\.com$/.test(clientId))
+      throw Error("YOUTUBE_CLIENT_ID_INVALID");
+    if(!/^UC[A-Za-z0-9_-]{22}$/.test(verified.channelId) ||
+       !verified.grant?.refreshToken || !verified.grant?.accessToken)
+      throw Error("YOUTUBE_GRANT_INVALID");
+    const record=records[index];
+    records[index]={...record,
+      status:"ready",authMethod:"oauth",connectedProvider:"youtube",
+      connectedTargetId:verified.channelId,connectedTargetTitle:verified.channelTitle,
+      verifiedEmail:verified.verifiedEmail,
+      connectedClientId:clientId,
+      lastAuthenticatedAt:new Date().toISOString(),
+      expiresAt:verified.grant.expiresAt,updatedAt:new Date().toISOString(),
+      cipherText:null,
+      oauthCipherText:safeStorage.encryptString(JSON.stringify(verified.grant)).toString("base64"),
+    };
+    writeJson(this.file,records);
     return sanitize(records[index]);
   }
 

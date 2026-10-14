@@ -183,6 +183,7 @@ declare global {
       tunnelStart(): Promise<TunnelStatus>;
       tunnelStop(): Promise<TunnelStatus>;
       listAccounts(): Promise<AccountMeta[]>;
+      connectYoutubeAccount(id:string): Promise<AccountMeta>;
       upsertAccount(input: {
         id?: string;
         service: string;

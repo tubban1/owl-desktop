@@ -9,6 +9,7 @@ export type RuntimePermissionProjection = {
 };
 
 export type Settings = {
+  youtubeOauthClientId?:string;
   runtimePermissionModes?: Partial<Record<RuntimePermissionKey,RuntimePermissionMode>>;
   wakeName: string;
   wakeAliases: string[];
@@ -62,6 +63,11 @@ export type AccountMeta = {
     | "device_code"
     | "native_app_session";
   status: string;
+  connectedProvider?:string|null;
+  connectedTargetId?:string|null;
+  connectedTargetTitle?:string|null;
+  connectedClientId?:string|null;
+  verifiedEmail?:string|null;
   browserProfileId: string | null;
   notes: string;
   createdAt: string;

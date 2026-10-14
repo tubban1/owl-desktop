@@ -490,11 +490,25 @@ export default function App() {
     window.setTimeout(() => setNotice(""), 1800);
   };
 
+  const connectYoutubeAccount = async (id: string) => {
+    setBusy(true);
+    try {
+      const connected=await window.owlDesktop.connectYoutubeAccount(id);
+      setAccounts(await window.owlDesktop.listAccounts());
+      setNotice(`YouTube connected: ${connected.connectedTargetTitle ?? connected.connectedTargetId}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "YouTube authorization failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const addAccount = async () => {
     if (!accountDraft.service.trim() || !accountDraft.label.trim()) return;
     await window.owlDesktop.upsertAccount({
       ...accountDraft,
-      secret: accountDraft.secret || undefined,
+      secret: ["google","youtube","instagram"].includes(accountDraft.service.trim().toLowerCase())
+        ? undefined : accountDraft.secret || undefined,
     });
     setAccounts(await window.owlDesktop.listAccounts());
     setAccountDraft({
@@ -1316,16 +1330,58 @@ export default function App() {
               <span className="neutral-pill">Optional</span>
             </summary>
             <div className="connected-identities-body">
+          <section className="panel">
+            <div className="panel-heading">
+              <div><span className="eyebrow">YOUTUBE OFFICIAL OAUTH</span><h3>Connect a verified channel</h3></div>
+              <span className="neutral-pill">{settings?.youtubeOauthClientId?.trim() ? "App configured" : "App setup required"}</span>
+            </div>
+            <p className="panel-help">Create a Google OAuth client of type Desktop app for OWL LAB. The Client ID is public app configuration, not a password. Save it once here; connecting an account opens the official Google consent screen.</p>
+            <div className="secret-form">
+              <div className="grow">
+                <label>Google Desktop OAuth Client ID</label>
+                <input aria-label="Google Desktop OAuth Client ID"
+                  placeholder="...apps.googleusercontent.com"
+                  value={settings?.youtubeOauthClientId ?? ""}
+                  onChange={event => settings && setSettings({...settings,youtubeOauthClientId:event.target.value})}/>
+              </div>
+              <button className="secondary" disabled={busy || !settings?.youtubeOauthClientId?.trim()}
+                onClick={() => void saveSettings({youtubeOauthClientId:settings?.youtubeOauthClientId?.trim()??""})}>Save Client ID</button>
+            </div>
+            <p className="panel-help">Instagram requires a separately configured Meta app and matching Professional account permissions. Adding a profile alone does not grant publishing access.</p>
+          </section>
           <section className="panel secret-form account-form">
             <div><label>Service</label><input value={accountDraft.service} onChange={(e) => setAccountDraft({ ...accountDraft, service: e.target.value })} placeholder="WhatsApp / X / Shopify" /></div>
             <div><label>Account label</label><input value={accountDraft.label} onChange={(e) => setAccountDraft({ ...accountDraft, label: e.target.value })} placeholder="Main account" /></div>
             <div><label>Identifier</label><input value={accountDraft.identifier} onChange={(e) => setAccountDraft({ ...accountDraft, identifier: e.target.value })} placeholder="email / phone / @handle" /></div>
             <div><label>Auth method</label><select value={accountDraft.authMethod} onChange={(e) => setAccountDraft({ ...accountDraft, authMethod: e.target.value as AccountMeta["authMethod"] })}><option value="password">Password</option><option value="oauth">OAuth</option><option value="third_party_oauth">Third-party login</option><option value="qr">QR scan</option><option value="sms_otp">SMS OTP</option><option value="email_otp">Email OTP</option><option value="totp">Authenticator / TOTP</option><option value="authenticator_push">Authenticator push</option><option value="passkey">Passkey</option><option value="device_code">Device code</option><option value="native_app_session">Native app session</option></select></div>
-            <div className="grow"><label>Stored secret (optional)</label><input type="password" value={accountDraft.secret} onChange={(e) => setAccountDraft({ ...accountDraft, secret: e.target.value })} placeholder="Only for credentials you explicitly choose to store" /></div>
+            <div className="grow"><label>Stored secret (optional)</label><input type="password"
+              disabled={["google","youtube","instagram"].includes(accountDraft.service.trim().toLowerCase())}
+              value={accountDraft.secret}
+              onChange={(e) => setAccountDraft({ ...accountDraft, secret: e.target.value })}
+              placeholder={["google","youtube","instagram"].includes(accountDraft.service.trim().toLowerCase())
+                ? "Use official OAuth · never save a platform password here" : "Only for credentials you explicitly choose to store"} /></div>
             <button className="primary add-secret" onClick={addAccount}><Plus size={15} />Add</button>
           </section>
           <div className="contract-note"><ShieldCheck size={17} /><div><strong>OWL does not bypass MFA.</strong><p>QR, SMS/email codes, passkeys and authenticator approvals become explicit login challenges. Native app sessions and browser profiles are reused without extracting their credentials.</p></div></div>
-          <section className="panel"><div className="secret-table head"><span>Account</span><span>Auth</span><span>Status</span><span /></div>{accounts.map((account) => <div className="secret-table" key={account.id}><div><UserRound size={15} /><p><strong>{account.service} · {account.label}</strong><small>{account.identifier || "No identifier"}</small></p></div><code>{account.authMethod}</code><span>{account.status}</span><button className="danger-icon" onClick={async () => { await window.owlDesktop.deleteAccount(account.id); setAccounts(await window.owlDesktop.listAccounts()); }}><Trash2 size={15} /></button></div>)}{accounts.length === 0 && <div className="empty table-empty">No managed accounts yet.</div>}</section>
+          <section className="panel"><div className="secret-table head"><span>Account</span><span>Auth</span><span>Status</span><span /></div>{accounts.map((account) => <div className="secret-table" key={account.id}><div><UserRound size={15} /><p><strong>{account.service} · {account.label}</strong><small>{account.identifier || "No identifier"}</small></p></div><code>{account.authMethod}</code><div>
+              <span>{account.status === "ready" && account.connectedProvider === "youtube" && account.connectedTargetId &&
+                account.connectedClientId === settings?.youtubeOauthClientId?.trim()
+                ? "OAuth verified · publishing inactive" :
+                account.connectedProvider === "youtube" ? "Reconnect required (OAuth app changed)" : account.status}</span>
+              {account.connectedProvider === "youtube" && account.connectedTargetId &&
+                <small>{account.connectedTargetTitle} · {account.connectedTargetId}</small>}
+            </div>
+            <div className="row-actions">
+              {["google","youtube"].includes(account.service.toLowerCase().trim()) &&
+                <button className="secondary" disabled={busy || !settings?.youtubeOauthClientId?.trim()}
+                  onClick={() => void connectYoutubeAccount(account.id)}>
+                  {account.connectedProvider === "youtube" ? "Reconnect" : "Connect YouTube"}
+                </button>}
+              <button className="danger-icon" disabled={busy} onClick={async () => {
+                await window.owlDesktop.deleteAccount(account.id);
+                setAccounts(await window.owlDesktop.listAccounts());
+              }}><Trash2 size={15} /></button>
+            </div></div>)}{accounts.length === 0 && <div className="empty table-empty">No managed accounts yet.</div>}</section>
             </div>
           </details>
         </>}
