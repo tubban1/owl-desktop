@@ -184,6 +184,9 @@ declare global {
       tunnelStop(): Promise<TunnelStatus>;
       listAccounts(): Promise<AccountMeta[]>;
       connectYoutubeAccount(id:string): Promise<AccountMeta>;
+      getInstagramConfig(): Promise<{appId:string;secretConfigured:boolean;redirectUri:string|null}>;
+      saveInstagramConfig(input:{appId:string;appSecret:string}): Promise<{appId:string;secretConfigured:boolean}>;
+      connectInstagramAccount(id:string): Promise<AccountMeta>;
       getYoutubeClientSecretStatus(): Promise<{configured:boolean}>;
       saveYoutubeClientSecret(value:string): Promise<{configured:boolean}>;
       upsertAccount(input: {

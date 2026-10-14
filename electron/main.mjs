@@ -18,6 +18,7 @@ import { ConnectionHostClient } from "./services/connection-host-client.mjs";
 import { startDesktopCapabilityBridge } from "./services/desktop-capability-bridge.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
 import { connectYoutubeBrowser } from "./services/youtube-oauth.mjs";
+import { connectInstagramBrowser, instagramRedirectUri } from "./services/instagram-oauth.mjs";
 import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
 import { CloudAccountAuth } from "./services/cloud-account-auth.mjs";
@@ -2082,6 +2083,51 @@ Only this single action will be approved.`,
   ipcMain.handle("tunnel:status", () => tunnelStatus());
   ipcMain.handle("tunnel:start", () => startTunnel());
   ipcMain.handle("tunnel:stop", () => stopTunnel());
+  ipcMain.handle("accounts:instagram-config-status", () => {
+    const settings=store.getSettings();
+    const appId=settings.instagramAppId?.trim()??"";
+    let redirectUri=null;
+    try{redirectUri=instagramRedirectUri(settings.cloudBaseUrl);}catch{}
+    return {appId,secretConfigured:!!appId && !!store.readSecret("INSTAGRAM_OAUTH_APP_SECRET",appId),
+      redirectUri};
+  });
+  ipcMain.handle("accounts:instagram-config-save", (_event,input) => {
+    const appId=String(input?.appId??"").trim();
+    if(!/^[0-9]{6,30}$/.test(appId))throw Error("INSTAGRAM_OAUTH_APP_ID_REQUIRED");
+    const secret=String(input?.appSecret??"");
+    if(secret && (secret.length<8||secret.length>512||/\s/.test(secret)))
+      throw Error("INSTAGRAM_OAUTH_APP_SECRET_INVALID");
+    if(!secret&&!store.readSecret("INSTAGRAM_OAUTH_APP_SECRET",appId))
+      throw Error("INSTAGRAM_OAUTH_APP_SECRET_REQUIRED");
+    if(secret)store.upsertSecret({name:"INSTAGRAM_OAUTH_APP_SECRET",project:appId,value:secret});
+    store.updateSettings({instagramAppId:appId});
+    return {appId,secretConfigured:true};
+  });
+  ipcMain.handle("accounts:instagram-connect",async (_event,id)=>{
+    const account=identityVault.get(id);
+    if(!account||account.service.trim().toLowerCase()!=="instagram")
+      throw Error("INSTAGRAM_ACCOUNT_NOT_FOUND");
+    const settings=store.getSettings();
+    const appId=settings.instagramAppId?.trim();
+    const appSecret=store.readSecret("INSTAGRAM_OAUTH_APP_SECRET",appId);
+    if(!appId||!appSecret)throw Error("INSTAGRAM_OAUTH_APP_CONFIG_REQUIRED");
+    identityVault.noteInstagramOauthAttempt(id);
+    try{
+      const result=await connectInstagramBrowser({appId,appSecret,
+       cloudBaseUrl:settings.cloudBaseUrl,expectedUsername:account.identifier,
+       openExternal:async url=>shell.openExternal(url)});
+      const saved=identityVault.saveInstagramGrant(id,result,appId);
+      record("info","publish-oauth","Instagram professional account verified",{accountId:result.accountId});
+      return saved;
+    }catch(e){
+      const raw=e instanceof Error?e.message:"";
+      const safe=/^INSTAGRAM_OAUTH_[A-Z0-9_]{1,80}$/.test(raw)
+        ?raw:"INSTAGRAM_OAUTH_CONNECTION_FAILED";
+      identityVault.noteInstagramOauthAttempt(id,safe);
+      record("warn","publish-oauth","Instagram authorization incomplete",{code:safe});
+      throw Error(safe);
+    }
+  });
   ipcMain.handle("accounts:youtube-client-secret-status", () => {
     const id=store.getSettings().youtubeOauthClientId?.trim();
     return {configured:!!id && !!store.readSecret("GOOGLE_YOUTUBE_OAUTH_CLIENT_SECRET",id)};

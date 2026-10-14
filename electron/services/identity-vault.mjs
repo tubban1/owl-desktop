@@ -114,6 +114,8 @@ export class IdentityVault {
       verifiedEmail: sameIdentity ? previous?.verifiedEmail ?? null : null,
       lastYoutubeOauthError: sameIdentity ? previous?.lastYoutubeOauthError ?? null : null,
       lastYoutubeOauthErrorAt: sameIdentity ? previous?.lastYoutubeOauthErrorAt ?? null : null,
+      lastInstagramOauthError: sameIdentity ? previous?.lastInstagramOauthError ?? null : null,
+      lastInstagramOauthErrorAt: sameIdentity ? previous?.lastInstagramOauthErrorAt ?? null : null,
     };
     if (!sameIdentity && previous?.oauthCipherText) {
       record.status = "needs_login";
@@ -168,6 +170,46 @@ export class IdentityVault {
     };
     writeJson(this.file,records);
     return sanitize(records[index]);
+  }
+
+  noteInstagramOauthAttempt(id, errorCode=null){
+    const records=readJson(this.file,[]);
+    const index=records.findIndex(item=>item.id===id);
+    if(index<0||records[index].service?.trim().toLowerCase()!=="instagram")
+      throw Error("INSTAGRAM_ACCOUNT_NOT_FOUND");
+    const safe=errorCode===null?null:
+      /^INSTAGRAM_OAUTH_[A-Z0-9_]{1,80}$/.test(errorCode)
+       ?errorCode:"INSTAGRAM_OAUTH_CONNECTION_FAILED";
+    records[index]={...records[index],lastInstagramOauthError:safe,
+      lastInstagramOauthErrorAt:safe?new Date().toISOString():null,
+      updatedAt:new Date().toISOString()};
+    writeJson(this.file,records);
+    return sanitize(records[index]);
+  }
+  saveInstagramGrant(id,verified,appId){
+    const rows=readJson(this.file,[]);
+    const index=rows.findIndex(item=>item.id===id);
+    if(index<0||rows[index].service?.trim().toLowerCase()!=="instagram")
+      throw Error("INSTAGRAM_ACCOUNT_NOT_FOUND");
+    if(!safeStorage.isEncryptionAvailable())throw Error("INSTAGRAM_OS_SECURE_STORAGE_UNAVAILABLE");
+    if(!/^[0-9]{6,30}$/.test(appId)||!/^[0-9]{4,32}$/.test(verified?.accountId??"")||
+      !verified?.grant?.accessToken||!verified?.grant?.expiresAt)
+      throw Error("INSTAGRAM_GRANT_INVALID");
+    const current=rows[index];
+    const requested=current.identifier.trim().replace(/^@/,"").toLowerCase();
+    if(requested && requested!==verified.username.toLowerCase())
+      throw Error("INSTAGRAM_OAUTH_WRONG_ACCOUNT");
+    rows[index]={...current,status:"ready",authMethod:"oauth",
+      connectedProvider:"instagram",connectedTargetId:verified.accountId,
+      connectedTargetTitle:"@"+verified.username,connectedClientId:appId,
+      lastInstagramOauthError:null,lastInstagramOauthErrorAt:null,
+      lastAuthenticatedAt:new Date().toISOString(),
+      expiresAt:verified.grant.expiresAt,
+      cipherText:null,oauthCipherText:safeStorage.encryptString(
+       JSON.stringify(verified.grant)).toString("base64"),
+      updatedAt:new Date().toISOString()};
+    writeJson(this.file,rows);
+    return sanitize(rows[index]);
   }
 
   saveYoutubeGrant(id, verified, clientId) {

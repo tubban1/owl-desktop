@@ -5686,3 +5686,10 @@ input:focus { border-color: #41634b; box-shadow: 0 0 0 3px rgba(78,128,92,.08); 
   .connected-identities-body .oauth-config-form {grid-template-columns:minmax(0,1fr);}
   .connected-identities-body .oauth-config-form button {justify-self:start;}
 }
+
+.instagram-redirect-uri {min-width:0;max-width:100%;border:1px solid #262b30;
+ padding:10px;border-radius:8px;margin:8px 0 13px;background:#0a0c0e;}
+.instagram-redirect-uri code {display:block;overflow-wrap:anywhere;white-space:normal;
+ color:#a1b6ad;font-size:11px;}
+.connected-identities-body .oauth-config-form {grid-template-columns:repeat(auto-fit,minmax(min(100%,155px),1fr));}
+.connected-identities-body .oauth-config-form > div {min-width:0;}

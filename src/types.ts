@@ -10,6 +10,7 @@ export type RuntimePermissionProjection = {
 
 export type Settings = {
   youtubeOauthClientId?:string;
+  instagramAppId?:string;
   runtimePermissionModes?: Partial<Record<RuntimePermissionKey,RuntimePermissionMode>>;
   wakeName: string;
   wakeAliases: string[];
@@ -70,6 +71,8 @@ export type AccountMeta = {
   verifiedEmail?:string|null;
   lastYoutubeOauthError?:string|null;
   lastYoutubeOauthErrorAt?:string|null;
+  lastInstagramOauthError?:string|null;
+  lastInstagramOauthErrorAt?:string|null;
   browserProfileId: string | null;
   notes: string;
   createdAt: string;

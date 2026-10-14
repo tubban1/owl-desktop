@@ -126,6 +126,10 @@ export default function App() {
   const [accounts, setAccounts] = useState<AccountMeta[]>([]);
   const [youtubeClientSecretDraft,setYoutubeClientSecretDraft]=useState("");
   const [youtubeClientSecretConfigured,setYoutubeClientSecretConfigured]=useState(false);
+  const [instagramAppIdDraft,setInstagramAppIdDraft]=useState("");
+  const [instagramAppSecretDraft,setInstagramAppSecretDraft]=useState("");
+  const [instagramConfig,setInstagramConfig]=useState<{appId:string;secretConfigured:boolean;redirectUri:string|null}|null>(null);
+  const [instagramNotice,setInstagramNotice]=useState("");
   const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
   const [liveActivity, setLiveActivity] = useState<ActivityEntry[]>([]);
   const [usageStats, setUsageStats] = useState<UsageStatisticsSnapshot | null>(null);
@@ -146,6 +150,13 @@ export default function App() {
   const [logSource, setLogSource] = useState("all");
   const [logQuery, setLogQuery] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  useEffect(()=>{
+    let live=true;
+    void window.owlDesktop.getInstagramConfig().then(config=>{
+      if(live){setInstagramConfig(config);setInstagramAppIdDraft(config.appId);}
+    }).catch(()=>{});
+    return()=>{live=false;};
+  },[settings?.cloudBaseUrl]);
   useEffect(()=>{
     let live=true;
     setYoutubeClientSecretConfigured(false);
@@ -574,6 +585,32 @@ export default function App() {
       setNotice(identityChanged?"Account updated. Reconnect to authorize the changed identity.":"Account updated.");
     }catch(error){
       setAccountEditError(error instanceof Error?error.message:"Unable to save account changes.");
+    }finally{setBusy(false);}
+  };
+
+  const saveInstagramSettings=async()=>{
+    setBusy(true);setInstagramNotice("");
+    try{
+      await window.owlDesktop.saveInstagramConfig({
+        appId:instagramAppIdDraft.trim(),appSecret:instagramAppSecretDraft.trim()
+      });
+      setInstagramAppSecretDraft("");
+      const current=await window.owlDesktop.getInstagramConfig();
+      setInstagramConfig(current);
+      setInstagramNotice("Instagram App credentials encrypted locally.");
+    }catch(error){
+      setInstagramNotice(error instanceof Error?error.message:"Instagram configuration failed.");
+    }finally{setBusy(false);}
+  };
+  const connectInstagramAccount=async(id:string)=>{
+    setBusy(true);setInstagramNotice("");
+    try{
+      const linked=await window.owlDesktop.connectInstagramAccount(id);
+      setAccounts(await window.owlDesktop.listAccounts());
+      setInstagramNotice("Instagram connected: "+linked.connectedTargetTitle);
+    }catch(error){
+      setAccounts(await window.owlDesktop.listAccounts());
+      setInstagramNotice(error instanceof Error?error.message:"Instagram connection incomplete.");
     }finally{setBusy(false);}
   };
 
@@ -1449,6 +1486,31 @@ export default function App() {
             <p className="panel-help">When Google asks which YouTube permissions to grant, select BOTH: manage YouTube videos and view your YouTube account. The browser callback is not a final success confirmation — look for the verified channel on this page.</p>
             <p className="panel-help">Instagram requires a separately configured Meta app and matching Professional account permissions. Adding a profile alone does not grant publishing access.</p>
           </section>
+          <section className="panel">
+            <div className="panel-heading">
+              <div><span className="eyebrow">INSTAGRAM OFFICIAL LOGIN</span><h3>Connect a professional account</h3></div>
+              <span className="neutral-pill">{instagramConfig?.secretConfigured?"App configured":"Meta app setup required"}</span>
+            </div>
+            <p className="panel-help">Meta Developers → Instagram API → API setup with Instagram login. Business or Creator account, no Facebook Page required. Scopes: instagram_business_basic and instagram_business_content_publish.</p>
+            <div className="secret-form oauth-config-form">
+              <div className="grow"><label>Instagram App ID (not Facebook App ID)</label>
+                <input aria-label="Instagram App ID" value={instagramAppIdDraft}
+                  placeholder="Instagram App ID from Meta API setup"
+                  onChange={e=>setInstagramAppIdDraft(e.target.value)}/></div>
+              <div className="grow"><label>Instagram App Secret</label>
+                <input type="password" autoComplete="off" aria-label="Instagram App Secret"
+                  placeholder={instagramConfig?.secretConfigured&&instagramConfig.appId===instagramAppIdDraft.trim()?"Encrypted for this App ID":"App Secret from Meta dashboard"}
+                  value={instagramAppSecretDraft}
+                  onChange={e=>setInstagramAppSecretDraft(e.target.value)}/></div>
+              <button className="secondary" disabled={busy||!/^[0-9]{6,30}$/.test(instagramAppIdDraft.trim())||
+                (!instagramAppSecretDraft.trim()&&!(instagramConfig?.secretConfigured&&instagramConfig.appId===instagramAppIdDraft.trim()))}
+                onClick={()=>void saveInstagramSettings()}>Save Instagram app</button>
+            </div>
+            <p className="panel-help">In Meta Business Login settings, register this exact HTTPS Valid OAuth Redirect URI:</p>
+            <div className="instagram-redirect-uri"><code>{instagramConfig?.redirectUri??"Configure the OWL Cloud HTTPS endpoint first"}</code></div>
+            <p className="panel-help">Connect Instagram checks that the Cloud HTTPS relay is deployed before opening Meta login. No Instagram password is stored.</p>
+            {instagramNotice && <p className="identity-edit-warning" role="status">{instagramNotice}</p>}
+          </section>
           <section className="panel secret-form account-form">
             <div><label>Service</label><input value={accountDraft.service} onChange={(e) => setAccountDraft({ ...accountDraft, service: e.target.value })} placeholder="WhatsApp / X / Shopify" /></div>
             <div><label>Account label</label><input value={accountDraft.label} onChange={(e) => setAccountDraft({ ...accountDraft, label: e.target.value })} placeholder="Main account" /></div>
@@ -1481,7 +1543,11 @@ export default function App() {
                         <span>{account.status==="ready" && account.connectedProvider==="youtube" &&
                           account.connectedTargetId && account.connectedClientId===settings?.youtubeOauthClientId?.trim()
                             ? "OAuth verified · publishing inactive" :
-                            account.connectedProvider==="youtube" ? "Reconnect required" : account.status}</span>
+                            account.connectedProvider==="youtube" ? "Reconnect required" :
+                            account.status==="ready" && account.connectedProvider==="instagram" &&
+                              account.connectedTargetId && account.connectedClientId===instagramConfig?.appId
+                              ? "Instagram OAuth verified · publishing inactive" :
+                            account.connectedProvider==="instagram" ? "Reconnect required" : account.status}</span>
                       </div>
                     </div>
                   </div>
@@ -1490,6 +1556,11 @@ export default function App() {
                       <button type="button" className="secondary" disabled={busy || !settings?.youtubeOauthClientId?.trim()}
                         onClick={()=>void connectYoutubeAccount(account.id)}>
                         {account.connectedProvider==="youtube"?"Reconnect":"Connect YouTube"}
+                      </button>}
+                    {account.service.toLowerCase().trim()==="instagram" &&
+                      <button type="button" className="secondary" disabled={busy||!instagramConfig?.secretConfigured}
+                        onClick={()=>void connectInstagramAccount(account.id)}>
+                        {account.connectedProvider==="instagram"?"Reconnect":"Connect Instagram"}
                       </button>}
                     <button type="button" className="secondary" disabled={busy}
                       aria-label={"Edit "+account.label}
@@ -1517,8 +1588,13 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                {account.connectedProvider==="youtube" && account.connectedTargetId &&
+                {["youtube","instagram"].includes(account.connectedProvider??"") && account.connectedTargetId &&
                   <small className="identity-card-channel">{account.connectedTargetTitle} · {account.connectedTargetId}</small>}
+                {account.lastInstagramOauthError &&
+                  <div role="alert" className="oauth-inline-error">
+                    Instagram authorization incomplete: {account.lastInstagramOauthError}
+                    <span className="oauth-inline-code">Check professional account, Meta App credentials and HTTPS callback.</span>
+                  </div>}
                 {account.lastYoutubeOauthError &&
                   <div role="alert" className="oauth-inline-error">
                     {youtubeOauthFailureHelp(account.lastYoutubeOauthError)}
