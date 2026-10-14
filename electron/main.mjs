@@ -18,7 +18,7 @@ import { ConnectionHostClient } from "./services/connection-host-client.mjs";
 import { startDesktopCapabilityBridge } from "./services/desktop-capability-bridge.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
 import { connectYoutubeBrowser } from "./services/youtube-oauth.mjs";
-import { connectInstagramBrowser, instagramRedirectUri } from "./services/instagram-oauth.mjs";
+import { connectInstagramBrowser, instagramRedirectUri, validateInstagramAppSecret } from "./services/instagram-oauth.mjs";
 import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
 import { CloudAccountAuth } from "./services/cloud-account-auth.mjs";
@@ -2095,8 +2095,7 @@ Only this single action will be approved.`,
     const appId=String(input?.appId??"").trim();
     if(!/^[0-9]{6,30}$/.test(appId))throw Error("INSTAGRAM_OAUTH_APP_ID_REQUIRED");
     const secret=String(input?.appSecret??"");
-    if(secret && (secret.length<8||secret.length>512||/\s/.test(secret)))
-      throw Error("INSTAGRAM_OAUTH_APP_SECRET_INVALID");
+    if(secret)validateInstagramAppSecret(secret);
     if(!secret&&!store.readSecret("INSTAGRAM_OAUTH_APP_SECRET",appId))
       throw Error("INSTAGRAM_OAUTH_APP_SECRET_REQUIRED");
     if(secret)store.upsertSecret({name:"INSTAGRAM_OAUTH_APP_SECRET",project:appId,value:secret});

@@ -3,6 +3,10 @@ import http from "node:http";
 import {randomBytes,createHash,timingSafeEqual} from "node:crypto";
 export const INSTAGRAM_SCOPES=["instagram_business_basic","instagram_business_content_publish"];
 function fail(code){throw Error(code);}
+export function validateInstagramAppSecret(secret){
+ if(typeof secret!=="string"||!/^[a-fA-F0-9]{32}$/.test(secret))
+  fail("INSTAGRAM_OAUTH_APP_SECRET_INVALID");
+}
 export function instagramRedirectUri(cloudBaseUrl){
  let url;
  try{url=new URL(cloudBaseUrl);}catch{fail("INSTAGRAM_OAUTH_CLOUD_HTTPS_REQUIRED");}
@@ -40,7 +44,17 @@ async function apiJson(fetchImpl,endpoint,options,stage){
  try{res=await fetchImpl(url.toString(),{...options,redirect:"manual",
    signal:AbortSignal.timeout(15000)});}
  catch{fail("INSTAGRAM_OAUTH_"+stage+"_NETWORK_FAILED");}
- if(res.status<200||res.status>=300)fail("INSTAGRAM_OAUTH_"+stage+"_HTTP_"+res.status);
+ if(res.status<200||res.status>=300){
+  // Never propagate Meta response bodies: they may echo credentials or codes.
+  let detail;try{detail=await res.json();}catch{}
+  const message=String(detail?.error_message??detail?.error?.message??"");
+  const reason=/client[_ ]secret/i.test(message)?"CLIENT_SECRET_INVALID"
+   :/redirect/i.test(message)?"REDIRECT_INVALID"
+   :/matching code|code.*(?:invalid|used|expired)/i.test(message)?"CODE_INVALID"
+   :/invalid.*(?:client|app)|(?:client|app).*invalid/i.test(message)?"APP_INVALID"
+   :null;
+  fail("INSTAGRAM_OAUTH_"+stage+"_"+(reason??"HTTP_"+res.status));
+ }
  const raw=await res.text();
  if(raw.length>32768)fail("INSTAGRAM_OAUTH_"+stage+"_RESPONSE_TOO_LARGE");
  let value;try{value=JSON.parse(raw);}catch{fail("INSTAGRAM_OAUTH_"+stage+"_INVALID_RESPONSE");}
@@ -50,7 +64,8 @@ async function apiJson(fetchImpl,endpoint,options,stage){
 }
 export async function finishInstagramOauth({fetchImpl=fetch,appId,appSecret,code,
  redirectUri,expectedUsername}){
- if(!appSecret||typeof appSecret!=="string")fail("INSTAGRAM_OAUTH_APP_SECRET_REQUIRED");
+ if(!appSecret)fail("INSTAGRAM_OAUTH_APP_SECRET_REQUIRED");
+ validateInstagramAppSecret(appSecret);
  const tokenResponse=await apiJson(fetchImpl,"https://api.instagram.com/oauth/access_token",{
   method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
   body:new URLSearchParams({client_id:appId,client_secret:appSecret,
@@ -65,7 +80,7 @@ export async function finishInstagramOauth({fetchImpl=fetch,appId,appSecret,code
  const scopes=typeof short.permissions==="string"
   ?short.permissions.split(",").map(s=>s.trim())
   :Array.isArray(short.permissions)?short.permissions:[];
- if(scopes.length&&!INSTAGRAM_SCOPES.every(s=>scopes.includes(s)))
+ if(!INSTAGRAM_SCOPES.every(s=>scopes.includes(s)))
   fail("INSTAGRAM_OAUTH_SCOPES_MISSING");
  const longUrl=new URL("https://graph.instagram.com/access_token");
  for(const [k,v] of Object.entries({grant_type:"ig_exchange_token",
@@ -73,22 +88,36 @@ export async function finishInstagramOauth({fetchImpl=fetch,appId,appSecret,code
  const long=await apiJson(fetchImpl,longUrl.toString(),{},"LONG_TOKEN");
  if(typeof long.access_token!=="string"||!long.access_token||
    !(Number(long.expires_in)>0))fail("INSTAGRAM_OAUTH_LONG_TOKEN_INVALID");
- const profile=await apiJson(fetchImpl,
-   "https://graph.instagram.com/me?fields=id,username,account_type",{
+ const profileResponse=await apiJson(fetchImpl,
+   "https://graph.instagram.com/v26.0/me?fields=id,user_id,username,account_type",{
     headers:{Authorization:"Bearer "+long.access_token}
    },"PROFILE");
- if(!/^[0-9]{4,32}$/.test(String(profile.id??""))||
-   String(profile.id)!==String(short.user_id)||
+ const profile=Array.isArray(profileResponse.data)
+  ?(profileResponse.data.length===1&&!profileResponse.username?profileResponse.data[0]:null)
+  :profileResponse;
+ // /me binds this profile to the exchanged token. OAuth-scoped and professional
+ // IDs are different namespaces; verify the expected username and professional ID.
+ if(!profile||!/^[0-9]{4,32}$/.test(String(profile.user_id??""))||
    typeof profile.username!=="string"||!profile.username.trim())
   fail("INSTAGRAM_OAUTH_PROFILE_INVALID");
- if(profile.account_type&&!["BUSINESS","MEDIA_CREATOR","CREATOR"].includes(
-   String(profile.account_type)))fail("INSTAGRAM_OAUTH_PROFESSIONAL_REQUIRED");
+ const accountType=String(profile.account_type??"").toUpperCase();
+ if(!["BUSINESS","MEDIA_CREATOR","CREATOR"].includes(accountType))fail("INSTAGRAM_OAUTH_PROFESSIONAL_REQUIRED");
  const requested=String(expectedUsername??"").trim().replace(/^@/,"");
  if(requested&&requested.toLowerCase()!==profile.username.toLowerCase())
   fail("INSTAGRAM_OAUTH_WRONG_ACCOUNT");
- return {accountId:String(profile.id),username:profile.username,
-  accountType:profile.account_type??null,grant:{
+ const publishing=await apiJson(fetchImpl,
+   "https://graph.instagram.com/v26.0/"+profile.user_id+"/content_publishing_limit?fields=quota_usage,config",
+   {headers:{Authorization:"Bearer "+long.access_token}},"PUBLISHING");
+ const quota=publishing.data;
+ if(!Array.isArray(quota)||quota.length!==1||
+   !Number.isInteger(quota[0]?.quota_usage)||quota[0].quota_usage<0)
+  fail("INSTAGRAM_OAUTH_PUBLISHING_INVALID");
+ return {accountId:String(profile.user_id),username:profile.username,
+  accountType,grant:{
    accessToken:long.access_token,scopes:INSTAGRAM_SCOPES.slice(),
+   accountType,appScopedUserId:profile.id?String(profile.id):null,
+   oauthUserId:String(short.user_id),
+   publishingVerifiedAt:new Date().toISOString(),publishingQuota:quota[0],
    expiresAt:new Date(Date.now()+Math.min(60*86400,Number(long.expires_in))*1000).toISOString()}};
 }
 export async function verifyInstagramRelay(fetchImpl,cloudBaseUrl){
@@ -106,6 +135,7 @@ export async function connectInstagramBrowser({appId,appSecret,cloudBaseUrl,
  const redirectUri=instagramRedirectUri(cloudBaseUrl);
  if(!/^[0-9]{6,30}$/.test(appId??""))fail("INSTAGRAM_OAUTH_APP_ID_REQUIRED");
  if(!appSecret)fail("INSTAGRAM_OAUTH_APP_SECRET_REQUIRED");
+ validateInstagramAppSecret(appSecret);
  await verifyInstagramRelay(fetchImpl,cloudBaseUrl);
  let complete;
  const received=new Promise(resolve=>{complete=resolve;});
