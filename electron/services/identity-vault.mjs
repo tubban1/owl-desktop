@@ -73,6 +73,8 @@ export class IdentityVault {
     const records = readJson(this.file, []);
     const index = records.findIndex((item) => item.id === id);
     const previous = index >= 0 ? records[index] : null;
+    // An edit must not silently become a new record if its ID was deleted.
+    if(id && !previous)throw Error("ACCOUNT_EDIT_NOT_FOUND");
     const now = new Date().toISOString();
 
     if (secret && !safeStorage.isEncryptionAvailable()) {
@@ -89,19 +91,21 @@ export class IdentityVault {
       label: label.trim(),
       identifier: identifier.trim(),
       authMethod,
-      status: previous?.status ?? "needs_login",
+      status: sameIdentity ? previous?.status ?? "needs_login" : "needs_login",
       browserProfileId:
-        browserProfileId ?? previous?.browserProfileId ?? null,
+        browserProfileId ?? (sameIdentity ? previous?.browserProfileId ?? null : null),
       notes: notes.trim(),
       createdAt: previous?.createdAt ?? now,
       updatedAt: now,
-      lastAuthenticatedAt: previous?.lastAuthenticatedAt ?? null,
-      expiresAt: previous?.expiresAt ?? null,
+      lastAuthenticatedAt: sameIdentity ? previous?.lastAuthenticatedAt ?? null : null,
+      expiresAt: sameIdentity ? previous?.expiresAt ?? null : null,
+      // Do not retain secrets/sessions when the owner, platform or auth method
+      // changes. Label-only edits preserve existing credentials.
       cipherText: secret
         ? safeStorage.encryptString(secret).toString("base64")
-        : previous?.cipherText ?? null,
-      refreshCipherText: previous?.refreshCipherText ?? null,
-      recoveryCipherText: previous?.recoveryCipherText ?? null,
+        : sameIdentity ? previous?.cipherText ?? null : null,
+      refreshCipherText: sameIdentity ? previous?.refreshCipherText ?? null : null,
+      recoveryCipherText: sameIdentity ? previous?.recoveryCipherText ?? null : null,
       oauthCipherText: sameIdentity ? previous?.oauthCipherText ?? null : null,
       connectedProvider: sameIdentity ? previous?.connectedProvider ?? null : null,
       connectedTargetId: sameIdentity ? previous?.connectedTargetId ?? null : null,

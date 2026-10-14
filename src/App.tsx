@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, Boxes, CheckCircle2, Cloud, Cpu, Gauge, HardDrive,
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
-  Terminal, Trash2, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
+  Terminal, Trash2, Pencil, Wifi, WifiOff, UserRound, Link2, Puzzle, Inbox,
   AlertTriangle, ArrowRight, BrainCircuit, Clock3, FolderOpen, X,
   ChartNoAxesCombined, Laptop,
 } from "lucide-react";
@@ -125,6 +125,9 @@ export default function App() {
   const [usageStats, setUsageStats] = useState<UsageStatisticsSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [secretDraft, setSecretDraft] = useState({ name: "", project: "global", value: "" });
+  const [editingAccount, setEditingAccount] = useState<AccountMeta | null>(null);
+  const [accountEditSecret,setAccountEditSecret] = useState("");
+  const [accountEditError,setAccountEditError] = useState("");
   const [accountDraft, setAccountDraft] = useState({
     service: "",
     label: "",
@@ -532,6 +535,40 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const saveAccountEdit = async () => {
+    if(!editingAccount || busy)return;
+    if(!editingAccount.service.trim() || !editingAccount.label.trim()){
+      setAccountEditError("Service and account label are required.");return;
+    }
+    const original=accounts.find(a=>a.id===editingAccount.id);
+    if(!original){setAccountEditError("Account no longer exists. Refresh the list.");return;}
+    const identityChanged=original.service.trim()!==editingAccount.service.trim() ||
+      original.identifier.trim()!==editingAccount.identifier.trim() ||
+      original.authMethod!==editingAccount.authMethod;
+    if(identityChanged && original.connectedProvider && !window.confirm(
+      "This edit will disconnect the verified account. Continue?"
+    ))return;
+    setBusy(true);setAccountEditError("");
+    try{
+      await window.owlDesktop.upsertAccount({
+        id:editingAccount.id,
+        service:editingAccount.service.trim(),
+        label:editingAccount.label.trim(),
+        identifier:editingAccount.identifier.trim(),
+        authMethod:editingAccount.authMethod,
+        notes:editingAccount.notes ?? "",
+        secret: ["google","youtube","instagram"].includes(editingAccount.service.toLowerCase().trim())
+          ? undefined : accountEditSecret || undefined,
+      });
+      setAccounts(await window.owlDesktop.listAccounts());
+      setEditingAccount(null);
+      setAccountEditSecret("");
+      setNotice(identityChanged?"Account updated. Reconnect to authorize the changed identity.":"Account updated.");
+    }catch(error){
+      setAccountEditError(error instanceof Error?error.message:"Unable to save account changes.");
+    }finally{setBusy(false);}
   };
 
   const addAccount = async () => {
@@ -1367,7 +1404,7 @@ export default function App() {
               <span className="neutral-pill">{settings?.youtubeOauthClientId?.trim() ? "App configured" : "App setup required"}</span>
             </div>
             <p className="panel-help">Create a Google OAuth client of type Desktop app for OWL LAB. The Client ID is public app configuration, not a password. Save it once here; connecting an account opens the official Google consent screen.</p>
-            <div className="secret-form">
+            <div className="secret-form oauth-config-form">
               <div className="grow">
                 <label>Google Desktop OAuth Client ID</label>
                 <input aria-label="Google Desktop OAuth Client ID"
@@ -1378,7 +1415,7 @@ export default function App() {
               <button className="secondary" disabled={busy || !settings?.youtubeOauthClientId?.trim()}
                 onClick={() => void saveSettings({youtubeOauthClientId:settings?.youtubeOauthClientId?.trim()??""})}>Save Client ID</button>
             </div>
-            <div className="secret-form">
+            <div className="secret-form oauth-config-form">
               <div className="grow">
                 <label>Google Desktop OAuth Client Secret (only if Google requires it)</label>
                 <input type="password" autoComplete="off" aria-label="Google Desktop OAuth Client Secret"
@@ -1420,30 +1457,112 @@ export default function App() {
             <button className="primary add-secret" onClick={addAccount}><Plus size={15} />Add</button>
           </section>
           <div className="contract-note"><ShieldCheck size={17} /><div><strong>OWL does not bypass MFA.</strong><p>QR, SMS/email codes, passkeys and authenticator approvals become explicit login challenges. Native app sessions and browser profiles are reused without extracting their credentials.</p></div></div>
-          <section className="panel"><div className="secret-table head"><span>Account</span><span>Auth</span><span>Status</span><span /></div>{accounts.map((account) => <div className="secret-table" key={account.id}><div><UserRound size={15} /><p><strong>{account.service} · {account.label}</strong><small>{account.identifier || "No identifier"}</small></p></div><code>{account.authMethod}</code><div>
-              <span>{account.status === "ready" && account.connectedProvider === "youtube" && account.connectedTargetId &&
-                account.connectedClientId === settings?.youtubeOauthClientId?.trim()
-                ? "OAuth verified · publishing inactive" :
-                account.connectedProvider === "youtube" ? "Reconnect required (OAuth app changed)" : account.status}</span>
-              {account.connectedProvider === "youtube" && account.connectedTargetId &&
-                <small>{account.connectedTargetTitle} · {account.connectedTargetId}</small>}
-              {account.lastYoutubeOauthError &&
-                <small role="alert" className="oauth-inline-error">
-                  {youtubeOauthFailureHelp(account.lastYoutubeOauthError)}
-                  <span className="oauth-inline-code">{account.lastYoutubeOauthError}</span>
-                </small>}
+          <section className="panel identity-accounts-panel">
+            <div className="panel-heading">
+              <div><span className="eyebrow">SAVED ACCOUNTS</span><h3>Connected service identities</h3></div>
+              <span className="neutral-pill">{accounts.length} accounts</span>
             </div>
-            <div className="row-actions">
-              {["google","youtube"].includes(account.service.toLowerCase().trim()) &&
-                <button className="secondary" disabled={busy || !settings?.youtubeOauthClientId?.trim()}
-                  onClick={() => void connectYoutubeAccount(account.id)}>
-                  {account.connectedProvider === "youtube" ? "Reconnect" : "Connect YouTube"}
-                </button>}
-              <button className="danger-icon" disabled={busy} onClick={async () => {
-                await window.owlDesktop.deleteAccount(account.id);
-                setAccounts(await window.owlDesktop.listAccounts());
-              }}><Trash2 size={15} /></button>
-            </div></div>)}{accounts.length === 0 && <div className="empty table-empty">No managed accounts yet.</div>}</section>
+            <div className="identity-card-list">
+              {accounts.map(account=><article className="identity-card" key={account.id}>
+                <div className="identity-card-top">
+                  <div className="identity-card-person">
+                    <UserRound size={16} aria-hidden="true"/>
+                    <div className="identity-card-description">
+                      <strong>{account.service} · {account.label}</strong>
+                      <small>{account.identifier || "No identifier"}</small>
+                      <div className="identity-card-badges">
+                        <span>{account.authMethod.replaceAll("_"," ")}</span>
+                        <span>{account.status==="ready" && account.connectedProvider==="youtube" &&
+                          account.connectedTargetId && account.connectedClientId===settings?.youtubeOauthClientId?.trim()
+                            ? "OAuth verified · publishing inactive" :
+                            account.connectedProvider==="youtube" ? "Reconnect required" : account.status}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="identity-card-actions">
+                    {["google","youtube"].includes(account.service.toLowerCase().trim()) &&
+                      <button type="button" className="secondary" disabled={busy || !settings?.youtubeOauthClientId?.trim()}
+                        onClick={()=>void connectYoutubeAccount(account.id)}>
+                        {account.connectedProvider==="youtube"?"Reconnect":"Connect YouTube"}
+                      </button>}
+                    <button type="button" className="secondary" disabled={busy}
+                      aria-label={"Edit "+account.label}
+                      aria-expanded={editingAccount?.id===account.id}
+                      onClick={()=>{
+                        setAccountEditError("");
+                        setAccountEditSecret("");
+                        setEditingAccount(editingAccount?.id===account.id?null:{...account});
+                      }}>
+                      <Pencil size={13} aria-hidden="true"/> Edit
+                    </button>
+                    <button type="button" className="danger-icon" disabled={busy}
+                      aria-label={"Delete "+account.label} title="Delete account"
+                      onClick={()=>void(async()=>{
+                        if(!window.confirm("Delete this saved account and its local credentials? This cannot be undone."))return;
+                        try{
+                          await window.owlDesktop.deleteAccount(account.id);
+                          setAccounts(await window.owlDesktop.listAccounts());
+                          if(editingAccount?.id===account.id)setEditingAccount(null);
+                        }catch(error){
+                          setNotice(error instanceof Error?error.message:"Unable to delete account.");
+                        }
+                      })()}>
+                      <Trash2 size={15} aria-hidden="true"/>
+                    </button>
+                  </div>
+                </div>
+                {account.connectedProvider==="youtube" && account.connectedTargetId &&
+                  <small className="identity-card-channel">{account.connectedTargetTitle} · {account.connectedTargetId}</small>}
+                {account.lastYoutubeOauthError &&
+                  <div role="alert" className="oauth-inline-error">
+                    {youtubeOauthFailureHelp(account.lastYoutubeOauthError)}
+                    <span className="oauth-inline-code">{account.lastYoutubeOauthError}</span>
+                  </div>}
+                {editingAccount?.id===account.id &&
+                  <form className="identity-edit-form" aria-label={"Edit "+account.label}
+                    onSubmit={event=>{event.preventDefault();void saveAccountEdit();}}>
+                    <div className="identity-edit-fields">
+                      <label>Service<input required value={editingAccount.service}
+                        onChange={event=>setEditingAccount({...editingAccount,service:event.target.value})}/></label>
+                      <label>Account label<input required value={editingAccount.label}
+                        onChange={event=>setEditingAccount({...editingAccount,label:event.target.value})}/></label>
+                      <label>Identifier<input value={editingAccount.identifier}
+                        onChange={event=>setEditingAccount({...editingAccount,identifier:event.target.value})}/></label>
+                      <label>Auth method<select value={editingAccount.authMethod}
+                        onChange={event=>setEditingAccount({...editingAccount,authMethod:event.target.value as AccountMeta["authMethod"]})}>
+                        <option value="password">Password</option><option value="oauth">OAuth</option>
+                        <option value="third_party_oauth">Third-party login</option>
+                        <option value="qr">QR scan</option><option value="sms_otp">SMS OTP</option>
+                        <option value="email_otp">Email OTP</option><option value="totp">TOTP</option>
+                        <option value="authenticator_push">Authenticator push</option>
+                        <option value="passkey">Passkey</option><option value="device_code">Device code</option>
+                        <option value="native_app_session">Native app session</option>
+                      </select></label>
+                      <label>Notes<input value={editingAccount.notes??""} placeholder="Optional notes"
+                        onChange={event=>setEditingAccount({...editingAccount,notes:event.target.value})}/></label>
+                      <label>Replace stored secret (optional)
+                        <input type="password" autoComplete="new-password" value={accountEditSecret}
+                          disabled={["google","youtube","instagram"].includes(editingAccount.service.toLowerCase().trim())}
+                          placeholder={["google","youtube","instagram"].includes(editingAccount.service.toLowerCase().trim())
+                            ? "Use official OAuth" : "Leave blank to keep existing secret"}
+                          onChange={event=>setAccountEditSecret(event.target.value)}/>
+                      </label>
+                    </div>
+                    {(account.service.trim()!==editingAccount.service.trim() ||
+                      account.identifier.trim()!==editingAccount.identifier.trim() ||
+                      account.authMethod!==editingAccount.authMethod) &&
+                      <p className="identity-edit-warning">Changing the service, identifier or authentication method resets the saved login. Editing the label preserves your authorization.</p>}
+                    {accountEditError && <p role="alert" className="identity-edit-warning">{accountEditError}</p>}
+                    <div className="identity-edit-actions">
+                      <button className="primary" type="submit" disabled={busy || !editingAccount.label.trim() || !editingAccount.service.trim()}>Save changes</button>
+                      <button className="secondary" type="button" disabled={busy}
+                        onClick={()=>{setEditingAccount(null);setAccountEditError("");setAccountEditSecret("");}}>Cancel</button>
+                    </div>
+                  </form>}
+              </article>)}
+              {accounts.length===0 && <div className="empty table-empty">No managed accounts yet.</div>}
+            </div>
+          </section>
             </div>
           </details>
         </>}
