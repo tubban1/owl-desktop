@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   listActivity: () => ipcRenderer.invoke("desktop:activity:list"),
   statistics: () => ipcRenderer.invoke("desktop:statistics"),
   refreshRuntime: (options) => ipcRenderer.invoke("runtime:refresh", options),
+  listRuntimeApprovals: () => ipcRenderer.invoke("runtime:approvals:list"),
   approveRuntimeApproval: (approvalId) =>
     ipcRenderer.invoke("runtime:approval:approve", approvalId),
   denyRuntimeApproval: (approvalId) =>
@@ -115,6 +116,8 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   hostRestart: () => ipcRenderer.invoke("host:restart"),
   hostStop: () => ipcRenderer.invoke("host:stop"),
   tunnelStatus: () => ipcRenderer.invoke("tunnel:status"),
+  connectivityIncident: () => ipcRenderer.invoke("connectivity:incident"),
+  connectivityTimeline: () => ipcRenderer.invoke("connectivity:timeline"),
   tunnelStart: () => ipcRenderer.invoke("tunnel:start"),
   tunnelStop: () => ipcRenderer.invoke("tunnel:stop"),
   listAccounts: () => ipcRenderer.invoke("accounts:list"),
@@ -122,6 +125,8 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   getInstagramConfig: () => ipcRenderer.invoke("accounts:instagram-config-status"),
   saveInstagramConfig: (input) => ipcRenderer.invoke("accounts:instagram-config-save",input),
   connectInstagramAccount: (id) => ipcRenderer.invoke("accounts:instagram-connect",id),
+  chooseInstagramReel: () => ipcRenderer.invoke("accounts:instagram-select-reel"),
+  publishInstagramReel: (input) => ipcRenderer.invoke("accounts:instagram-publish",input),
   getYoutubeClientSecretStatus: () => ipcRenderer.invoke("accounts:youtube-client-secret-status"),
   saveYoutubeClientSecret: (value) => ipcRenderer.invoke("accounts:youtube-client-secret-save",value),
   upsertAccount: (input) => ipcRenderer.invoke("accounts:upsert", input),

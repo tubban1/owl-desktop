@@ -184,6 +184,8 @@ export type MonitorWorkstream = {
 export type WorkstreamBoard = {
   generatedAt: string;
   activeCount: number;
+  staleCheckpointCount?: number;
+  reconnectingCheckpointCount?: number;
   connectedSources: number;
   workingCount: number;
   waitingCount: number;
@@ -844,6 +846,8 @@ export function buildWorkstreamBoard({
 
   return {
     generatedAt: new Date(now).toISOString(),
+    staleCheckpointCount: snapshot?.mcp.continuation?.staleActiveCheckpointCount??0,
+    reconnectingCheckpointCount: snapshot?.mcp.continuation?.waitingReconnectCheckpointCount??0,
     activeCount: streams.filter((stream) =>
       ["working", "waiting", "attention"].includes(stream.status),
     ).length,

@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { DevChildSupervisor } from "./lib/dev-child-supervisor.mjs";
 import { writeDevOwner, removeDevOwner } from "./lib/dev-full-owner.mjs";
+import { buildDevRuntimePermissionPolicy, writeDevRuntimePermissionStatus, devPermissionStatusFile, DEV_PERMISSION_FLAG_NAMES } from "./lib/dev-runtime-permissions.mjs";
 
 const desktopRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -520,6 +521,63 @@ try {
   console.log(
     `[dev:full] starting OWL Runtime DEV on isolated port ${runtimeDevPort} (${runtimeWatch ? "watch" : "stable-source"})...`,
   );
+  // Permission updates are scoped to the isolated DEV Runtime. Production
+  // ~/.owl/runtime.env and the production Runtime PID remain untouched.
+  let activePermissionPolicy=buildDevRuntimePermissionPolicy({
+    settingsFile:desktopSettingsFile,userDataRoot:desktopUserDataRoot});
+  const runtimePermissionEnv={...activePermissionPolicy.env};
+  const runtimeSpawnEnv={
+    PATH:devPath,PORT:String(runtimeDevPort),OWL_RUNTIME_MODE:"development",
+    OWL_RUNTIME_ACCESS_MODE:enforceCloudAccess?"enforced":"compat",
+    OWL_RUNTIME_REQUIRE_SIGNED_LEASE:enforceCloudAccess?"true":"false",
+    OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE:runtimeLeasePublicKeyFile,
+    OWL_STATE_ROOT:runtimeStateRoot,OWL_WAKE_NAME:userWakeName,
+    OWL_ALIASES:userWakeAliases.join(","),ALLOWED_DIRECTORIES:devAllowedDirectories,
+    ALLOW_WRITE:process.env.ALLOW_WRITE||"true",
+    ALLOW_BROWSER:process.env.ALLOW_BROWSER||"true",
+    ALLOW_GUI:process.env.ALLOW_GUI||"true",...runtimePermissionEnv
+  };
+  const permissionStatusPath=devPermissionStatusFile(runtimeStateRoot);
+  let runtimeChild=null;
+  const publishPolicyStatus=(child,healthy)=>writeDevRuntimePermissionStatus(permissionStatusPath,{
+    version:1,ownerPid:process.pid,runtimePid:child?.pid??null,
+    digest:activePermissionPolicy.digest,modes:activePermissionPolicy.modes,
+    reviewReady:activePermissionPolicy.reviewReady,reason:activePermissionPolicy.reason,
+    healthy,appliedAt:new Date().toISOString(),env:runtimePermissionEnv
+  });
+  const onRuntimeLaunch=child=>{
+    runtimeChild=child;
+    publishPolicyStatus(child,false);
+    void waitForDevRuntime().then(()=>{
+      if(runtimeChild===child)publishPolicyStatus(child,true);
+    }).catch(error=>{
+      if(runtimeChild===child)console.warn("[dev:full] Runtime policy health verification failed: "+
+       (error instanceof Error?error.message:String(error)));
+    });
+  };
+  const reloadRuntimePermissions=()=>{
+    if(childSupervisor.shuttingDown)return;
+    let next;
+    try{next=buildDevRuntimePermissionPolicy({
+      settingsFile:desktopSettingsFile,userDataRoot:desktopUserDataRoot});}
+    catch(error){console.error("[dev:full] Permission reload rejected:",String(error));return;}
+    if(next.digest===activePermissionPolicy.digest&&
+       next.reviewReady===activePermissionPolicy.reviewReady)return;
+    activePermissionPolicy=next;
+    for(const key of DEV_PERMISSION_FLAG_NAMES){delete runtimePermissionEnv[key];delete runtimeSpawnEnv[key];}
+    Object.assign(runtimePermissionEnv,next.env);
+    Object.assign(runtimeSpawnEnv,next.env);
+    publishPolicyStatus(runtimeChild,false);
+    if(runtimeChild?.pid&&runtimeChild.pid!==process.pid){
+      // The supervisor owns this child and its detached process group.
+      try{process.kill(-runtimeChild.pid,"SIGTERM");}
+      catch(error){console.error("[dev:full] Owned Runtime restart failed:",String(error));}
+    }
+  };
+  process.on("SIGHUP",reloadRuntimePermissions);
+  const signerPublicFile=path.join(desktopUserDataRoot,"human-approval-signer.json");
+  fs.watchFile(desktopSettingsFile,{interval:1200},reloadRuntimePermissions);
+  fs.watchFile(signerPublicFile,{interval:1200},reloadRuntimePermissions);
   start(
     "runtime",
     runtimeRoot,
@@ -527,25 +585,8 @@ try {
     runtimeWatch
       ? [tsxCli, "watch", "src/server.ts"]
       : [tsxCli, "src/server.ts"],
-    {
-      PATH: devPath,
-      PORT: String(runtimeDevPort),
-      OWL_RUNTIME_MODE: "development",
-      OWL_RUNTIME_ACCESS_MODE: enforceCloudAccess ? "enforced" : "compat",
-      OWL_RUNTIME_REQUIRE_SIGNED_LEASE: enforceCloudAccess ? "true" : "false",
-      OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE: runtimeLeasePublicKeyFile,
-      OWL_STATE_ROOT: runtimeStateRoot,
-      OWL_WAKE_NAME: userWakeName,
-      OWL_ALIASES: userWakeAliases.join(","),
-      ALLOWED_DIRECTORIES: devAllowedDirectories,
-      ALLOW_WRITE: process.env.ALLOW_WRITE || "true",
-      ALLOW_SHELL: process.env.ALLOW_SHELL || "true",
-      ALLOW_DELETE: process.env.ALLOW_DELETE || "false",
-      ALLOW_GIT_PUSH: desktopUserSettings.runtimePermissionModes?.gitPush==="blocked"
-        ? "false" : process.env.ALLOW_GIT_PUSH || "true",
-      ALLOW_BROWSER: process.env.ALLOW_BROWSER || "true",
-      ALLOW_GUI: process.env.ALLOW_GUI || "true",
-    },
+    runtimeSpawnEnv,
+    {restartOnExit:true,restartDelayMs:1200,onLaunch:onRuntimeLaunch},
   );
 
   await waitForDevRuntime();

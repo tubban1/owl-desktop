@@ -41,7 +41,17 @@ export async function sendAuthorizedFile(source,authorize,cloudClient,{fetchImpl
   const response=await fetchImpl(grant.uploadUrl,{
    method:"PUT",body:bytes,headers:grant.uploadHeaders,redirect:"error",signal:AbortSignal.timeout(120000),
   });
-  if(!response.ok)reject("Upload failed with HTTP "+response.status,"FILE_UPLOAD_FAILED");
+  if(!response.ok){
+   // Only retain a bounded S3 error *category*: never expose XML, signed URLs or credentials.
+   let s3Code="";
+   try{const xml=await response.text();if(xml.length<=8192)
+    s3Code=(xml.match(/<Code>([A-Za-z0-9_]{1,55})<\/Code>/)?.[1]??"").toUpperCase();}catch{}
+   const failure=new Error("Upload failed with HTTP "+response.status);
+   failure.code="FILE_UPLOAD_FAILED";
+   failure.status=response.status;
+   if(s3Code)failure.s3Code=s3Code;
+   throw failure;
+  }
   success=true;
  }finally{
   if(!success)await cloudClient.revokeFileDelivery?.(grant.deliveryId).catch(()=>undefined);

@@ -30,7 +30,33 @@ export class CloudHttpClient {
     this.timeoutMs = timeoutMs;
   }
 
-  async request(path, {
+  async request(path, options={}) {
+    const method=options.method??"GET";
+    const budget=options.timeoutMs??this.timeoutMs;
+    // Only replay idempotent GET reads; device claims, heartbeats,
+    // publication and mutations must never be automatically duplicated.
+    // Reuse the original timeout budget across both tries; do not double UI wait.
+    const canRetry=method==="GET"&&Number.isFinite(budget)&&
+      budget>=2_000&&budget<=12_000;
+    if(!canRetry)return this.requestOnce(path,options);
+    const backoffMs=150;
+    const started=Date.now();
+    try{
+      // Preserve the full original deadline for a slow-but-healthy GET.
+      // Splitting the deadline in half would falsely abort valid long reads.
+      return await this.requestOnce(path,options);
+    }catch(error){
+      const transient=error instanceof CloudHttpError&&(
+        ["CLOUD_TIMEOUT","CLOUD_NETWORK_ERROR"].includes(error.code)||
+        [429,502,503,504].includes(error.status));
+      const remaining=budget-(Date.now()-started)-backoffMs;
+      if(!transient||remaining<500)throw error;
+      await new Promise(resolve=>setTimeout(resolve,backoffMs));
+      return this.requestOnce(path,{...options,timeoutMs:remaining});
+    }
+  }
+
+  async requestOnce(path, {
     method = "GET",
     body,
     auth = "none",

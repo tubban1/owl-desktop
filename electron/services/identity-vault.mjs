@@ -212,6 +212,31 @@ export class IdentityVault {
     return sanitize(rows[index]);
   }
 
+  /** Never return an OAuth grant to IPC. Run a trusted publisher callback in main. */
+  async withInstagramPublishingAuthorization(id,expectedAppId,publish){
+    const record=readJson(this.file,[]).find(item=>item.id===id);
+    if(!record||record.status!=="ready"||record.connectedProvider!=="instagram"||
+      record.service?.trim().toLowerCase()!=="instagram"||
+      record.connectedClientId!==expectedAppId||!record.oauthCipherText)
+      throw Error("INSTAGRAM_PUBLISH_ACCOUNT_NOT_READY");
+    if(!safeStorage.isEncryptionAvailable())throw Error("INSTAGRAM_PUBLISH_SECURE_STORAGE_UNAVAILABLE");
+    let grant;
+    try{grant=JSON.parse(safeStorage.decryptString(Buffer.from(record.oauthCipherText,"base64")));}
+    catch{throw Error("INSTAGRAM_PUBLISH_GRANT_UNAVAILABLE");}
+    if(!Array.isArray(grant.scopes)||!grant.scopes.includes("instagram_business_content_publish")||
+      typeof grant.accessToken!=="string"||!grant.accessToken||
+      !record.connectedTargetId||!record.connectedTargetTitle)
+      throw Error("INSTAGRAM_PUBLISH_SCOPE_MISSING");
+    if(!grant.expiresAt||Date.parse(grant.expiresAt)<=Date.now()+60000)
+      throw Error("INSTAGRAM_PUBLISH_TOKEN_EXPIRED");
+    return await publish({
+      accessToken:grant.accessToken,
+      authorizationMode:"instagram_login",
+      accountId:record.connectedTargetId,
+      username:record.connectedTargetTitle.replace(/^@/,"")
+    });
+  }
+
   saveYoutubeGrant(id, verified, clientId) {
     const records = readJson(this.file, []);
     const index = records.findIndex(item => item.id === id);

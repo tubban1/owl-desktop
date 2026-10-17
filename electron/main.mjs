@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, powerMonitor, shell } from "electron";
+import { app, BrowserWindow, Notification, dialog, ipcMain, powerMonitor, shell } from "electron";
 import { configureOwlDesktopStorage } from "./storage-layout.mjs";
 import { DesktopStore } from "./store.mjs";
 import { UsageStatisticsStore } from "./services/usage-statistics-store.mjs";
@@ -11,14 +11,21 @@ import { RuntimeHttpClient } from "./runtime-http-client.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
 import { LocalRuntimeBootstrap } from "./services/local-runtime-bootstrap.mjs";
-import { runtimePermissionProjection, validateRuntimePermissionChange } from "./services/runtime-permissions.mjs";
+import { runtimePermissionProjection, validateRuntimePermissionChange, installedRuntimeSupportsSignedReview, runtimePermissionChangeCopy, assertSafePermissionCombination } from "./services/runtime-permissions.mjs";
+import { readDevOwner, ownerMatches } from "../scripts/lib/dev-full-owner.mjs";
+import { readDevRuntimePermissionStatus, devPermissionStatusFile } from "../scripts/lib/dev-runtime-permissions.mjs";
 import { TunnelSupervisor } from "./services/tunnel-supervisor.mjs";
+import { createConnectivityIncidentTracker } from "./services/connectivity-incident.mjs";
+import { probeLocalNetwork, readLocalNetworkLink } from "./services/local-network-evidence.mjs";
+import { probeOpenAiIncidents } from "./services/openai-status-evidence.mjs";
+import { createConnectivityIncidentJournal } from "./services/connectivity-incident-journal.mjs";
 import { tunnelTransportAvailable } from "./services/tunnel-availability.mjs";
 import { ConnectionHostClient } from "./services/connection-host-client.mjs";
 import { startDesktopCapabilityBridge } from "./services/desktop-capability-bridge.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
 import { connectYoutubeBrowser } from "./services/youtube-oauth.mjs";
 import { connectInstagramBrowser, instagramRedirectUri, validateInstagramAppSecret } from "./services/instagram-oauth.mjs";
+import { publishInstagramReel } from "./services/instagram-publisher.mjs";
 import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
 import { CloudAccountAuth } from "./services/cloud-account-auth.mjs";
@@ -72,6 +79,17 @@ const desktopCapabilityBridgePort = Number(
   process.env.OWL_DESKTOP_CAPABILITY_BRIDGE_PORT || "8792",
 );
 let mainWindow;
+let approvalNotificationTimer;
+let connectivityNotificationTimer;
+const connectivityTracker=createConnectivityIncidentTracker();
+let connectivityIncidentState=connectivityTracker.snapshot();
+let connectivityJournal=null;
+let connectivityNetworkEvidence=null;
+let connectivityOfficialEvidence=null;
+let connectivityProbeAt=0;
+let connectivityRecordedLayer=null;
+let connectivityIncidentStartedAt=null;
+const announcedApprovalIds=new Set();
 let store;
 let identityVault;
 let tunnelSupervisor;
@@ -1760,6 +1778,7 @@ function registerIpc() {
   }));
 
   ipcMain.handle("runtime:refresh", (_event, options) => runtimeSnapshot(options ?? {}));
+  ipcMain.handle("runtime:approvals:list", () => runtimeClient().approvals());
   ipcMain.handle("runtime:approval:approve", async (_event, approvalId) => {
     if (typeof approvalId !== "string" || !approvalId.trim()) {
       throw new Error("APPROVAL_ID_REQUIRED");
@@ -1771,8 +1790,13 @@ function registerIpc() {
     const reviewing=Object.values(modes).includes("review");
     let humanProof;
     if(reviewing){
-      if(!app.isPackaged || !createLocalRuntimeBootstrap(store.getSettings()))
-        throw new Error("SIGNED_APPROVAL_REQUIRES_MANAGED_PACKAGED_RUNTIME");
+      const devReviewVerified=!app.isPackaged&&devForceConnectivity&&
+        verifiedDevPermissionStatus()?.healthy===true&&
+        verifiedDevPermissionStatus()?.reviewReady===true&&
+        !currentRuntimePermissionProjection().restartRequired;
+      if(!(devReviewVerified||
+          (app.isPackaged&&createLocalRuntimeBootstrap(store.getSettings()))))
+        throw new Error("SIGNED_APPROVAL_REQUIRES_VERIFIED_MANAGED_RUNTIME");
       if(!store.getHumanApprovalPublicKey())
         throw new Error("OS_HUMAN_SIGNER_NOT_PROVISIONED");
       if(approval.review?.complete!==true)
@@ -2081,6 +2105,8 @@ Only this single action will be approved.`,
   ipcMain.handle("host:restart", () => runtimeHostSupervisor().restartService());
   ipcMain.handle("host:stop", () => runtimeHostSupervisor().stopService());
   ipcMain.handle("tunnel:status", () => tunnelStatus());
+  ipcMain.handle("connectivity:incident", () => connectivityIncidentState);
+  ipcMain.handle("connectivity:timeline", () => connectivityJournal?.list(30)??[]);
   ipcMain.handle("tunnel:start", () => startTunnel());
   ipcMain.handle("tunnel:stop", () => stopTunnel());
   ipcMain.handle("accounts:instagram-config-status", () => {
@@ -2124,6 +2150,31 @@ Only this single action will be approved.`,
         ?raw:"INSTAGRAM_OAUTH_CONNECTION_FAILED";
       identityVault.noteInstagramOauthAttempt(id,safe);
       record("warn","publish-oauth","Instagram authorization incomplete",{code:safe});
+      throw Error(safe);
+    }
+  });
+  ipcMain.handle("accounts:instagram-select-reel", async () => {
+    const chosen=await dialog.showOpenDialog(mainWindow,{title:"Choose Instagram Reel",
+      properties:["openFile"],filters:[{name:"MP4 videos",extensions:["mp4"]}]});
+    return chosen.canceled?null:chosen.filePaths[0]??null;
+  });
+  ipcMain.handle("accounts:instagram-publish",async (_event,input)=>{
+    if(!input||input.approved!==true||typeof input.accountId!=="string"||
+      typeof input.mediaPath!=="string"||typeof input.caption!=="string")
+      throw Error("INSTAGRAM_PUBLISH_INVALID_REQUEST");
+    const configuredApp=store.getSettings().instagramAppId?.trim();
+    try{
+      const result=await identityVault.withInstagramPublishingAuthorization(
+        input.accountId,configuredApp,credential=>publishInstagramReel({
+          ...credential,mediaPath:input.mediaPath,caption:input.caption,approved:true,
+          journalDir:path.join(app.getPath("userData"),"instagram-publish-journal")
+        }));
+      record("info","publish","Instagram Reel published",{mediaId:result.mediaId});
+      return result;
+    }catch(e){
+      const safe=/^INSTAGRAM_PUBLISH_[A-Z0-9_]{1,90}$/.test(e?.message??"")?
+        e.message:"INSTAGRAM_PUBLISH_UNEXPECTED_ERROR";
+      record("warn","publish","Instagram publish not verified",{code:safe});
       throw Error(safe);
     }
   });
@@ -2181,32 +2232,85 @@ Only this single action will be approved.`,
   });
   ipcMain.handle("accounts:capabilities", (_event, id) =>
     identityVault.capabilities(id));
-  ipcMain.handle("runtime-permissions:get", () =>
-    runtimePermissionProjection(store.getSettings(),path.join(os.homedir(),".owl","runtime.env"),
-      {packaged:app.isPackaged}));
+  function verifiedDevPermissionStatus(){
+    if(app.isPackaged||!devForceConnectivity)return null;
+    const owner=readDevOwner();
+    if(!ownerMatches(owner,path.join(__dirname,"..")))return null;
+    const localRuntime=process.env.OWL_RUNTIME_DEV_URL?.trim()||"";
+    if(!/^http:\/\/127\.0\.0\.1:\d{4,5}$/.test(localRuntime))return null;
+    const stateRoot=process.env.OWL_RUNTIME_DEV_STATE_ROOT?.trim()||
+      path.join(os.homedir(),".owl-runtime-dev");
+    const status=readDevRuntimePermissionStatus(devPermissionStatusFile(stateRoot));
+    return status?.ownerPid===owner.pid?status:null;
+  }
+  function currentRuntimePermissionProjection(){
+    const settings=store.getSettings();
+    if(!app.isPackaged&&devForceConnectivity){
+      const status=verifiedDevPermissionStatus();
+      const envOverride=new Map(Object.entries(status?.flags??{}));
+      const result=runtimePermissionProjection(settings,"",{
+        packaged:false,envOverride,reviewSupportOverride:true,
+        signedKeyConfiguredOverride:status?.reviewReady===true,
+        liveVerified:status?.healthy===true
+      });
+      return {...result,source:"Isolated DEV Runtime",
+       message:!status?"DEV_RUNTIME_POLICY_STATUS_UNAVAILABLE: actual running DEV configuration not yet verified":
+       status.reason?"DEV_RUNTIME_POLICY_"+status.reason:
+       result.restartRequired?"DEV_RUNTIME_POLICY_NOT_APPLIED: waiting for isolated Runtime restart":
+       status.healthy?"DEV_RUNTIME_POLICY_APPLIED: isolated Runtime healthy":
+       "DEV_RUNTIME_POLICY_RESTARTING"};
+    }
+    return runtimePermissionProjection(settings,path.join(os.homedir(),".owl","runtime.env"),{
+      packaged:app.isPackaged,componentFile:path.join(os.homedir(),".owl","current","component.json")});
+  }
+  ipcMain.handle("runtime-permissions:get",()=>currentRuntimePermissionProjection());
   ipcMain.handle("runtime-permissions:set", async (_event,key,mode) => {
     validateRuntimePermissionChange(key,mode);
-    if(key==="gitPush"&&mode==="enabled"){
-      store.setRuntimePermission(key,mode);
-      return {...runtimePermissionProjection(store.getSettings(),path.join(os.homedir(),".owl","runtime.env"),
-        {packaged:app.isPackaged}),changed:true};
-    }
+    assertSafePermissionCombination({
+      ...store.getSettings().runtimePermissionModes,[key]:mode
+    });
+    if(mode==="review"&&app.isPackaged&&installedRuntimeSupportsSignedReview(path.join(os.homedir(),".owl","current","component.json"))!==true)
+      throw new Error("REVIEW_UNAVAILABLE_INSTALLED_RUNTIME_LACKS_SIGNED_APPROVAL");
+    if(mode==="review"&&!app.isPackaged&&!devForceConnectivity)
+      throw new Error("REVIEW_REQUIRES_VERIFIED_MANAGED_RUNTIME");
+    const changeCopy=runtimePermissionChangeCopy(mode);
     const {response}=await dialog.showMessageBox(mainWindow ?? undefined,{
-      type:"warning",buttons:["Cancel",mode==="review"?"Require approval for each action":"Block capability"],
+      type:"warning",buttons:["Cancel",changeCopy.button],
       defaultId:0,cancelId:0,noLink:true,title:"OWL Runtime permission",
-      message:mode==="review"?"Allow this capability only with per-action Runtime review?":"Block this capability at next Runtime restart?",
-      detail:"This preference does not grant a task approval. Exact Task/Step/arguments still require separate Runtime authorization. Saving never restarts your computer.",
+      message:changeCopy.message,detail:changeCopy.detail,
     });
     if(response===1){
       if(mode==="review")store.ensureHumanApprovalSigner();
       store.setRuntimePermission(key,mode);
       record("info","runtime","Permission preference saved, requires Runtime restart",{capability:key,mode});
     }
-    return {...runtimePermissionProjection(store.getSettings(),path.join(os.homedir(),".owl","runtime.env"),
-      {packaged:app.isPackaged}),changed:response===1};
+    return {...currentRuntimePermissionProjection(),changed:response===1};
   });
   ipcMain.handle("runtime-permissions:apply", async () => {
-    if(!app.isPackaged)return {applied:false,reason:"DEV_FULL_RESTART_REQUIRED"};
+    if(!app.isPackaged){
+      const owner=readDevOwner();
+      if(!devForceConnectivity||!ownerMatches(owner,path.join(__dirname,"..")))
+        return {applied:false,reason:"NOT_VERIFIED_OWNED_DEV_RUNTIME"};
+      const {response}=await dialog.showMessageBox(mainWindow??undefined,{
+        type:"warning",buttons:["Cancel","Apply to isolated DEV Runtime"],
+        defaultId:0,cancelId:0,noLink:true,title:"Apply OWL Runtime permissions",
+        message:"Restart only the managed development Runtime to apply these settings?",
+        detail:"This briefly interrupts active DEV tasks. Production Runtime is untouched. No action is approved."
+      });
+      if(response!==1)return {applied:false,reason:"CANCELLED"};
+      if(Object.values(store.getSettings().runtimePermissionModes||{}).includes("review"))
+        store.ensureHumanApprovalSigner();
+      // Only the authenticated dev:full owner receives the local reload signal.
+      process.kill(owner.pid,"SIGHUP");
+      for(let attempt=0;attempt<100;attempt++){
+        await new Promise(resolve=>setTimeout(resolve,150));
+        const status=verifiedDevPermissionStatus();
+        const projection=currentRuntimePermissionProjection();
+        if(status?.healthy===true&&!projection.restartRequired)
+          return {applied:true,source:"Isolated DEV Runtime"};
+      }
+      return {applied:false,reason:"DEV_RUNTIME_APPLY_TIMEOUT"};
+    }
     const bootstrap=createLocalRuntimeBootstrap(store.getSettings());
     if(!bootstrap)return {applied:false,reason:"NOT_DESKTOP_MANAGED_RUNTIME"};
     const {response}=await dialog.showMessageBox(mainWindow ?? undefined,{
@@ -3130,7 +3234,131 @@ if (packagedConnectivityHostSoakOnly) {
     registerIpc();
     record("info", "desktop", "OWL Desktop started", { version: app.getVersion() });
     const settings = store.getSettings();
+    connectivityJournal=createConnectivityIncidentJournal({file:path.join(app.getPath("userData"),"connectivity-incidents.json")});
     createWindow();
+    // Runtime approvals can arrive while OWL Desktop is in the background.
+    // Never reveal paths or command arguments in OS notification previews.
+    const pollApprovalNotifications=async()=>{
+      if(!mainWindow||mainWindow.isDestroyed())return;
+      try{
+        const response=await runtimeClient().approvals();
+        const rows=Array.isArray(response)?response:
+          Array.isArray(response?.approvals)?response.approvals:
+          Array.isArray(response?.result?.approvals)?response.result.approvals:[];
+        const active=new Set();
+        for(const row of rows){
+          if(row?.state!=="pending"||typeof row.id!=="string")continue;
+          active.add(row.id);
+          if(announcedApprovalIds.has(row.id))continue;
+          announcedApprovalIds.add(row.id);
+          if(mainWindow.isFocused()||!Notification.isSupported())continue;
+          const notice=new Notification({
+            title:"OWL LAB · Action approval required",
+            body:"A protected action is waiting. Open OWL LAB to review its exact target."
+          });
+          notice.on("click",()=>{
+            if(mainWindow&&!mainWindow.isDestroyed()){mainWindow.show();mainWindow.focus();}
+          });
+          notice.show();
+        }
+        for(const id of announcedApprovalIds)if(!active.has(id))announcedApprovalIds.delete(id);
+      }catch{/* Transport failures never approve protected actions. */}
+    };
+    approvalNotificationTimer=setInterval(()=>void pollApprovalNotifications(),5000);
+    approvalNotificationTimer.unref?.();
+    void pollApprovalNotifications();
+    // Poll connection health independently from the renderer and from approval
+    // requests. A hidden Desktop still informs the user once per incident.
+    let connectivityPollInFlight=false;
+    const pollConnectivityNotifications=async()=>{
+      if(connectivityPollInFlight)return;
+      connectivityPollInFlight=true;
+      try{
+        const prefs=store.getSettings();
+        const enabled=prefs.connectivityMode==="managed_tunnel"||
+          (prefs.connectivityMode==="custom_tunnel"&&prefs.tunnelEnabled===true);
+        const tunnel=enabled?await tunnelStatus().catch(()=>({state:"unavailable"})):null;
+        // A cheap OS-only interface check catches local link loss promptly,
+        // even before a stale Tunnel health proof expires.
+        const interfaceState=enabled?readLocalNetworkLink():"unknown";
+        const freshNetworkEvidence=interfaceState==="missing"?
+          {link:"missing",dns:"skipped",internet:"skipped"}:
+          connectivityNetworkEvidence;
+        let state=connectivityTracker.sample({enabled,tunnel,
+          network:freshNetworkEvidence,official:connectivityOfficialEvidence});
+        const change=state.event;
+        // Investigate only sustained incidents, at most once per 60s.
+        // Never send credentials or network identifiers to probe endpoints.
+        let sampledNewEvidence=false;
+        if(state.active&&prefs.diagnosticsEnabled===true&&Date.now()-connectivityProbeAt>60_000){
+          connectivityProbeAt=Date.now();
+          connectivityNetworkEvidence=await probeLocalNetwork();
+          connectivityOfficialEvidence=connectivityNetworkEvidence.internet==="reachable"?
+            await probeOpenAiIncidents({at:Date.now(),since:Date.parse(state.incidentSince??"")||Date.now()}):
+            {state:"unknown",overlap:false};
+          state=connectivityTracker.sample({enabled,tunnel,
+            network:connectivityNetworkEvidence,official:connectivityOfficialEvidence});
+          sampledNewEvidence=true;
+        }
+        connectivityIncidentState={...state,event:change};
+        const recordEvidence=(kind)=>connectivityJournal?.record({
+          kind,at:new Date().toISOString(),
+          layer:state.layer,link:connectivityNetworkEvidence?.link,
+          dns:connectivityNetworkEvidence?.dns,internet:connectivityNetworkEvidence?.internet,
+          tunnel:tunnel?.reachability?.state??"unknown",
+          officialStatus:connectivityOfficialEvidence?.state,
+          officialOverlap:connectivityOfficialEvidence?.overlap,
+          officialImpact:connectivityOfficialEvidence?.impact,
+          durationMs:kind==="recovered"&&connectivityIncidentStartedAt?
+            Math.max(0,Date.now()-Date.parse(connectivityIncidentStartedAt)):null
+        });
+        if(change==="degraded"){
+          connectivityIncidentStartedAt=state.incidentSince;
+          connectivityRecordedLayer=state.layer;
+          recordEvidence("degraded");
+        }else if(change==="recovered"){
+          recordEvidence("recovered");
+          connectivityNetworkEvidence=null;
+          connectivityOfficialEvidence=null;
+          connectivityProbeAt=0;
+          connectivityRecordedLayer=null;
+          connectivityIncidentStartedAt=null;
+        }else if(state.phase==="disabled"){
+          connectivityNetworkEvidence=null;
+          connectivityOfficialEvidence=null;
+          connectivityProbeAt=0;
+          connectivityRecordedLayer=null;
+          connectivityIncidentStartedAt=null;
+        }else if(sampledNewEvidence&&state.active&&state.layer!==connectivityRecordedLayer){
+          connectivityRecordedLayer=state.layer;
+          recordEvidence("evidence");
+        }
+        if(!change)return;
+        record(change==="degraded"?"warn":"info","tunnel",
+          change==="degraded"?"Remote Tunnel reachability degraded":"Remote Tunnel reachability recovered",{
+            code:change==="degraded"?"TUNNEL_REACHABILITY_DEGRADED":"TUNNEL_REACHABILITY_RECOVERED"
+          });
+        if(mainWindow?.isDestroyed()!==false||mainWindow.isFocused()||!Notification.isSupported())return;
+        const notice=new Notification({
+          title:change==="degraded"?"OWL LAB · Remote connection unstable":"OWL LAB · Remote connection recovered",
+          body:change==="degraded"?
+            state.layer==="device_network"?"Local network interface unavailable. Check Wi-Fi/Ethernet; local work may continue.":
+            state.layer==="dns"?"Device DNS lookup failed. Check router/DNS settings; local work may continue.":
+            state.layer==="internet_path"?"Independent internet check failed. Check local router/ISP; cause not confirmed.":
+            state.layer==="control_plane"?"Local Tunnel ready but remote control plane degraded. Cause not confirmed.":
+            "Remote tasks may be delayed. Cause unknown; local work may continue. Open OWL LAB to check status.":
+            "Remote reachability is verified again. Check task results in OWL LAB."
+        });
+        notice.on("click",()=>{
+          if(mainWindow&&!mainWindow.isDestroyed()){mainWindow.show();mainWindow.focus();}
+        });
+        notice.show();
+      }catch{/* Connectivity diagnostics must not interrupt Runtime or Desktop. */}
+      finally{connectivityPollInFlight=false;}
+    };
+    connectivityNotificationTimer=setInterval(()=>void pollConnectivityNotifications(),5000);
+    connectivityNotificationTimer.unref?.();
+    void pollConnectivityNotifications();
     await ensurePackagedLocalRuntime(settings);
     await ensurePackagedConnectivityHost().catch((error) => {
       record("error", "connectivity-host-service", "Background Connectivity Host bootstrap failed", {
@@ -3209,6 +3437,8 @@ if (packagedConnectivityHostSoakOnly) {
   });
 
   app.on("before-quit", () => {
+    if(connectivityNotificationTimer)clearInterval(connectivityNotificationTimer);
+    if(approvalNotificationTimer)clearInterval(approvalNotificationTimer);
     usageStatistics?.flush();
     void devAuthCallbackServer?.stop();
     void cloudBridge?.stop();

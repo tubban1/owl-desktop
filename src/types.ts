@@ -1,11 +1,11 @@
 export type RuntimePermissionKey = "gitPush" | "shell" | "delete" | "rollback";
-export type RuntimePermissionMode = "inherit" | "blocked" | "review" | "enabled";
+export type RuntimePermissionMode = "enabled" | "blocked" | "review";
 export type RuntimePermissionProjection = {
-  version:number;packaged:boolean;restartRequired:boolean;approvalPolicyPending:boolean;changed?:boolean;
-  liveRuntimeEffective:"unverified";approvalModeConfigured:boolean;message:string;
+  version:number;packaged:boolean;restartRequired:boolean;approvalPolicyPending:boolean;changed?:boolean;installedRuntimeSupportsReview:boolean|null;source?:string;
+  liveRuntimeEffective:"unverified"|"verified";approvalModeConfigured:boolean;message:string;
   items:Array<{key:RuntimePermissionKey;label:string;envName:string;
     mode:RuntimePermissionMode;configured:boolean;configuredSource:string;
-    pendingApply:boolean;requiresExactRuntimeApproval:boolean;liveEffective:"unverified"}>;
+    pendingApply:boolean;reviewConfigured:boolean;requiresExactRuntimeApproval:boolean;liveEffective:"unverified"|"verified"}>;
 };
 
 export type Settings = {
@@ -168,6 +168,22 @@ export type TunnelStatus = {
 
 
 
+export type ConnectivityTimelineEntry = {
+ id:string;at:string;kind:"degraded"|"evidence"|"recovered";
+ layer:string;link:string;dns:string;internet:string;tunnel:string;
+ officialStatus:string;officialOverlap:boolean;officialImpact:string;durationMs:number|null;
+};
+export type ConnectivityIncidentState = {
+  layer?:"device_network"|"dns"|"internet_path"|"tunnel_local"|"control_plane"|"unknown"|"healthy";
+  network?:{link:string;dns:string;internet:string;at:string}|null;
+  official?:{state:string;overlap:boolean;impact?:string|null}|null;
+  phase:"disabled"|"unknown"|"healthy"|"recovering"|"degraded";
+  severity:"info"|"warning";
+  title:string;detail:string;active:boolean;visible:boolean;
+  incidentSince:string|null;lastRecoveredAt:string|null;
+  event:"degraded"|"recovered"|null;
+  everObserved:boolean;
+};
 export type RuntimeAccessState = {
   schemaVersion: 1;
   mode: "compat" | "enforced";
@@ -589,6 +605,9 @@ export type PlannerContinuationOwner = {
 
 export type PlannerContinuationSummary = {
   activeCheckpointCount: number;
+  currentlyActiveCheckpointCount?: number;
+  staleActiveCheckpointCount?: number;
+  waitingReconnectCheckpointCount?: number;
   connectedOwnerCount: number;
   readyHandoffCount?: number;
   latestReadyHandoff?: PlannerHandoff | null;

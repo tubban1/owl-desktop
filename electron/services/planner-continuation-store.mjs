@@ -1285,6 +1285,20 @@ export class PlannerContinuationStore {
         owner?.checkpoint &&
         owner.checkpoint.status !== "completed",
     );
+    // Do not conflate a recoverable, disconnected checkpoint with an
+    // actively executing workstream. Projection only; never mutate history.
+    const activityAgeMs=(owner)=>{
+      const stamp=Date.parse(owner.workstream?.lastProgressAt ??
+        owner.workstream?.updatedAt ?? owner.checkpoint?.updatedAt ??
+        owner.updatedAt ?? "");
+      return Number.isFinite(stamp)?Math.max(0,nowMs-stamp):Infinity;
+    };
+    const liveActive=active.filter(owner=>owner.plannerConnected &&
+      activityAgeMs(owner)<=5*60_000);
+    const staleActive=active.filter(owner=>!owner.plannerConnected &&
+      activityAgeMs(owner)>15*60_000);
+    const waitingReconnect=active.filter(owner=>!owner.plannerConnected &&
+      activityAgeMs(owner)<=15*60_000);
     const readyHandoffs = Object.values(state.handoffs ?? {})
       .filter((handoff) => handoff?.status === "ready")
       .sort(
@@ -1293,7 +1307,10 @@ export class PlannerContinuationStore {
           Date.parse(a.updatedAt ?? a.createdAt ?? ""),
       );
     return {
-      activeCheckpointCount: active.length,
+      activeCheckpointCount: active.length, // legacy recoverable count
+      currentlyActiveCheckpointCount:liveActive.length,
+      staleActiveCheckpointCount:staleActive.length,
+      waitingReconnectCheckpointCount:waitingReconnect.length,
       readyHandoffCount: readyHandoffs.length,
       latestReadyHandoff: compactHandoff(readyHandoffs[0] ?? null),
       connectedOwnerCount: owners.filter((owner) => owner.plannerConnected).length,

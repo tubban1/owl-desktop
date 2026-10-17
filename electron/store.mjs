@@ -4,7 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { app, safeStorage } from "electron";
 import { normalizeOnboardingState } from "./services/onboarding-state.mjs";
-import { normalizeRuntimePermissionModes, validateRuntimePermissionChange } from "./services/runtime-permissions.mjs";
+import { normalizeRuntimePermissionModes, validateRuntimePermissionChange, readRuntimeEnvFlags } from "./services/runtime-permissions.mjs";
 import {createHumanApprovalSigner} from "./services/human-approval-signer.mjs";
 
 const readJson = (file, fallback) => {
@@ -93,8 +93,13 @@ export class DesktopStore {
             .filter((value) => fs.existsSync(value)),
         )]
       : standardFolders;
-    settings.runtimePermissionModes=normalizeRuntimePermissionModes(settings.runtimePermissionModes);
-    if (!stored.sessionId) writeJson(this.settingsFile, settings);
+    // One-time migration of inherit/missing modes to real explicit states.
+    settings.runtimePermissionModes=normalizeRuntimePermissionModes(
+      settings.runtimePermissionModes,
+      readRuntimeEnvFlags(path.join(os.homedir(),".owl","runtime.env")));
+    if (!stored.sessionId ||
+        JSON.stringify(stored.runtimePermissionModes)!==JSON.stringify(settings.runtimePermissionModes))
+      writeJson(this.settingsFile,settings);
     return settings;
   }
 

@@ -159,6 +159,9 @@ describe("PlannerContinuationStore", () => {
 
     const summary = store.summary();
     expect(summary.activeCheckpointCount).toBe(1);
+    expect(summary.currentlyActiveCheckpointCount).toBe(0);
+    expect(summary.waitingReconnectCheckpointCount).toBe(1);
+    expect(summary.staleActiveCheckpointCount).toBe(0);
     expect(summary.latestActive.checkpoint.goal).toBe("Active");
     expect(summary.owners).toHaveLength(2);
     expect(summary.progressPolicy).toEqual({
@@ -167,6 +170,17 @@ describe("PlannerContinuationStore", () => {
     });
   });
 
+  it("marks disconnected old active checkpoints as stale, without closing history",()=>{
+    const store=createStore();
+    store.checkpoint("owl-owner:old",{
+      status:"active",goal:"Recovery required",nextActions:["resume"]
+    },"2026-09-01T10:00:00.000Z");
+    const result=store.summary();
+    expect(result.activeCheckpointCount).toBe(1);
+    expect(result.currentlyActiveCheckpointCount).toBe(0);
+    expect(result.staleActiveCheckpointCount).toBe(1);
+    expect(result.owners[0].checkpoint.status).toBe("active");
+  });
   it("preserves client metadata in the multi-owner summary", () => {
     const store = createStore();
     store.noteTransportActivity(

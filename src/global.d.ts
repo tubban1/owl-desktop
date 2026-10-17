@@ -23,6 +23,8 @@ import type {
   UserSkillRegistrySummary,
   WorkflowSkillDiscoveryResult,
   TunnelStatus,
+  ConnectivityIncidentState,
+  ConnectivityTimelineEntry,
 } from "./types";
 
 declare global {
@@ -32,6 +34,7 @@ declare global {
       listActivity(): Promise<ActivityEntry[]>;
       statistics(): Promise<import("./statistics/statisticsModel").UsageStatisticsSnapshot>;
       refreshRuntime(options?: { quiet?: boolean; detailedMcp?: boolean }): Promise<RuntimeSnapshot>;
+      listRuntimeApprovals(): Promise<unknown>;
       approveRuntimeApproval(approvalId: string): Promise<unknown>;
       denyRuntimeApproval(approvalId: string): Promise<unknown>;
       monitorTaskDetail(
@@ -180,6 +183,8 @@ declare global {
       hostRestart(): Promise<HostStatus>;
       hostStop(): Promise<HostStatus>;
       tunnelStatus(): Promise<TunnelStatus>;
+      connectivityIncident(): Promise<ConnectivityIncidentState>;
+      connectivityTimeline(): Promise<ConnectivityTimelineEntry[]>;
       tunnelStart(): Promise<TunnelStatus>;
       tunnelStop(): Promise<TunnelStatus>;
       listAccounts(): Promise<AccountMeta[]>;
@@ -187,6 +192,8 @@ declare global {
       getInstagramConfig(): Promise<{appId:string;secretConfigured:boolean;redirectUri:string|null}>;
       saveInstagramConfig(input:{appId:string;appSecret:string}): Promise<{appId:string;secretConfigured:boolean}>;
       connectInstagramAccount(id:string): Promise<AccountMeta>;
+      chooseInstagramReel(): Promise<string|null>;
+      publishInstagramReel(input:{accountId:string;mediaPath:string;caption:string;approved:true}): Promise<{published:boolean;replayed:boolean;mediaId:string;permalink:string}>;
       getYoutubeClientSecretStatus(): Promise<{configured:boolean}>;
       saveYoutubeClientSecret(value:string): Promise<{configured:boolean}>;
       upsertAccount(input: {

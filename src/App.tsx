@@ -6,7 +6,7 @@ import {
   AlertTriangle, ArrowRight, BrainCircuit, Clock3, FolderOpen, X,
   ChartNoAxesCombined, Laptop,
 } from "lucide-react";
-import type { AccountMeta, ActivityEntry, AgentRequest, CloudAccountStatus, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
+import type { AccountMeta, ActivityEntry, AgentRequest, CloudAccountStatus, ConnectivityIncidentState, ConnectivityTimelineEntry, DesktopEnvironment, RuntimeSnapshot, SecretMeta, Settings } from "./types";
 import { SkillsPage } from "./skills/SkillsPage";
 import { deriveWorkState } from "./workState";
 import { executionAccessView } from "./executionAccessView";
@@ -121,6 +121,9 @@ export default function App() {
   const [env, setEnv] = useState<DesktopEnvironment | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
+  const [connectivityIncident,setConnectivityIncident]=useState<ConnectivityIncidentState|null>(null);
+  const [connectivityTimeline,setConnectivityTimeline]=useState<ConnectivityTimelineEntry[]>([]);
+  const [liveApprovals,setLiveApprovals]=useState<unknown>(null);
   const [cloudAccount, setCloudAccount] = useState<CloudAccountStatus | null>(null);
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [accounts, setAccounts] = useState<AccountMeta[]>([]);
@@ -130,6 +133,12 @@ export default function App() {
   const [instagramAppSecretDraft,setInstagramAppSecretDraft]=useState("");
   const [instagramConfig,setInstagramConfig]=useState<{appId:string;secretConfigured:boolean;redirectUri:string|null}|null>(null);
   const [instagramNotice,setInstagramNotice]=useState("");
+  const [instagramReelFile,setInstagramReelFile]=useState("");
+  const [instagramReelCaption,setInstagramReelCaption]=useState(
+    "给 Manta AI 老师的一束花 🌸\n\n从一句心意开始，用 AI 与数字花艺创造独一无二的花束。\nBloomroom — 让心意开花。\n\nhttps://flower.fde.fan\n\n#Bloomroom #AI花艺 #数字花艺 #MantaAI"
+  );
+  const [instagramPublishNotice,setInstagramPublishNotice]=useState("");
+  const [instagramPublishedLink,setInstagramPublishedLink]=useState("");
   const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
   const [liveActivity, setLiveActivity] = useState<ActivityEntry[]>([]);
   const [usageStats, setUsageStats] = useState<UsageStatisticsSnapshot | null>(null);
@@ -336,6 +345,31 @@ export default function App() {
     return unsubscribe;
   }, []);
 
+  useEffect(()=>{
+    if(page!=="settings")return;
+    let live=true;
+    const load=()=>void window.owlDesktop.connectivityTimeline()
+      .then(rows=>{if(live)setConnectivityTimeline(rows);}).catch(()=>undefined);
+    load();
+    const timer=window.setInterval(load,15000);
+    return()=>{live=false;window.clearInterval(timer);};
+  },[page]);
+  // Connectivity alerts are tracked by Electron even while the UI is hidden.
+  useEffect(()=>{
+    let mounted=true;
+    const read=async()=>{
+      try{
+        const item=await window.owlDesktop.connectivityIncident();
+        if(mounted)setConnectivityIncident(item);
+      }catch{/* Never invent a healthy state after a failed IPC. */}
+    };
+    void read();
+    const timer=window.setInterval(()=>{if(!document.hidden)void read();},5000);
+    const visible=()=>{if(!document.hidden)void read();};
+    document.addEventListener("visibilitychange",visible);
+    return()=>{mounted=false;window.clearInterval(timer);
+      document.removeEventListener("visibilitychange",visible);};
+  },[]);
   useEffect(() => {
     if (page !== "overview" && page !== "monitor") return;
     const intervalMs = page === "monitor" ? 3000 : 5000;
@@ -395,6 +429,7 @@ export default function App() {
 
   const approveRuntimeApproval = async (approvalId: string) => {
     await window.owlDesktop.approveRuntimeApproval(approvalId);
+    await window.owlDesktop.listRuntimeApprovals().then(setLiveApprovals).catch(()=>undefined);
     await refresh(false);
     setNotice("Approved · Runtime may continue the exact protected action");
     window.setTimeout(() => setNotice(""), 2400);
@@ -402,6 +437,7 @@ export default function App() {
 
   const denyRuntimeApproval = async (approvalId: string) => {
     await window.owlDesktop.denyRuntimeApproval(approvalId);
+    await window.owlDesktop.listRuntimeApprovals().then(setLiveApprovals).catch(()=>undefined);
     await refresh(false);
     setNotice("Denied · protected action remains blocked");
     window.setTimeout(() => setNotice(""), 2400);
@@ -614,6 +650,21 @@ export default function App() {
     }finally{setBusy(false);}
   };
 
+  const publishInstagramAccount=async(id:string)=>{
+    if(!instagramReelFile||!instagramReelCaption.trim())return;
+    if(!window.confirm("Publish this Reel publicly to the connected Instagram professional account?"))return;
+    setBusy(true);setInstagramPublishNotice("");setInstagramPublishedLink("");
+    try{
+      const result=await window.owlDesktop.publishInstagramReel({
+        accountId:id,mediaPath:instagramReelFile,caption:instagramReelCaption,approved:true
+      });
+      setInstagramPublishedLink(result.permalink);
+      setInstagramPublishNotice(result.replayed?"Previously published Reel verified.":"Instagram Reel published and verified.");
+    }catch(error){
+      setInstagramPublishNotice(error instanceof Error?error.message:"Instagram publish failed.");
+    }finally{setBusy(false);}
+  };
+
   const addAccount = async () => {
     if (!accountDraft.service.trim() || !accountDraft.label.trim()) return;
     await window.owlDesktop.upsertAccount({
@@ -705,9 +756,29 @@ export default function App() {
       ),
     [agentRequests],
   );
+  // Keep action approvals visible on every Desktop page, even when the
+  // expensive Runtime/Cloud overview snapshot is not being refreshed.
+  useEffect(()=>{
+    let alive=true,inFlight=false;
+    const poll=async()=>{
+      if(inFlight||document.hidden)return;
+      inFlight=true;
+      try{
+        const result=await window.owlDesktop.listRuntimeApprovals();
+        if(alive)setLiveApprovals(result);
+      }catch{/* Connection status is reported independently by Runtime UI. */}
+      finally{inFlight=false;}
+    };
+    const visible=()=>{if(!document.hidden)void poll();};
+    void poll();
+    document.addEventListener("visibilitychange",visible);
+    const timer=window.setInterval(()=>void poll(),3000);
+    return ()=>{alive=false;window.clearInterval(timer);
+      document.removeEventListener("visibilitychange",visible);};
+  },[]);
   const pendingRuntimeApprovals = useMemo(
-    () => pendingApprovals(snapshot?.approvals),
-    [snapshot?.approvals],
+    () => pendingApprovals(liveApprovals??snapshot?.approvals),
+    [liveApprovals,snapshot?.approvals],
   );
   const runtimeEventStatus = snapshot?.runtimeEvents;
   const runtimeEventNeedsAttention =
@@ -1015,6 +1086,30 @@ export default function App() {
       </header>
 
       <div className="content">
+        {connectivityIncident?.visible&&
+          <section className={"connection-incident "+(connectivityIncident.active?"degraded":"recovered")}
+            role={connectivityIncident.active?"alert":"status"}>
+            {connectivityIncident.active?<WifiOff size={19}/>:<CheckCircle2 size={19}/>}
+            <div className="connection-incident-copy">
+              <strong>{connectivityIncident.active?
+                (connectivityIncident.phase==="recovering"?"远程连接恢复中":
+                 connectivityIncident.layer==="device_network"?"本机网络接口异常":
+                 connectivityIncident.layer==="dns"?"本机 DNS 解析异常":
+                 connectivityIncident.layer==="internet_path"?"公网连接疑似异常":
+                 connectivityIncident.layer==="tunnel_local"?"本地 Tunnel 检查异常":
+                 connectivityIncident.layer==="control_plane"?"远程控制平面异常":
+                 "远程连接异常 · 来源尚未确认"):
+                "远程连接已恢复"}</strong>
+              <p>{connectivityIncident.detail}</p>
+            </div>
+            <button className="secondary" type="button" onClick={()=>setPage("monitor")}>查看任务</button>
+            <button className="text-button" type="button" onClick={()=>setPage("settings")}>连接诊断</button>
+            <a className="connection-status-link" href="https://status.openai.com" target="_blank" rel="noopener noreferrer" title="Official provider status does not prove the cause of this connection issue">OpenAI 状态</a>
+          </section>}
+        {page!=="overview"&&page!=="settings"&&page!=="monitor"&&
+          pendingRuntimeApprovals.length>0&&
+          <ApprovalAttention approvals={liveApprovals??snapshot?.approvals}
+            onApprove={approveRuntimeApproval} onDeny={denyRuntimeApproval} />}
         {page === "overview" && <>
           <SectionHeader title="Your OWL" description="See what OWL is doing, whether it is waiting, and what needs your attention." action={<button className="primary" onClick={runReadinessAction} disabled={busy}>{productReadiness.state === "READY" ? <RefreshCw size={15} /> : <ArrowRight size={15} />}{readinessActionLabel}</button>} />
           <section className={"hero-status " + (readinessReady ? "healthy" : "warning")}>
@@ -1051,7 +1146,7 @@ export default function App() {
           </section>
 
           <ApprovalAttention
-            approvals={snapshot?.approvals}
+            approvals={liveApprovals??snapshot?.approvals}
             onApprove={approveRuntimeApproval}
             onDeny={denyRuntimeApproval}
             compact
@@ -1590,6 +1685,27 @@ export default function App() {
                 </div>
                 {["youtube","instagram"].includes(account.connectedProvider??"") && account.connectedTargetId &&
                   <small className="identity-card-channel">{account.connectedTargetTitle} · {account.connectedTargetId}</small>}
+                {account.connectedProvider==="instagram"&&account.status==="ready"&&
+                 account.connectedClientId===instagramConfig?.appId&&
+                  <section className="instagram-reel-publisher" aria-label="Instagram official Reels publisher">
+                    <strong>Instagram Reel · Local publishing</strong>
+                    <p role="status">Instagram Login is connected, but Meta does not allow local binary Reel uploads with this authorization mode. Direct local API upload requires Facebook Login for Business. OWL Cloud and S3 are not used for publishing.</p>
+                    <div className="instagram-reel-media-row">
+                      <input aria-label="Reel MP4 file" placeholder="Local MP4 file path"
+                        value={instagramReelFile} onChange={event=>setInstagramReelFile(event.target.value)}/>
+                      <button type="button" className="secondary" disabled={busy}
+                        onClick={()=>void window.owlDesktop.chooseInstagramReel().then(file=>{
+                          if(file)setInstagramReelFile(file);
+                        })}>Choose MP4</button>
+                    </div>
+                    <textarea aria-label="Instagram Reel caption" rows={4} maxLength={2200}
+                      value={instagramReelCaption} onChange={event=>setInstagramReelCaption(event.target.value)}/>
+                    <button type="button" className="primary" disabled={true}
+                      title="Requires Facebook Login for Business direct-upload authorization"
+                      onClick={()=>void publishInstagramAccount(account.id)}>Publish Reel</button>
+                    {instagramPublishNotice&&<p role="status">{instagramPublishNotice}</p>}
+                    {instagramPublishedLink&&<a href={instagramPublishedLink} target="_blank" rel="noreferrer">View published Reel</a>}
+                  </section>}
                 {account.lastInstagramOauthError &&
                   <div role="alert" className="oauth-inline-error">
                     Instagram authorization incomplete: {account.lastInstagramOauthError}
@@ -1657,6 +1773,24 @@ export default function App() {
 
         {page === "settings" && settings && <>
           <SectionHeader title="Settings" description="Everyday preferences first. Technical connection details stay out of the way." />
+          <section className="panel settings-panel">
+            <div className="panel-heading"><div><span className="eyebrow">CONNECTIVITY DIAGNOSTICS</span><h3>最近的远程连接故障</h3></div>
+              <span className="neutral-pill">本机脱敏记录</span></div>
+            <p className="panel-help">分层判断网络接口、DNS、独立公网连通性与 Tunnel 控制平面。启用 Diagnostics 后，仅在持续异常期间最多每分钟向 Cloudflare 公网测试端点及 OpenAI 官方状态 API 请求一次；对方可看到正常 HTTPS 请求的公网来源地址，但不会收到项目内容或凭据。同期 OpenAI 公告不等于已确定根因。</p>
+            {connectivityTimeline.length===0?
+              <p className="panel-help">暂无记录。发生持续异常后将自动生成故障及恢复时间线。</p>:
+              <div className="connectivity-timeline">
+                {connectivityTimeline.slice(0,20).map(entry=>
+                  <div className="connectivity-timeline-row" key={entry.id}>
+                    <span>{new Date(entry.at).toLocaleString()}</span>
+                    <strong>{entry.kind==="degraded"?"发生异常":entry.kind==="recovered"?"已恢复":"发现新证据"}</strong>
+                    <span>{entry.layer==="device_network"?"本地网络":entry.layer==="dns"?"DNS":entry.layer==="internet_path"?"公网路径":entry.layer==="tunnel_local"?"本地 Tunnel":entry.layer==="control_plane"?"控制平面":entry.layer==="healthy"?"连接健康":"原因未确定"}</span>
+                    <span>DNS {entry.dns} · Internet {entry.internet}</span>
+                    {entry.officialOverlap&&<span>同期 OpenAI 公告（非因果判定）</span>}
+                    {entry.durationMs!==null&&<span>{Math.round(entry.durationMs/1000)} 秒</span>}
+                  </div>)}
+              </div>}
+          </section>
 
           <section className="panel settings-panel everyday-settings">
             <div className="panel-heading">
@@ -1699,7 +1833,7 @@ export default function App() {
             </div>
           </section>
 
-          <RuntimePermissionCenter approvals={snapshot?.approvals} access={runtimeAccess}
+          <RuntimePermissionCenter approvals={liveApprovals??snapshot?.approvals} access={runtimeAccess}
             endpoint={snapshot?.runtimeEndpoint} onApprove={approveRuntimeApproval}
             onDeny={denyRuntimeApproval} />
           <section className="panel settings-panel folder-settings">

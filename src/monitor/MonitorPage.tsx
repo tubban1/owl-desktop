@@ -554,6 +554,13 @@ function WorkstreamsView({
         <SummaryMetric label="Waiting" value={board.waitingCount} detail="user / runtime / external" />
         <SummaryMetric label="Attention" value={board.attentionCount} detail="needs intervention" />
       </section>
+      {(board.staleCheckpointCount||board.reconnectingCheckpointCount)?(
+        <p className="panel-help" role="status">
+          Historical workstreams: {board.staleCheckpointCount??0} stale inactive,
+          {" "}{board.reconnectingCheckpointCount??0} awaiting reconnection.
+          These are recoverable records, not currently executing tasks.
+        </p>
+      ):null}
 
       <section className="panel workstream-board">
         <div className="panel-heading">

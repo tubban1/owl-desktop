@@ -140,13 +140,14 @@ describe("LocalRuntimeBootstrap", () => {
     const env=fs.readFileSync(path.join(f.home,".owl","runtime.env"),"utf8");
     expect(env).toContain("ALLOW_GIT_PUSH=true");
     expect(env).toContain("ALLOW_SHELL=false");
-    expect(env).toContain("ALLOW_DELETE=true");
+    expect(env).toContain("ALLOW_DELETE=false");
     expect(env).toContain("ALLOW_ROLLBACK=false");
     expect(env).toContain("OWL_APPROVAL_MODE=enforce");
     expect(env).toContain("OWL_APPROVAL_ACTIONS=");
     expect(env).not.toContain("git.push");
-    expect(env).toContain("shell.exec");
-    expect(env).toContain("tx.rollback");
+    expect(env).toContain("fs.delete");
+    expect(env).not.toContain("shell.exec");
+    expect(env).not.toContain("tx.rollback");
   });
 
   it("installs packaged components and prepares a safe local Runtime", async () => {

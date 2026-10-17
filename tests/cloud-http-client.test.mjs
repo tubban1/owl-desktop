@@ -65,6 +65,40 @@ describe("CloudHttpClient", () => {
     });
   });
 
+  it("retries a transient GET within its existing timeout budget",async()=>{
+    const fetchImpl=vi.fn()
+      .mockRejectedValueOnce(new Error("network interrupted"))
+      .mockResolvedValueOnce(jsonResponse({ok:true}));
+    const client=new CloudHttpClient({
+      baseUrl:"https://cloud.example.test",fetchImpl,timeoutMs:2_500
+    });
+    expect(await client.health()).toEqual({ok:true});
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    for(const [,request] of fetchImpl.mock.calls){
+      expect(request.method).toBe("GET");
+      expect(request.signal).toBeDefined();
+    }
+  });
+  it("never automatically replays a write after a transient failure",async()=>{
+    const fetchImpl=vi.fn().mockRejectedValue(new Error("transient"));
+    const client=new CloudHttpClient({
+      baseUrl:"https://cloud.example.test",deviceCredential:"owldev1.test.secret",
+      fetchImpl,timeoutMs:2_500
+    });
+    await expect(client.heartbeat({ok:true})).rejects.toMatchObject({
+      code:"CLOUD_NETWORK_ERROR"
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+  it("does not retry authorization failures",async()=>{
+    const fetchImpl=vi.fn(async()=>jsonResponse({error:"UNAUTHORIZED"},401));
+    const client=new CloudHttpClient({
+      baseUrl:"https://cloud.example.test",fetchImpl,timeoutMs:2_500
+    });
+    await expect(client.health()).rejects.toMatchObject({status:401});
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("uses Bearer auth for account-scoped device registration", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
