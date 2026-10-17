@@ -276,15 +276,20 @@ New workstreams now use progressAckProtocol=2:
     threshold reached
       -> persist progressBoundary.pending
       -> block substantive OWL tools
-      -> planner emits progressBoundary.userVisibleProgress to the user
-      -> workstream_progress acknowledges the exact boundaryId + visible text
-      -> gate clears
+      -> planner emits a genuine visible update (can be localized/paraphrased)
+      -> workstream_progress acknowledges the owner-scoped boundaryId
+         and explicitly attests visible_progress_reported=true
+      -> gate clears (legacy exact-text ACK remains accepted)
       -> tool work may continue
 
 The MCP server cannot inspect the ChatGPT UI itself, so it cannot independently
-prove that pixels were rendered. The protocol therefore makes the acknowledgement
-explicit and persistent rather than pretending MCP can inject an assistant
-message.
+prove that pixels were rendered. The structured ACK therefore records the
+planner's explicit attestation *after* a visible message; it never treats a
+boundary ID alone as sufficient proof. A matching boundary ID is required,
+stale and cross-workstream IDs are rejected, and duplicate confirmations are
+idempotent (no extra checkpoint revisions). Legacy clients may still ACK with
+the exact originally supplied text. The canonical pending progress text is
+recorded for auditing; no full assistant transcript is required.
 
 Rollout is backward compatible. Workstreams created before protocol v2 remain on
 legacy_soft behavior so an already-open Chat with a cached tool catalog cannot be

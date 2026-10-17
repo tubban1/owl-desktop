@@ -540,7 +540,7 @@ function progressBoundaryError(context, pending, fallbackTool) {
     : null;
 
   const error = new Error(
-    "Progress acknowledgement pending. The required boundary identifier and visible progress text are supplied in progressBoundary. State-changing operations remain unavailable until their matching acknowledgement is recorded.",
+    "Visible progress acknowledgement pending. First post a user-visible update, then acknowledge with the matching boundaryId and visible_progress_reported=true (or use legacy exact text). State-changing operations remain blocked until acknowledgement.",
   );
   error.code = "PROGRESS_UPDATE_REQUIRED";
   error.progressBoundary = {
@@ -555,6 +555,7 @@ function progressBoundaryError(context, pending, fallbackTool) {
     boundaryRecorded: false,
     acknowledgementRequired: true,
     acknowledgementTool: "workstream_progress",
+    acknowledgementProtocol: "boundary_id_plus_visible_attestation",
     retryTool: pending.retryTool ?? fallbackTool,
     recommendedUpdateIntervalMs: WORKSTREAM_PROGRESS_MAX_SILENCE_MS,
     recommendedMaxToolStepsWithoutUpdate: WORKSTREAM_PROGRESS_MAX_STEPS,
@@ -1172,7 +1173,7 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
         "When the user starts a new Chat and asks to continue prior OWL work, or when the prior conversation context is unavailable, call conversation_handoff_latest before creating a new workstream or replacement Runtime Task. If a ready handoff exists, resume its sourceWorkstreamId with workstream_open(resume_workstream_id=...) and inspect existing Runtime work before continuing.",
         "Before intentionally changing ChatGPT conversations during active work, save a compact planner_checkpoint and call conversation_handoff_prepare. Consume the handoff only after the receiving planner has successfully rebound to the original workstream. A Planner Handoff changes planner transport, not Runtime Task identity or workspace execution authority.",
         "For multi-step planning or coding work that spans several tool calls, maintain a planner_checkpoint after meaningful milestones and before long-running operations. Store only compact operational context: goal, phase, completed evidence, next actions, decisions, constraints, do-not-repeat guidance and workspace refs. Never store secrets, passwords, tokens or full conversation text in the checkpoint. Mark it complete when the goal is finished.",
-        "Progress reporting is part of the interactive contract. During active multi-step work, do not silently issue more than 3 substantive tool steps or leave the user without a concise visible progress update for roughly 10 seconds. OWL enforces this boundary with PROGRESS_UPDATE_REQUIRED. When that boundary is returned, STOP substantive tool work: do not retry the blocked tool and do not call a different substantive OWL tool. First emit progressBoundary.userVisibleProgress as a normal user-visible assistant commentary message. Then call workstream_progress with progress_boundary_id=progressBoundary.boundaryId and user_visible_progress exactly equal to progressBoundary.userVisibleProgress. Only after that acknowledgement succeeds may you continue. If your host cannot emit a visible commentary message mid-turn, end the turn with that progress text instead of silently continuing. At each progress boundary, if the remaining steps are already known, prefer one task_submit with verification over many individual MCP calls. Do not spam trivial updates and never invent progress.",
+        "Progress reporting is mandatory during active multi-step work. OWL enforces periodic updates with PROGRESS_UPDATE_REQUIRED. When returned, STOP substantive tool calls. First post a genuine user-visible message in the host conversation (you may localize or summarize the supplied progressBoundary.userVisibleProgress, without inventing facts). Only then call workstream_progress with progress_boundary_id=progressBoundary.boundaryId and visible_progress_reported=true; legacy exact user_visible_progress is also accepted. The flag is an attestation, not independent evidence from the UI. Retry the blocked tool only after acknowledgement succeeds. If the host cannot emit a visible message mid-turn, end the turn with progress instead. Prefer task_submit for known remaining steps. Never fabricate progress or silently bypass the boundary.",
         "When a durable Task remains active during an interactive ChatGPT turn, use its real progress projection in those user-visible updates before the frontend would otherwise sit silent too long. Never infer completion before canonical Task state is terminal.",
         "For work on another OWL device, call device_list first and choose an explicit device_id. Use remote_task_submit with a stable submission_id; after reconnect or response loss, reuse the exact same submission_id and arguments or call remote_task_status. Never create replacement remote work while the prior submission outcome is uncertain.",
       ].join(" "),
@@ -3159,7 +3160,7 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
   tool(
     server,
     "workstream_progress",
-    "Record a concise workstream progress update. For a pending PROGRESS_UPDATE_REQUIRED boundary, progress_boundary_id and user_visible_progress must exactly match the published boundary; only a matching acknowledgement releases state-changing operations. The record excludes full chat transcripts and private content.",
+    "Record concise progress. When a boundary is pending, first emit a real user-visible commentary update. Then acknowledge with progress_boundary_id and visible_progress_reported=true; legacy exact user_visible_progress is still accepted. The boundary is workstream-scoped and idempotent. Never attest without first showing an update.",
     {
       completed: z.array(z.string().min(1).max(600)).max(20).optional(),
       current: z.string().min(1).max(600).optional(),
@@ -3167,6 +3168,7 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
       summary: z.string().min(1).max(1600).optional(),
       progress_boundary_id: z.string().min(1).max(220).optional(),
       user_visible_progress: z.string().min(1).max(2400).optional(),
+      visible_progress_reported: z.boolean().optional(),
       status: z.enum([
         "active",
         "waiting_runtime",
@@ -3188,6 +3190,7 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
       summary,
       progress_boundary_id,
       user_visible_progress,
+      visible_progress_reported,
       status,
     }) => {
       const context = currentMcpRequestContext();
@@ -3214,6 +3217,9 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
           ...(user_visible_progress
             ? { userVisibleProgress: user_visible_progress }
             : {}),
+          ...(visible_progress_reported === true
+            ? { visibleProgressReported: true }
+            : {}),
           status: status ?? "active",
         },
       );
@@ -3235,9 +3241,16 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
         current: resolvedCurrent,
         nextActions: next_actions ?? [],
         acknowledgedBoundaryId: progress_boundary_id ?? null,
-        userVisibleProgress: user_visible_progress ?? visibleProgress,
+        acknowledgementMode: progress_boundary_id
+          ? owner.workstream?.lastAcknowledgedProgressBoundary?.acknowledgementMode ??
+            (visible_progress_reported === true ? "structured" : "legacy_text")
+          : null,
+        userVisibleProgress: progress_boundary_id
+          ? owner.workstream?.lastAcknowledgedProgressBoundary?.userVisibleProgress ??
+            user_visible_progress ?? visibleProgress
+          : user_visible_progress ?? visibleProgress,
         instruction:
-          "Surface userVisibleProgress to the user before continuing substantive OWL tool work. If the remaining steps are known in advance, prefer one task_submit over many interactive tool calls.",
+          "Post visible progress before acknowledging a pending boundary; acknowledgement does not independently prove UI delivery. If remaining steps are known, prefer task_submit.",
         durableExecution: DURABLE_EXECUTION_RECOMMENDATION,
       };
     },

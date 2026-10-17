@@ -398,7 +398,9 @@ export class PlannerContinuationStore {
     if (!pendingBoundary?.pending && input.progressBoundaryId) {
       const prior = owner.workstream.lastAcknowledgedProgressBoundary;
       if (prior?.boundaryId === input.progressBoundaryId &&
-          prior?.userVisibleProgress === input.userVisibleProgress) {
+          (input.visibleProgressReported === true ||
+            prior?.userVisibleProgress === input.userVisibleProgress)) {
+        // Retried acknowledgements are idempotent and owner-scoped.
         return compactOwner(owner);
       }
       const error = new Error("PROGRESS_ACK_STALE: no matching boundary.");
@@ -414,13 +416,16 @@ export class PlannerContinuationStore {
         error.progressBoundary = pendingBoundary;
         throw error;
       }
-      if (
-        typeof input.userVisibleProgress !== "string" ||
-        input.userVisibleProgress.trim() !==
-          String(pendingBoundary.userVisibleProgress ?? "").trim()
-      ) {
+      // Structured ACK attests that a *previously posted* user-visible
+      // update exists. Localized messages need not equal generated English.
+      // Legacy callers can still submit the exact pending text.
+      const legacyTextMatched =
+        typeof input.userVisibleProgress === "string" &&
+        input.userVisibleProgress.trim() ===
+          String(pendingBoundary.userVisibleProgress ?? "").trim();
+      if (input.visibleProgressReported !== true && !legacyTextMatched) {
         const error = new Error(
-          "PROGRESS_VISIBLE_UPDATE_REQUIRED: user_visible_progress must match the pending progress update exactly.",
+          "PROGRESS_VISIBLE_UPDATE_REQUIRED: post a user-visible progress update first; then acknowledge with visible_progress_reported=true and the pending boundary ID, or use legacy exact text.",
         );
         error.code = "PROGRESS_VISIBLE_UPDATE_REQUIRED";
         error.progressBoundary = pendingBoundary;
@@ -457,6 +462,8 @@ export class PlannerContinuationStore {
         ? {
             boundaryId: pendingBoundary.boundaryId,
             userVisibleProgress: pendingBoundary.userVisibleProgress,
+            acknowledgementMode: input.visibleProgressReported === true
+              ? "structured" : "legacy_text",
             at: now,
           }
         : owner.workstream.lastAcknowledgedProgressBoundary ?? null,
