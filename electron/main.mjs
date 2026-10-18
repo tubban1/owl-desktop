@@ -1609,6 +1609,13 @@ async function runtimeSnapshot(options = {}) {
     latencyMs: Date.now() - started,
     info: info.status === "fulfilled" ? info.value : null,
     runtimeAccess: effectiveRuntimeAccess,
+    runtimeAccessError: runtimeAccess.status === "rejected"
+      ? { code: typeof runtimeAccess.reason?.code === "string"
+          ? runtimeAccess.reason.code
+          : runtimeAccess.reason?.name === "AbortError" ||
+            /timed out/i.test(String(runtimeAccess.reason?.message ?? ""))
+            ? "RUNTIME_ACCESS_PROBE_TIMEOUT" : "RUNTIME_ACCESS_PROBE_FAILED" }
+      : null,
     health: health.status === "fulfilled" ? health.value : null,
     tasks: tasks.status === "fulfilled" ? tasks.value : null,
     approvals: approvals.status === "fulfilled" ? approvals.value : null,

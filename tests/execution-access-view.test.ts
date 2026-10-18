@@ -5,6 +5,8 @@ describe("Desktop execution authorization projection", () => {
   it("does not report authorization required from a missing/failed Runtime access probe", () => {
     expect(executionAccessView(true, null)).toBe("verifying");
     expect(executionAccessView(true, undefined)).toBe("verifying");
+    expect(executionAccessView(true, null, { code: "RUNTIME_ACCESS_PROBE_TIMEOUT" })).toBe("unavailable");
+    expect(executionAccessView(true, { state:"READY", mode:"enforced" } as never, {code:"STALE_ERROR"})).toBe("ready");
   });
   it("accepts only verified Runtime READY or explicit compat mode", () => {
     expect(executionAccessView(true, { state:"READY", mode:"enforced" } as never)).toBe("ready");

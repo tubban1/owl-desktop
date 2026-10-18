@@ -626,6 +626,7 @@ export type RuntimeSnapshot = {
   latencyMs: number;
   info: null | { apiVersion?: string; runtimeVersion?: string; transport?: string };
   runtimeAccess: RuntimeAccessState | null;
+  runtimeAccessError?: { code: string } | null;
   health: unknown;
   tasks: unknown;
   approvals: unknown;

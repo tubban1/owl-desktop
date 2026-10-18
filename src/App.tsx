@@ -180,7 +180,7 @@ export default function App() {
 
   const online = snapshot?.mode === "live";
   const runtimeAccess = snapshot?.runtimeAccess ?? null;
-  const accessView = executionAccessView(online, runtimeAccess);
+  const accessView = executionAccessView(online, runtimeAccess, snapshot?.runtimeAccessError);
   const executionReady = accessView === "ready";
   const cloudOnline = snapshot?.cloud.status === "connected";
   const accountReady = cloudAccount?.status === "ready";
@@ -221,6 +221,16 @@ export default function App() {
         label: "Setup required",
         title: "Sign in to finish setup",
         description: "Your local Runtime is reachable, but OWL LAB account setup is not complete.",
+      };
+    }
+    if (accessView === "unavailable") {
+      return {
+        state: "AUTHORIZATION_PROBE_FAILED",
+        label: "Authorization check failed",
+        title: "Cannot verify execution access",
+        description: "Runtime is reachable, but its authorization status query failed (" +
+          (snapshot?.runtimeAccessError?.code ?? "RUNTIME_ACCESS_PROBE_FAILED") +
+          "). New work remains gated; retry the check. This does not establish that your access was revoked.",
       };
     }
     if (accessView === "verifying") {
@@ -265,6 +275,7 @@ export default function App() {
     cloudAccount?.status,
     executionReady,
     accessView,
+    snapshot?.runtimeAccessError?.code,
   ]);
 
   const readinessReady = productReadiness.state === "READY";
@@ -470,6 +481,8 @@ export default function App() {
         ? "Sign in"
         : productReadiness.state === "AUTHORIZATION_CHECKING"
           ? "Refresh authorization"
+          : productReadiness.state === "AUTHORIZATION_PROBE_FAILED"
+            ? "Retry access check"
           : productReadiness.state === "AUTHORIZATION_REQUIRED"
             ? "Reauthorize"
           : productReadiness.state === "CHATGPT_CONNECTION_REQUIRED"
@@ -519,7 +532,7 @@ export default function App() {
         setNotice("Continue sign-in in your browser");
         window.setTimeout(() => setNotice(""), 2400);
         return;
-      } else if (productReadiness.state === "AUTHORIZATION_CHECKING") {
+      } else if (productReadiness.state === "AUTHORIZATION_CHECKING" || productReadiness.state === "AUTHORIZATION_PROBE_FAILED") {
         await refresh(false);
         return;
       } else if (productReadiness.state === "AUTHORIZATION_REQUIRED") {
@@ -1115,7 +1128,7 @@ export default function App() {
           <section className={"hero-status " + (readinessReady ? "healthy" : "warning")}>
             <div className="hero-icon">{readinessReady ? <CheckCircle2 size={24} /> : <AlertTriangle size={24} />}</div>
             <div className="hero-copy"><span>PRODUCT READINESS</span><h2>{productReadiness.title}</h2><p>{productReadiness.description}</p></div>
-            <div className="hero-side"><strong>{online ? snapshot?.latencyMs + " ms" : "—"}</strong><span>Runtime probe</span></div>
+            <div className="hero-side"><strong>{online ? snapshot?.latencyMs + " ms" : "—"}</strong><span>Status refresh</span></div>
           </section>
 
           <section className={"work-status-card " + workState.state}>
@@ -1156,7 +1169,7 @@ export default function App() {
             <MetricCard label="Executing workstreams" value={overviewExecution.workingCount} caption={overviewExecution.waitingCount + " waiting · " + overviewExecution.attentionCount + " need attention; retained checkpoints are not running work"} icon={ChartNoAxesCombined} />
             <MetricCard label="Background work" value={runningProcesses.length} caption="Running now" icon={Cpu} />
             <MetricCard label="Approvals" value={pendingRuntimeApprovals.length} caption="Need your decision" icon={ShieldCheck} />
-            <MetricCard label="Device access" value={runtimeAccess?.state ?? "—"} caption={runtimeAccess?.grant?.signatureVerified ? "Cloud verified" : "Runtime gate"} icon={Laptop} />
+            <MetricCard label="Device access" value={runtimeAccess?.state ?? "—"} caption={snapshot?.runtimeAccessError ? "Access probe failed" : runtimeAccess?.grant?.signatureVerified ? "Cloud verified" : "Runtime gate"} icon={Laptop} />
           </div>
           <StatisticsPanel stats={usageStats} />
           <div className="two-col">
