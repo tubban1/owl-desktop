@@ -271,7 +271,7 @@ Dogfood on 2026-10-02 showed that a soft PROGRESS_UPDATE_REQUIRED boundary was
 insufficient: the boundary was reset server-side immediately, so a planner could
 retry substantive tools without first producing a user-visible progress message.
 
-New workstreams now use progressAckProtocol=2:
+Historically, protocol v2 used a mandatory blocking acknowledgement:
 
     threshold reached
       -> persist progressBoundary.pending
@@ -291,45 +291,42 @@ idempotent (no extra checkpoint revisions). Legacy clients may still ACK with
 the exact originally supplied text. The canonical pending progress text is
 recorded for auditing; no full assistant transcript is required.
 
-Rollout is backward compatible. Workstreams created before protocol v2 remain on
-legacy_soft behavior so an already-open Chat with a cached tool catalog cannot be
-locked out by a newly introduced acknowledgement tool. Newly created workstreams
-use protocol v2.
+Historical acknowledgement logic remains for audit and explicit acknowledgements,
+but new and resumed work never block solely on this protocol. Legacy pending
+boundaries are retired as unacknowledged migrations, not cleared as if a user
+had acknowledged them.
 
 
-## P0 Reliability Gate (2026-10-19)
+## Single-owner reliability and continuity (2026-10-19)
 
-The first reporting threshold is advisory, not blocking. At about
-60 seconds or 12 substantive tool steps, a successful JSON-shaped MCP response
-may include owlProgressAdvisory (with blocking=false). The advisory is
-rate-limited to once per minute and does not change task progress, reset
-the counter, or attest that a user has seen any message. It should prompt a
-genuine user-visible update, followed by workstream_progress.
+Progress reminders are advisory, not authorization. After roughly 60 seconds or
+12 tool steps, a successful JSON-shaped response may attach an
+owlProgressAdvisory (blocking=false). It is rate-limited to one reminder per
+minute. No tool is denied solely because an assistant failed to post an
+intermediate progress message. Real Runtime command policy, device ownership
+checks, and deletion approvals are **not** bypassed.
 
-Only after 10 minutes without a progress report or 48 substantive tool
-steps does a consequential MCP tool encounter the durable
-PROGRESS_UPDATE_REQUIRED boundary. Previously pending boundaries still require
-explicit visible acknowledgement; existing guardrails for shell and deletion
-are not weakened. The read-only recovery tool allowlist remains available
-at any boundary; execute_command is not safe merely because its caller sets
-workspace_mode=read.
+Older pending progress boundaries are released only when a workstream is
+resumed or next used. The original boundary ID and timestamps are preserved in
+lastReleasedProgressBoundary, with acknowledged=false and
+reason=nonblocking_progress_migration. This is **not** a fabricated ACK or a
+claim that the user saw progress. Prior event history remains intact; a
+subsequent genuine workstream_progress records the next user-facing update.
 
-### Mission continuity (initial phase)
+## Mission continuity
 
-workstream_open can record an optional mission_contract with
-allowed_repositories, prohibited_changes, and acceptance_criteria.
-The original workstream goal cannot be silently rewritten by
-planner_checkpoint after a mission is established. Existing prohibitions
-survive subsequent checkpoint updates, including empty or incomplete inputs.
-Resuming a workstream preserves its pinned goal and reports a mismatch if the
-caller proposes a different goal.
+workstream_open may pin a planner-supplied mission_contract with original goal,
+allowed repositories, prohibited changes and acceptance criteria. The goal is
+not independently verified against the user's chat (provenance remains
+planner_asserted_unverified). A later planner_checkpoint proposing a different
+goal is discarded *in full*, including phase, next actions, task references,
+and completion claims. The returned workstream state records
+lastMissionDrift with the proposed and retained goal; this does not require
+a separate approval. Valid checkpoints preserve previous constraints and
+prohibitions. A resumed workstream retains the original mission.
 
-Trust limit: The contract source is explicitly planner_asserted_unverified.
-The MCP server cannot authenticate the actual user's ChatGPT message or prove
-a scope expansion was approved from that data. This phase protects persisted
-intent, but is not an action-level authorization system: an agent can still
-propose or attempt new work through other tools. Consequential actions remain
-subject to Runtime permissions and human approval. A future phase requires
-trusted UI-backed user confirmation for scope changes and mission-aware action
-enforcement. Never interpret a planner's stored goal as an independent proof of
-user authorization.
+This is scope discipline, not new user permissions or semantic detection of
+every unwanted action. Runtime's independent safety policy continues to
+govern dangerous operations. Agents should ask only when a truly consequential
+new scope is indispensable, and must never invent new branches, releases or
+products as follow-up work.

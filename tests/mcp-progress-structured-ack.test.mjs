@@ -46,12 +46,8 @@ describe("Structured progress acknowledgment",()=>{
   const progress=(workstream_id,args)=>client.callTool({
     name:"workstream_progress",arguments:{workstream_id,current:"验证阶段",...args}
   });
-  const blocked=data(await client.callTool({
-    name:"task_cancel",arguments:{workstream_id:a,task_id:"test-only"}
-  }));
-  expect(blocked.code).toBe("PROGRESS_UPDATE_REQUIRED");
-  expect(blocked.progressBoundary.boundaryId).toBe(aid);
-  expect(blocked.progressBoundary.acknowledgementProtocol).toBe("boundary_id_plus_visible_attestation");
+  // Previously published explicit boundaries still validate their ACK if
+  // the planner chooses to acknowledge before any other tool is called.
   for(const args of [
     {progress_boundary_id:aid},
     {progress_boundary_id:aid,visible_progress_reported:false,

@@ -124,70 +124,23 @@ describe("MCP Conversation Continuity guard", () => {
     const readyBeforeBoundary = continuation.latestHandoff();
     expect(readyBeforeBoundary).toBeNull();
 
-    const blocked = await client.callTool({
+    const continued = jsonText(await client.callTool({
       name: "task_cancel",
       arguments: { workstream_id: source.ownerId, task_id: "test-only" },
-    });
-    expect(blocked.isError).toBe(true);
-
+    }));
+    expect(continued.code).not.toBe("PROGRESS_UPDATE_REQUIRED");
     expect(continuation.latestHandoff()).toBeNull();
-
-    const payload = jsonText(blocked);
-    expect(payload).toMatchObject({
-      code: "PROGRESS_UPDATE_REQUIRED",
-      progressBoundary: {
-        pending: true,
-        acknowledgementRequired: true,
-      },
-    });
-    expect(payload.progressBoundary).not.toHaveProperty(
-      "conversationContinuity",
-    );
-    expect(payload.progressBoundary.userVisibleProgress).not.toContain(
-      "Planner Handoff",
-    );
 
     continuation.prepareHandoff(source.ownerId, {
       reason: "continuity_high",
       continuityRisk: "high",
     });
+    expect(continuation.latestHandoff()).toBeTruthy();
     const withHandoff = jsonText(await client.callTool({
       name: "task_cancel",
       arguments: { workstream_id: source.ownerId, task_id: "test-only" },
     }));
-    expect(withHandoff.code).toBe("PROGRESS_UPDATE_REQUIRED");
-    expect(withHandoff.progressBoundary.boundaryId).toBe(
-      payload.progressBoundary.boundaryId,
-    );
-    expect(withHandoff.progressBoundary.userVisibleProgress).toBe(
-      payload.progressBoundary.userVisibleProgress,
-    );
-    expect(withHandoff.progressBoundary.continuityNotice).toContain(
-      "Planner Handoff",
-    );
-    expect(withHandoff.progressBoundary.conversationContinuity).toMatchObject({
-      handoffReady: true,
-      risk: "high",
-    });
-
-    const missingCurrent = jsonText(await client.callTool({
-      name: "workstream_progress",
-      arguments: { workstream_id: source.ownerId },
-    }));
-    expect(missingCurrent.code).toBe("PROGRESS_CURRENT_REQUIRED");
-
-    const confirmed = jsonText(await client.callTool({
-      name: "workstream_progress",
-      arguments: {
-        workstream_id: source.ownerId,
-        progress_boundary_id: payload.progressBoundary.boundaryId,
-        user_visible_progress: withHandoff.progressBoundary.userVisibleProgress,
-      },
-    }));
-    expect(confirmed.current).toBe(payload.progressBoundary.current);
-    expect(confirmed.acknowledgedBoundaryId).toBe(
-      payload.progressBoundary.boundaryId,
-    );
+    expect(withHandoff.code).not.toBe("PROGRESS_UPDATE_REQUIRED");
     expect(continuation.get(source.ownerId).workstream.progressBoundary).toBeNull();
   });
 });

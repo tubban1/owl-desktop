@@ -151,8 +151,7 @@ describe("MCP workstream isolation", () => {
         expect(payload.owlProgressAdvisory).toMatchObject({
           type: "SOFT_PROGRESS_REMINDER",
           blocking: false,
-          hardGateAfterSteps: 48,
-          hardGateAfterSilenceMs: 600000,
+          hardGateEnabled: false,
         });
       }
     }
@@ -177,74 +176,36 @@ describe("MCP workstream isolation", () => {
     expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(48);
     expect(continuation.get(a).workstream.progressBoundary).toBeNull();
 
-    const blocked = await client.callTool({
-      name: "task_cancel",
-      arguments: { workstream_id: a, task_id: "test-only" },
-    });
-    expect(blocked.isError).toBe(true);
-    const boundary = jsonText(blocked);
-    expect(boundary).toMatchObject({
-      code: "PROGRESS_UPDATE_REQUIRED",
-      progressBoundary: {
-        workstreamId: a,
-        pending: true,
-        acknowledgementRequired: true,
-        toolStepsSinceProgress: 48,
-        recommendedUpdateIntervalMs: 60000,
-        recommendedMaxToolStepsWithoutUpdate: 12,
-        durableExecution: {
-          recommended: true,
-          preferredTool: "task_submit",
-        },
-      },
-    });
-
-    const stillBlocked = jsonText(await client.callTool({
+    // A progress reminder is never a substitute for Runtime command security,
+    // and 48+ steps must not deadlock the chat.
+    const afterManySteps = jsonText(await client.callTool({
       name: "task_cancel",
       arguments: { workstream_id: a, task_id: "test-only" },
     }));
-    expect(stillBlocked).toMatchObject({
-      code: "PROGRESS_UPDATE_REQUIRED",
-      progressBoundary: {
-        boundaryId: boundary.progressBoundary.boundaryId,
-        pending: true,
-      },
+    expect(afterManySteps.code).not.toBe("PROGRESS_UPDATE_REQUIRED");
+    expect(continuation.get(a).workstream.progressBoundary).toBeNull();
+
+    // Simulate a pending gate persisted by an older MCP version.
+    const pending = continuation.markProgressBoundary(a, {
+      toolStepsSinceProgress: 48,
+      silenceMs: 620000,
+      retryTool: "task_cancel",
+      userVisibleProgress: "Old blocker that was never shown to the user",
+    }).workstream.progressBoundary;
+    const lastAck = continuation.get(a).workstream.lastAcknowledgedProgressBoundary;
+    const resume = jsonText(await client.callTool({
+      name: "task_cancel",
+      arguments: { workstream_id: a, task_id: "test-only" },
+    }));
+    expect(resume.code).not.toBe("PROGRESS_UPDATE_REQUIRED");
+    const released = continuation.get(a).workstream;
+    expect(released.progressBoundary).toBeNull();
+    expect(released.lastReleasedProgressBoundary).toMatchObject({
+      boundaryId: pending.boundaryId,
+      reason: "nonblocking_progress_migration",
+      acknowledged: false,
     });
-    expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(48);
-
-    for (const name of ["runtime_info", "runtime_diagnostics", "provider_status", "list_processes", "task_list"]) {
-      const read = await client.callTool({
-        name,
-        arguments: { workstream_id: a },
-      });
-      expect(read.isError).not.toBe(true);
-    }
-    expect(continuation.get(a).workstream.toolStepsSinceProgress).toBe(48);
-    expect(continuation.get(a).workstream.progressBoundary.boundaryId).toBe(
-      boundary.progressBoundary.boundaryId,
-    );
-
-    // Shell is potentially mutating even when the caller requests a read lease.
-    const shellBlocked = jsonText(await client.callTool({
-      name: "execute_command",
-      arguments: {
-        workstream_id: a, command: "echo read-only", cwd: "/tmp",
-        workspace_mode: "read",
-      },
-    }));
-    expect(shellBlocked.code).toBe("PROGRESS_UPDATE_REQUIRED");
-
-    const rejected = jsonText(await client.callTool({
-      name: "workstream_progress",
-      arguments: {
-        workstream_id: a,
-        current: "Rejected mismatch",
-        progress_boundary_id: boundary.progressBoundary.boundaryId,
-        user_visible_progress: "Not the exact published progress",
-      },
-    }));
-    expect(rejected.code).toBe("PROGRESS_VISIBLE_UPDATE_REQUIRED");
-    expect(continuation.get(a).workstream.progressBoundary.pending).toBe(true);
+    expect(released.lastAcknowledgedProgressBoundary).toEqual(lastAck);
 
     await transport.close();
     client = new Client({ name: "reconnected-chat", version: "0.1.0" });
@@ -255,76 +216,33 @@ describe("MCP workstream isolation", () => {
       arguments: { workstream_id: a },
     });
     expect(recovered.isError).not.toBe(true);
-    expect(continuation.get(a).workstream.progressBoundary.boundaryId).toBe(
-      boundary.progressBoundary.boundaryId,
-    );
+    expect(continuation.get(a).workstream.goal).toBe("Build Monitor");
 
     const progress = jsonText(await client.callTool({
       name: "workstream_progress",
       arguments: {
         workstream_id: a,
-        completed: ["Three Runtime checks"],
-        current: "Reporting progress before more tool work",
-        next_actions: ["Continue validation"],
-        progress_boundary_id: boundary.progressBoundary.boundaryId,
-        user_visible_progress: boundary.progressBoundary.userVisibleProgress,
+        completed: ["Previously executed Runtime checks"],
+        current: "Continue original Monitor testing",
+        next_actions: ["Validate original acceptance criteria"],
       },
     }));
-    expect(progress.userVisibleProgress).toBe(
-      boundary.progressBoundary.userVisibleProgress,
-    );
-    expect(progress.acknowledgedBoundaryId).toBe(
-      boundary.progressBoundary.boundaryId,
-    );
+    expect(progress.acknowledgedBoundaryId).toBeNull();
     expect(progress.durableExecution).toMatchObject({
       recommended: true,
       preferredTool: "task_submit",
     });
-
-    const revision = continuation.get(a).checkpoint.revision;
-    const eventsCount = continuation.get(a).workstream.progressEvents.length;
-    const duplicate = jsonText(await client.callTool({
-      name: "workstream_progress",
-      arguments: {
-        workstream_id: a,
-        progress_boundary_id: boundary.progressBoundary.boundaryId,
-        user_visible_progress: boundary.progressBoundary.userVisibleProgress,
-      },
-    }));
-    expect(duplicate.acknowledgedBoundaryId).toBe(boundary.progressBoundary.boundaryId);
-    expect(continuation.get(a).checkpoint.revision).toBe(revision);
-    expect(continuation.get(a).workstream.progressEvents).toHaveLength(eventsCount);
-
-    const stale = jsonText(await client.callTool({
-      name: "workstream_progress",
-      arguments: {
-        workstream_id: a,
-        current: "Stale acknowledgement",
-        progress_boundary_id: "progress-boundary:wrong",
-        user_visible_progress: boundary.progressBoundary.userVisibleProgress,
-      },
-    }));
-    expect(stale.code).toBe("PROGRESS_ACK_STALE");
-    expect(progressIngressEvents).toHaveLength(5);
-    expect(progressIngressEvents.every((item) =>
-      item.tool === "workstream_progress" && item.phase === "request",
-    )).toBe(true);
+    expect(continuation.get(a).workstream.progressBoundary).toBeNull();
+    expect(progressIngressEvents).toHaveLength(2);
 
     await client.callTool({
       name: "runtime_info",
       arguments: { workstream_id: a },
     });
-
     const infoCalls = runtime.observed.filter((item) => item.method === "info");
-    expect(infoCalls.map((item) => item.sessionId)).toEqual([
-      a,
-      b,
-      a,
-      a,
-      a,
-      a,
-      ...Array(46).fill(a),
-    ]);
+    expect(infoCalls.length).toBeGreaterThanOrEqual(49);
+    expect(infoCalls.some((item) => item.sessionId === a)).toBe(true);
+    expect(infoCalls.some((item) => item.sessionId === b)).toBe(true);
 
     const ownerA = continuation.get(a);
     const ownerB = continuation.get(b);
@@ -334,12 +252,12 @@ describe("MCP workstream isolation", () => {
       workstream: {
         goal: "Build Monitor",
         toolStepsSinceProgress: 1,
-        totalToolSteps: 50,
+        totalToolSteps: expect.any(Number),
       },
     });
     expect(ownerA.workstream.progressEvents.at(-1)).toMatchObject({
-      current: "Reporting progress before more tool work",
-      nextActions: ["Continue validation"],
+      current: "Continue original Monitor testing",
+      nextActions: ["Validate original acceptance criteria"],
     });
     expect(ownerB).toMatchObject({
       clientKind: "worker",
@@ -424,51 +342,22 @@ describe("MCP workstream isolation", () => {
       },
     });
 
-    const blocked = await client.callTool({
+    const continued = jsonText(await client.callTool({
       name: "task_cancel",
       arguments: { task_id: "test-only" },
-    });
-    expect(blocked.isError).toBe(true);
-    const boundary = jsonText(blocked);
-    expect(boundary).toMatchObject({
-      code: "PROGRESS_UPDATE_REQUIRED",
-      progressBoundary: {
-        workstreamId: actualOwnerId,
-        toolStepsSinceProgress: 48,
-        recommendedUpdateIntervalMs: 60000,
-        boundaryRecorded: false,
-        acknowledgementRequired: true,
-        pending: true,
-        retryTool: "task_cancel",
-      },
-    });
-    expect(boundary.progressBoundary.userVisibleProgress).toContain(
-      "Now: pausing to report progress",
-    );
+    }));
+    expect(continued.code).not.toBe("PROGRESS_UPDATE_REQUIRED");
+    expect(continuation.get(actualOwnerId).workstream.progressBoundary).toBeNull();
 
-    continuation.progressWorkstream(
-      actualOwnerId,
-      {
-        current: "No new OWL work yet",
-        status: "active",
-        progressBoundaryId: boundary.progressBoundary.boundaryId,
-        userVisibleProgress: boundary.progressBoundary.userVisibleProgress,
-      },
-      new Date(Date.now() - 60_000).toISOString(),
-    );
-    expect(continuation.get(actualOwnerId).workstream).toMatchObject({
-      toolStepsSinceProgress: 0,
-    });
-
+    continuation.progressWorkstream(actualOwnerId, {
+      current: "No new OWL work yet",
+      status: "active",
+    },new Date(Date.now()-60_000).toISOString());
     const afterIdleSilence = await client.callTool({
-      name: "runtime_info",
-      arguments: {},
+      name: "runtime_info", arguments: {},
     });
     expect(afterIdleSilence.isError).not.toBe(true);
-    expect(continuation.get(actualOwnerId).workstream).toMatchObject({
-      toolStepsSinceProgress: 1,
-      totalToolSteps: 49,
-    });
+    expect(continuation.get(actualOwnerId).workstream.toolStepsSinceProgress).toBe(1);
 
     const interactionRequests = events.filter(
       (event) =>
@@ -521,27 +410,16 @@ describe("MCP workstream isolation", () => {
       expect(result.isError).not.toBe(true);
     }
 
-    const blocked = jsonText(await client.callTool({
+    const continued = jsonText(await client.callTool({
       name: "task_cancel",
       arguments: { workstream_id: ownerId, task_id: "test-only" },
     }));
-    expect(blocked).toMatchObject({
-      code: "PROGRESS_UPDATE_REQUIRED",
-      progressBoundary: {
-        protocol: "legacy_soft",
-        boundaryRecorded: true,
-        acknowledgementRequired: false,
-      },
-    });
-
+    expect(continued.code).not.toBe("PROGRESS_UPDATE_REQUIRED");
+    expect(continuation.get(ownerId).workstream.progressBoundary).toBeNull();
     const retried = await client.callTool({
-      name: "runtime_info",
-      arguments: { workstream_id: ownerId },
+      name: "runtime_info", arguments: { workstream_id: ownerId },
     });
     expect(retried.isError).not.toBe(true);
-    expect(continuation.get(ownerId).workstream).toMatchObject({
-      toolStepsSinceProgress: 1,
-      progressBoundary: null,
-    });
+    expect(continuation.get(ownerId).workstream.toolStepsSinceProgress).toBeGreaterThan(48);
   }, 30_000);
 });

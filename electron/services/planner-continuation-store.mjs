@@ -191,18 +191,30 @@ export class PlannerContinuationStore {
       ? previous?.goal ?? null // First explicit user checkpoint pins implicit sessions.
       : owner.workstream?.missionContract?.originalGoal ??
         owner.workstream?.goal ?? previous?.goal ?? null;
-    if (pinnedGoal && input.goal !== pinnedGoal) {
-      const error = new Error("MISSION_GOAL_IMMUTABLE: checkpoint goal differs from the recorded original mission. Request user scope review instead of rewriting the goal.");
-      error.code = "MISSION_GOAL_IMMUTABLE";
-      error.originalGoal = pinnedGoal;
-      throw error;
+    const suggestedGoalDrift = Boolean(
+      pinnedGoal && typeof input.goal === "string" && input.goal !== pinnedGoal,
+    );
+    if (suggestedGoalDrift) {
+      // Discard the entire proposed checkpoint, including phase, new actions,
+      // task IDs, and completion claims. No additional approval loop.
+      if (owner.workstream) {
+        owner.workstream.lastMissionDrift = {
+          proposedGoal: input.goal.slice(0, 1000),
+          retainedGoal: pinnedGoal,
+          detectedAt: now,
+          disposition: "discarded_unverified_change",
+        };
+      }
+      owner.updatedAt = now;
+      this.write(state);
+      return compactOwner(owner);
     }
     const revision = Number(previous?.revision ?? 0) + 1;
     owner.checkpoint = {
       schemaVersion: 1,
       revision,
       status: input.status ?? "active",
-      goal: input.goal,
+      goal: pinnedGoal ?? input.goal,
       phase: input.phase ?? null,
       summary: input.summary ?? null,
       completed: Array.isArray(input.completed) ? [...input.completed] : [],
@@ -360,11 +372,22 @@ export class PlannerContinuationStore {
     owner.clientKind = input.clientKind ?? owner.clientKind ?? "chatgpt";
     owner.clientLabel = input.clientLabel ?? owner.clientLabel ?? null;
     owner.ownerSource = "workstream";
+    const pending = owner.workstream.progressBoundary;
     owner.workstream = {
       ...owner.workstream,
       clientKind: owner.clientKind,
       clientLabel: owner.clientLabel,
       ...(input.label ? { label: input.label } : {}),
+      ...(pending?.pending ? {
+        progressBoundary: null,
+        lastReleasedProgressBoundary: {
+          boundaryId: pending.boundaryId,
+          createdAt: pending.createdAt,
+          releasedAt: now,
+          reason: "nonblocking_progress_migration",
+          acknowledged: false,
+        },
+      } : {}),
       updatedAt: now,
     };
     owner.updatedAt = now;
@@ -379,6 +402,26 @@ export class PlannerContinuationStore {
         owner.workstream.status === "completed") return null;
     // Do not advance actual progress/goal or reset the gate by reminding.
     owner.workstream.lastProgressAdvisoryAt = now;
+    this.write(state);
+    return compactOwner(owner);
+  }
+
+  releaseUnacknowledgedProgressBoundary(ownerId, now = new Date().toISOString()) {
+    const state = this.read();
+    const owner = state.owners[ownerId];
+    const pending = owner?.workstream?.progressBoundary;
+    if (!pending?.pending) return owner ? compactOwner(owner) : null;
+    // Unblock legacy protocol without falsely asserting a user-visible report.
+    // Keep auditable evidence; don't modify the checkpoint or progress clock.
+    owner.workstream.progressBoundary = null;
+    owner.workstream.lastReleasedProgressBoundary = {
+      boundaryId: pending.boundaryId,
+      createdAt: pending.createdAt,
+      releasedAt: now,
+      reason: "nonblocking_progress_migration",
+      acknowledged: false,
+    };
+    owner.updatedAt = now;
     this.write(state);
     return compactOwner(owner);
   }
