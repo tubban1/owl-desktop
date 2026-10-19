@@ -295,3 +295,41 @@ Rollout is backward compatible. Workstreams created before protocol v2 remain on
 legacy_soft behavior so an already-open Chat with a cached tool catalog cannot be
 locked out by a newly introduced acknowledgement tool. Newly created workstreams
 use protocol v2.
+
+
+## P0 Reliability Gate (2026-10-19)
+
+The first reporting threshold is advisory, not blocking. At about
+60 seconds or 12 substantive tool steps, a successful JSON-shaped MCP response
+may include owlProgressAdvisory (with blocking=false). The advisory is
+rate-limited to once per minute and does not change task progress, reset
+the counter, or attest that a user has seen any message. It should prompt a
+genuine user-visible update, followed by workstream_progress.
+
+Only after 10 minutes without a progress report or 48 substantive tool
+steps does a consequential MCP tool encounter the durable
+PROGRESS_UPDATE_REQUIRED boundary. Previously pending boundaries still require
+explicit visible acknowledgement; existing guardrails for shell and deletion
+are not weakened. The read-only recovery tool allowlist remains available
+at any boundary; execute_command is not safe merely because its caller sets
+workspace_mode=read.
+
+### Mission continuity (initial phase)
+
+workstream_open can record an optional mission_contract with
+allowed_repositories, prohibited_changes, and acceptance_criteria.
+The original workstream goal cannot be silently rewritten by
+planner_checkpoint after a mission is established. Existing prohibitions
+survive subsequent checkpoint updates, including empty or incomplete inputs.
+Resuming a workstream preserves its pinned goal and reports a mismatch if the
+caller proposes a different goal.
+
+Trust limit: The contract source is explicitly planner_asserted_unverified.
+The MCP server cannot authenticate the actual user's ChatGPT message or prove
+a scope expansion was approved from that data. This phase protects persisted
+intent, but is not an action-level authorization system: an agent can still
+propose or attempt new work through other tools. Consequential actions remain
+subject to Runtime permissions and human approval. A future phase requires
+trusted UI-backed user confirmation for scope changes and mission-aware action
+enforcement. Never interpret a planner's stored goal as an independent proof of
+user authorization.

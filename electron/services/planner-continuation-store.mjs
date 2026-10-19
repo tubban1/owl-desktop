@@ -36,6 +36,24 @@ function compactStringList(value, maxItems = 20, maxChars = 600) {
     .map((item) => item.trim().slice(0, maxChars));
 }
 
+function missionContract(input, now) {
+  return {
+    version: 1,
+    // MCP cannot independently inspect the human's original chat message.
+    // Never describe planner-supplied constraints as user-verified authority.
+    provenance: "planner_asserted_unverified",
+    originalGoal: input.goal,
+    allowedRepositories: compactStringList(input.missionContract?.allowedRepositories, 12, 240),
+    prohibitedChanges: compactStringList(input.missionContract?.prohibitedChanges),
+    acceptanceCriteria: compactStringList(input.missionContract?.acceptanceCriteria),
+    createdAt: now,
+  };
+}
+
+function retainConstraints(...inputs) {
+  return [...new Set(inputs.flatMap((v) => compactStringList(v)))].slice(0, 20);
+}
+
 function compactEvidenceRefs(value) {
   if (!Array.isArray(value)) return [];
   return value
@@ -169,6 +187,16 @@ export class PlannerContinuationStore {
     const state = this.read();
     const owner = ownerRecord(state, ownerId);
     const previous = owner.checkpoint;
+    const pinnedGoal = owner.workstream?.implicit
+      ? previous?.goal ?? null // First explicit user checkpoint pins implicit sessions.
+      : owner.workstream?.missionContract?.originalGoal ??
+        owner.workstream?.goal ?? previous?.goal ?? null;
+    if (pinnedGoal && input.goal !== pinnedGoal) {
+      const error = new Error("MISSION_GOAL_IMMUTABLE: checkpoint goal differs from the recorded original mission. Request user scope review instead of rewriting the goal.");
+      error.code = "MISSION_GOAL_IMMUTABLE";
+      error.originalGoal = pinnedGoal;
+      throw error;
+    }
     const revision = Number(previous?.revision ?? 0) + 1;
     owner.checkpoint = {
       schemaVersion: 1,
@@ -185,12 +213,14 @@ export class PlannerContinuationStore {
       decisions: Array.isArray(input.decisions)
         ? compactStringList(input.decisions)
         : compactStringList(previous?.decisions),
-      constraints: Array.isArray(input.constraints)
-        ? compactStringList(input.constraints)
-        : compactStringList(previous?.constraints),
-      doNotRepeat: Array.isArray(input.doNotRepeat)
-        ? compactStringList(input.doNotRepeat)
-        : compactStringList(previous?.doNotRepeat),
+      // User prohibitions already recorded must survive a planner resume
+      // or another checkpoint with an incomplete context window.
+      constraints: retainConstraints(previous?.constraints, input.constraints),
+      doNotRepeat: retainConstraints(
+        previous?.doNotRepeat,
+        owner.workstream?.missionContract?.prohibitedChanges,
+        input.doNotRepeat,
+      ),
       createdAt: previous?.createdAt ?? now,
       updatedAt: now,
       completedAt: input.status === "completed" ? now : null,
@@ -279,6 +309,7 @@ export class PlannerContinuationStore {
       workstreamId: ownerId,
       status: input.status ?? "active",
       goal: input.goal,
+      missionContract: missionContract(input, now),
       label: input.label ?? null,
       clientKind,
       clientLabel,
@@ -307,7 +338,7 @@ export class PlannerContinuationStore {
       taskIds: [],
       decisions: [],
       constraints: [],
-      doNotRepeat: [],
+      doNotRepeat: compactStringList(input.missionContract?.prohibitedChanges),
       createdAt: now,
       updatedAt: now,
       completedAt: null,
@@ -337,6 +368,17 @@ export class PlannerContinuationStore {
       updatedAt: now,
     };
     owner.updatedAt = now;
+    this.write(state);
+    return compactOwner(owner);
+  }
+
+  noteProgressAdvisory(ownerId, now = new Date().toISOString()) {
+    const state = this.read();
+    const owner = state.owners[ownerId];
+    if (!owner?.workstream || owner.workstream.progressBoundary?.pending ||
+        owner.workstream.status === "completed") return null;
+    // Do not advance actual progress/goal or reset the gate by reminding.
+    owner.workstream.lastProgressAdvisoryAt = now;
     this.write(state);
     return compactOwner(owner);
   }
