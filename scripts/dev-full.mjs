@@ -7,8 +7,12 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { DevChildSupervisor } from "./lib/dev-child-supervisor.mjs";
+import { installStdioEpipeGuard } from "./lib/stdio-epipe-guard.mjs";
 import { writeDevOwner, removeDevOwner } from "./lib/dev-full-owner.mjs";
 import { buildDevRuntimePermissionPolicy, writeDevRuntimePermissionStatus, devPermissionStatusFile, DEV_PERMISSION_FLAG_NAMES } from "./lib/dev-runtime-permissions.mjs";
+
+// This supervisor can outlive its launching ChatGPT/terminal pipe.
+installStdioEpipeGuard();
 
 const desktopRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
