@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, Notification, dialog, ipcMain, powerMonitor, shell } from "electron";
 import { configureOwlDesktopStorage } from "./storage-layout.mjs";
+import { installStdioEpipeGuard } from "../scripts/lib/stdio-epipe-guard.mjs";
 import { DesktopStore } from "./store.mjs";
 import { UsageStatisticsStore } from "./services/usage-statistics-store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
@@ -53,6 +54,9 @@ import { createRuntimeAccessRecoveryGate } from "./services/runtime-access-recov
 import { createRuntimeLeaseMaintenance } from "./services/runtime-lease-maintenance.mjs";
 import { createConnectivityWakeRecovery } from "./services/connectivity-wake-recovery.mjs";
 import { revokeDeviceCredentialLifecycle, rotateDeviceCredentialLifecycle } from "./services/device-credential-lifecycle.mjs";
+
+// Keep the UI alive if a DEV terminal/remote MCP process closes its pipe.
+installStdioEpipeGuard();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let storageLayout;
