@@ -22,6 +22,18 @@ function writeJsonAtomic(file, value) {
   fs.renameSync(temp, file);
 }
 
+// Atomic snapshots are replaced with rename; the inode changes on every
+// supported store write. Check all identity fields so readers also notice
+// out-of-process rewrites without relying on a timer or stale in-memory data.
+function snapshotSignature(file) {
+  try {
+    const stat = fs.statSync(file);
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  } catch {
+    return null;
+  }
+}
+
 function initialState() {
   return {
     version: 1,
@@ -153,6 +165,7 @@ export class PlannerContinuationStore {
     this.file = file;
     this.implicitIdleTtlMs = Math.max(Number(implicitIdleTtlMs) || 0, 60_000);
     this.archivedRetentionMs = Math.max(Number(archivedRetentionMs) || 0, 0);
+    this._getCache = null;
   }
 
   read() {
@@ -177,11 +190,22 @@ export class PlannerContinuationStore {
 
   write(state) {
     writeJsonAtomic(this.file, state);
+    // Keep mutation reads fresh: only repeated read-only lookups are cached.
+    this._getCache = null;
   }
 
   get(ownerId) {
     if (!ownerId) return null;
-    return compactOwner(this.read().owners[ownerId] ?? null);
+    const signature = snapshotSignature(this.file);
+    if (!this._getCache || this._getCache.signature !== signature) {
+      this._getCache = {
+        signature,
+        owners: this.read().owners,
+      };
+    }
+    // Never expose cached nested objects: callers must not mutate persisted
+    // workstream/checkpoint views, nor accidentally modify other owners.
+    return structuredClone(compactOwner(this._getCache.owners[ownerId] ?? null));
   }
 
   checkpoint(ownerId, input, now = new Date().toISOString()) {
