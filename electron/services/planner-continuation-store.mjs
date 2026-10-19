@@ -16,7 +16,9 @@ function writeJsonAtomic(file, value) {
     path.dirname(file),
     "." + path.basename(file) + "." + process.pid + "." + randomUUID() + ".tmp",
   );
-  fs.writeFileSync(temp, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+  // This durable snapshot is machine-owned; pretty printing needlessly inflates
+  // multi-workstream persistence cost on every MCP tool call. Keep all fields.
+  fs.writeFileSync(temp, JSON.stringify(value) + "\n", { mode: 0o600 });
   fs.renameSync(temp, file);
 }
 
