@@ -13,6 +13,10 @@ import { CloudMcpCompletionStore } from "./cloud-mcp-completion-store.mjs";
 import { LocalMcpExecutor } from "./local-mcp-executor.mjs";
 import {sendAuthorizedFile} from "../mcp/send-file.mjs";
 import { createHostDiagnosticJournal } from "./diagnostic-journal.mjs";
+import { installStdioEpipeGuard } from "../scripts/lib/stdio-epipe-guard.mjs";
+
+// A detached supervising terminal must not kill the long-lived Host.
+installStdioEpipeGuard();
 
 function required(name, fallback = "") {
   const value = process.env[name]?.trim() || fallback;
