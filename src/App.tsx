@@ -143,6 +143,12 @@ export default function App() {
   const [liveActivity, setLiveActivity] = useState<ActivityEntry[]>([]);
   const [usageStats, setUsageStats] = useState<UsageStatisticsSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
+  const [connectionRecoveryFeedback, setConnectionRecoveryFeedback] = useState<{
+    state: "checking" | "ready" | "failed";
+    message: string;
+    code: string | null;
+    nextAction: "none" | "account" | "diagnostics";
+  } | null>(null);
   const [secretDraft, setSecretDraft] = useState({ name: "", project: "global", value: "" });
   const [editingAccount, setEditingAccount] = useState<AccountMeta | null>(null);
   const [accountEditSecret,setAccountEditSecret] = useState("");
@@ -524,6 +530,14 @@ export default function App() {
 
   const runReadinessAction = async () => {
     setBusy(true);
+    if (productReadiness.state === "CHATGPT_CONNECTION_REQUIRED") {
+      setConnectionRecoveryFeedback({
+        state: "checking",
+        message: "Checking the local Connection Host and OWL Cloud MCP…",
+        code: null,
+        nextAction: "none",
+      });
+    }
     try {
       if (productReadiness.state === "LOCAL_RECOVERY") {
         await window.owlDesktop.hostRestart();
@@ -557,14 +571,35 @@ export default function App() {
         } else if (settings?.cloudEnabled !== true) {
           await saveSettings({ cloudEnabled: true });
         }
-        await window.owlDesktop.recoverConnectivity();
+        const result = await window.owlDesktop.recoverConnectivity();
+        const status = result.recovery;
+        setConnectionRecoveryFeedback(status
+          ? {
+              state: status.ready ? "ready" : "failed",
+              message: status.message,
+              code: status.code,
+              nextAction: status.nextAction,
+            }
+          : {
+              state: "failed",
+              message: "Cloud recovery returned no verified connection status. Open Diagnostics.",
+              code: "CLOUD_RECOVERY_NO_STATUS",
+              nextAction: "diagnostics",
+            });
       }
       await refresh();
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "Recovery action failed",
-      );
-      window.setTimeout(() => setNotice(""), 2400);
+      if (productReadiness.state === "CHATGPT_CONNECTION_REQUIRED") {
+        setConnectionRecoveryFeedback({
+          state: "failed",
+          message: "Cloud recovery failed before verification. Open Settings → Diagnostics to inspect the error.",
+          code: "CLOUD_RECOVERY_REQUEST_FAILED",
+          nextAction: "diagnostics",
+        });
+      } else {
+        setNotice(error instanceof Error ? error.message : "Recovery action failed");
+        window.setTimeout(() => setNotice(""), 2400);
+      }
     } finally {
       setBusy(false);
     }
@@ -1124,12 +1159,22 @@ export default function App() {
           <ApprovalAttention approvals={liveApprovals??snapshot?.approvals}
             onApprove={approveRuntimeApproval} onDeny={denyRuntimeApproval} />}
         {page === "overview" && <>
-          <SectionHeader title="Your OWL" description="See what OWL is doing, whether it is waiting, and what needs your attention." action={<button className="primary" onClick={runReadinessAction} disabled={busy}>{productReadiness.state === "READY" ? <RefreshCw size={15} /> : <ArrowRight size={15} />}{readinessActionLabel}</button>} />
+          <SectionHeader title="Your OWL" description="See what OWL is doing, whether it is waiting, and what needs your attention." action={<button className="primary" onClick={runReadinessAction} disabled={busy}>{busy ? <RefreshCw size={15} className="spin" /> : productReadiness.state === "READY" ? <RefreshCw size={15} /> : <ArrowRight size={15} />}{busy && productReadiness.state === "CHATGPT_CONNECTION_REQUIRED" ? "Checking Cloud…" : readinessActionLabel}</button>} />
           <section className={"hero-status " + (readinessReady ? "healthy" : "warning")}>
             <div className="hero-icon">{readinessReady ? <CheckCircle2 size={24} /> : <AlertTriangle size={24} />}</div>
             <div className="hero-copy"><span>PRODUCT READINESS</span><h2>{productReadiness.title}</h2><p>{productReadiness.description}</p></div>
             <div className="hero-side"><strong>{online ? snapshot?.latencyMs + " ms" : "—"}</strong><span>Status refresh</span></div>
           </section>
+          {connectionRecoveryFeedback && (
+            <section className={"cloud-recovery-feedback " + connectionRecoveryFeedback.state} role="status" aria-live="polite">
+              <div>
+                <strong>{connectionRecoveryFeedback.state === "checking" ? "Connecting OWL Cloud" : connectionRecoveryFeedback.state === "ready" ? "Cloud connection verified" : "Cloud connection needs attention"}</strong>
+                <p>{connectionRecoveryFeedback.message}</p>
+                {connectionRecoveryFeedback.code && <small>Diagnostic code: {connectionRecoveryFeedback.code}</small>}
+              </div>
+              {connectionRecoveryFeedback.nextAction !== "none" && <button className="secondary" type="button" onClick={() => setPage(connectionRecoveryFeedback.nextAction === "account" ? "accounts" : "settings")}>{connectionRecoveryFeedback.nextAction === "account" ? "Open Account" : "Open Diagnostics"}</button>}
+            </section>
+          )}
 
           <section className={"work-status-card " + workState.state}>
             <div className="work-status-icon">

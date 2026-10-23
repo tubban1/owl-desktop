@@ -136,6 +136,13 @@ nav button.active { background: #151a18; color: #d5f8df; }
   background: linear-gradient(105deg, rgba(27, 46, 34, .5), rgba(12,14,16,.9));
 }
 .hero-status.warning { background: linear-gradient(105deg, rgba(54, 36, 25, .42), rgba(12,14,16,.9)); }
+.cloud-recovery-feedback { display: flex; gap: 14px; align-items: center; justify-content: space-between; border: 1px solid #394b42; border-radius: 10px; padding: 12px 15px; margin: -3px 0 16px; background: rgba(21,43,32,.65); color: #c7e4d1; }
+.cloud-recovery-feedback.failed { border-color: #966e49; background: rgba(65,42,24,.45); color: #e4b78e; }
+.cloud-recovery-feedback > div { min-width: 0; }
+.cloud-recovery-feedback strong { font-size: 12px; }
+.cloud-recovery-feedback p { margin: 4px 0; font-size: 12px; line-height: 1.5; }
+.cloud-recovery-feedback small { font-size: 10px; opacity: .85; }
+.cloud-recovery-feedback button { flex: 0 0 auto; font-size: 11px; }
 .hero-icon { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 11px; background: rgba(164, 236, 184, .08); color: #9ae8af; }
 .warning .hero-icon { color: #e5ab7e; background: rgba(222, 145, 86, .08); }
 .hero-copy span, .eyebrow { color: #596168; letter-spacing: .13em; font-size: 9px; font-weight: 800; }
