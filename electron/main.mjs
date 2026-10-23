@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, Notification, dialog, ipcMain, powerMonitor, shell } from "electron";
 import { configureOwlDesktopStorage } from "./storage-layout.mjs";
 import { installStdioEpipeGuard } from "../scripts/lib/stdio-epipe-guard.mjs";
+import { assessConnectivityRecovery } from "./services/connectivity-recovery-result.mjs";
 import { DesktopStore } from "./store.mjs";
 import { UsageStatisticsStore } from "./services/usage-statistics-store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
@@ -1881,6 +1882,11 @@ Only this single action will be approved.`,
         mode: "custom_tunnel",
         tunnel,
         cloudMcp: null,
+        recovery: assessConnectivityRecovery({
+          mode: "custom_tunnel",
+          mcpRunning: mcpState.status === "running",
+          tunnel,
+        }),
       };
     }
     const cloudMcp = await syncConnectionHostCloudMcp();
@@ -1901,11 +1907,22 @@ Only this single action will be approved.`,
     const host = externalConnectionHostEnabled
       ? await refreshConnectionHost()
       : null;
+    const currentCloudMcp = host?.cloudMcp ?? cloudMcp ?? null;
     return {
       mode: settings.connectivityMode,
       tunnel: host?.tunnel ?? managedTunnel?.tunnel ?? null,
-      cloudMcp: host?.cloudMcp ?? cloudMcp ?? null,
+      cloudMcp: currentCloudMcp,
       managedTunnel: managedTunnel?.projection ?? null,
+      recovery: assessConnectivityRecovery({
+        mode: settings.connectivityMode,
+        hostConnected: host?.ok === true,
+        mcpRunning: mcpState.status === "running",
+        cloudEnabled: settings.cloudEnabled,
+        cloudBaseUrl: settings.cloudBaseUrl,
+        deviceId: settings.cloudDeviceId,
+        deviceCredentialAvailable: Boolean(cloudDeviceCredential()),
+        cloudMcp: currentCloudMcp,
+      }),
     };
   });
   ipcMain.handle("cloud:devices:list", () =>

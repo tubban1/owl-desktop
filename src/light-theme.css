@@ -38,6 +38,8 @@ nav button.active { background: #e2f3e7 !important; color: #176239 !important; f
 }
 .hero-status.healthy { background: linear-gradient(100deg,#f1fbf3,#fff) !important; border-color: #b8dec3 !important; }
 .hero-status.warning { background: #fff8ef !important; border-color: #ecd8b2 !important; }
+.cloud-recovery-feedback { background: #f0f8f2 !important; border-color: #b8dec3 !important; color: #255337 !important; }
+.cloud-recovery-feedback.failed { background: #fff6ed !important; border-color: #eccaa5 !important; color: #864c21 !important; }
 .hero-icon, .work-status-icon, .component-icon, .metric-icon { background: #e8f4ec !important; color: #287149 !important; }
 .work-status-card.working { border-color: #a8d6b6 !important; background: #f7fdf8 !important; }
 .work-status-card.waiting { border-color: #ebd49c !important; background: #fffbef !important; }

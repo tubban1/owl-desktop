@@ -59,6 +59,12 @@ declare global {
       cloudStop(): Promise<CloudBridgeStatus>;
       cloudSync(): Promise<CloudBridgeStatus>;
       recoverConnectivity(): Promise<{
+        recovery: {
+          ready: boolean;
+          code: string | null;
+          message: string;
+          nextAction: "none" | "account" | "diagnostics";
+        };
         mode: "cloud_durable" | "managed_tunnel" | "custom_tunnel";
         tunnel: TunnelStatus | null;
         cloudMcp: RuntimeSnapshot["cloudMcp"] | null;
