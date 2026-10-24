@@ -25,13 +25,13 @@ try{
   const extensionId=new URL(worker.url()).host;
   const popup=await context.newPage();
   await popup.goto("chrome-extension://"+extensionId+"/popup.html",{waitUntil:"domcontentloaded",timeout:12000});
-  await popup.locator("#code").fill(broker.pair().code);
+  await popup.locator("#code").fill(broker.pair("owl-workstream:real-chrome-test").code);
   await popup.locator("#pair").click();
   await popup.waitForFunction(()=>{
     const el=document.querySelector("#status");
     return el?.textContent?.includes("已连接 OWL");
   },undefined,{timeout:9000});
-  assert.equal(broker.status().connected,true);
+  assert.equal(broker.status("owl-workstream:real-chrome-test").connected,true);
   const status=await popup.locator("#status").innerText();
   console.log(JSON.stringify({ok:true,extensionInstalled:true,paired:true,extensionIdLength:extensionId.length,status:status.slice(0,100)}));
 }finally{

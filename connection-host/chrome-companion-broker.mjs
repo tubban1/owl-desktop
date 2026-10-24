@@ -15,18 +15,25 @@ export async function startChromeCompanionBroker({port=8794}={}) {
     for(const item of waiting.values()) {clearTimeout(item.timer);item.reject(invalid(code));}
     waiting.clear();
   }
-  function pair() {
+  function requireOwner(ownerId) {
+    if(typeof ownerId!=="string" || ownerId.length<3 || ownerId.length>200)throw invalid("COMPANION_OWNER_REQUIRED");
+    if(linked && linked.deadline>Date.now() && linked.ownerId!==ownerId)throw invalid("COMPANION_OWNED_BY_OTHER_SESSION");
+  }
+  function pair(ownerId) {
+    requireOwner(ownerId);
     clear("COMPANION_REPAIRED");
     const code=randomBytes(8).toString("hex").toUpperCase();
-    pairing={digest:digest(code),deadline:Date.now()+120000};failures=0;
+    pairing={digest:digest(code),deadline:Date.now()+120000,ownerId};failures=0;
     return {code,expiresAt:new Date(pairing.deadline).toISOString()};
   }
-  function status() {
-    return {connected:!!linked&&linked.deadline>Date.now(),extensionId:linked?.extensionId||null,pending:waiting.size};
+  function status(ownerId) {
+    const owned=!!linked&&linked.deadline>Date.now()&&linked.ownerId===ownerId;
+    return {connected:owned,extensionId:owned?linked.extensionId:null,pending:owned?waiting.size:0};
   }
-  async function command(op,args={}) {
+  async function command(op,args={},ownerId) {
+    requireOwner(ownerId);
     if(!["snapshot","fill","click","screenshot"].includes(op))throw invalid("OP_NOT_ALLOWED");
-    if(!status().connected)throw invalid("COMPANION_NOT_PAIRED");
+    if(!status(ownerId).connected)throw invalid("COMPANION_NOT_PAIRED");
     if(waiting.size>=2)throw invalid("COMPANION_BUSY");
     if(!["snapshot","screenshot"].includes(op)&&(typeof args.selector!=="string"||args.selector.length>320||args.selector.length===0))
       throw invalid("INVALID_SELECTOR");
@@ -46,7 +53,9 @@ export async function startChromeCompanionBroker({port=8794}={}) {
     }
     return await operation;
   }
-  function result(id){
+  function result(id,ownerId){
+    requireOwner(ownerId);
+    if(!status(ownerId).connected)throw invalid("COMPANION_NOT_PAIRED");
     if(!/^[a-f0-9]{32}$/.test(id))throw invalid("INVALID_REQUEST_ID");
     for(const [key,value] of completed)if(value.at<Date.now()-600000)completed.delete(key);
     if(waiting.has(id))return {pending:true,requestId:id};
@@ -80,7 +89,7 @@ export async function startChromeCompanionBroker({port=8794}={}) {
           failures++;throw invalid("PAIRING_INVALID");
         }
         const token=randomBytes(32).toString("hex");
-        linked={digest:digest(token),extensionId:origin.slice(19),deadline:Date.now()+900000};
+        linked={digest:digest(token),extensionId:origin.slice(19),deadline:Date.now()+900000,ownerId:pairing.ownerId};
         pairing=null;
         data={token,expiresAt:new Date(linked.deadline).toISOString()};
       } else {

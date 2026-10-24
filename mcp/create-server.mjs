@@ -2022,7 +2022,8 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
     {},{title:"Screenshot Authorized Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     async()=>{
       if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
-      const proof=await browserCompanion.command("screenshot");
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      const proof=await browserCompanion.command("screenshot",{},owner.runtimeSessionId);
       if(!proof||proof.mimeType!=="image/jpeg"||
          typeof proof.base64!=="string"||proof.base64.length>4_500_000||
          !/^[a-zA-Z0-9+/=]+$/.test(proof.base64)) {
@@ -2042,14 +2043,18 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
     {}, {title:"Pair OWL Chrome Companion",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
     async () => {
       if (!browserCompanion) throw new Error("Chrome Companion is not enabled in this Connection Host.");
-      return browserCompanion.pair();
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      return browserCompanion.pair(owner.runtimeSessionId);
     },
   );
   tool(
     server, "browser_companion_status",
     "Check whether the opt-in Chrome Companion extension is currently paired to this Mac.",
     {}, {title:"Chrome Companion Status",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
-    async () => browserCompanion?.status() ?? {connected:false},
+    async () => {
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      return browserCompanion?.status(owner.runtimeSessionId) ?? {connected:false};
+    },
   );
   tool(
     server, "browser_companion_snapshot",
@@ -2057,7 +2062,8 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
     {}, {title:"Inspect Authorized Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     async () => {
       if (!browserCompanion) throw new Error("Chrome Companion unavailable.");
-      return browserCompanion.command("snapshot");
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      return browserCompanion.command("snapshot",{},owner.runtimeSessionId);
     },
   );
   tool(
@@ -2067,7 +2073,8 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
     {title:"Fill Authorized Chrome Field",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async ({selector,text}) => {
       if (!browserCompanion) throw new Error("Chrome Companion unavailable.");
-      return browserCompanion.command("fill",{selector,text});
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      return browserCompanion.command("fill",{selector,text},owner.runtimeSessionId);
     },
   );
   tool(
@@ -2077,7 +2084,8 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
     {title:"Check Chrome Action Confirmation",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     async({request_id})=>{
       if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
-      return browserCompanion.result(request_id);
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      return browserCompanion.result(request_id,owner.runtimeSessionId);
     }
   );
 
@@ -2088,7 +2096,8 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
     {title:"Request Authorized Chrome Click",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async ({selector}) => {
       if (!browserCompanion) throw new Error("Chrome Companion unavailable.");
-      return browserCompanion.command("click",{selector});
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      return browserCompanion.command("click",{selector},owner.runtimeSessionId);
     },
   );
 

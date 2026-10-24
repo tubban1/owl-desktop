@@ -2,6 +2,8 @@ import {describe,it,expect} from "vitest";
 import {startChromeCompanionBroker} from "../connection-host/chrome-companion-broker.mjs";
 
 const ORIGIN="chrome-extension://"+"a".repeat(32);
+const OWNER="owl-workstream:test-owner";
+const OTHER="owl-workstream:another-session";
 describe("Chrome Companion localhost pairing and request relay",()=>{
   it("requires extension origin, an explicit one-use pairing code, and a scoped token",async()=>{
     const bridge=await startChromeCompanionBroker({port:0});
@@ -13,7 +15,7 @@ describe("Chrome Companion localhost pairing and request relay",()=>{
       return {status:response.status,payload:await response.json()};
     };
     try {
-      const one=bridge.pair();
+      const one=bridge.pair(OWNER);
       expect(one.code).toMatch(/^[A-F0-9]{16}$/);
       expect((await send("/v1/pair",{code:one.code},"","https://evil.example")).status).toBe(403);
       expect((await send("/v1/pair",{code:"0".repeat(16)})).status).toBe(400);
@@ -23,7 +25,10 @@ describe("Chrome Companion localhost pairing and request relay",()=>{
       expect(token).toMatch(/^[a-f0-9]{64}$/);
       expect((await send("/v1/pair",{code:one.code})).status).toBe(400);
       expect((await send("/v1/poll",{},"0".repeat(64))).status).toBe(401);
-      const request=bridge.command("snapshot");
+      expect(bridge.status(OTHER).connected).toBe(false);
+      expect(()=>bridge.pair(OTHER)).toThrow("COMPANION_OWNED_BY_OTHER_SESSION");
+      await expect(bridge.command("snapshot",{},OTHER)).rejects.toThrow("COMPANION_OWNED_BY_OTHER_SESSION");
+      const request=bridge.command("snapshot",{},OWNER);
       const pending=await send("/v1/poll",{},token);
       expect(pending.payload.data.requests).toHaveLength(1);
       const actionId=pending.payload.data.requests[0].id;
@@ -31,26 +36,26 @@ describe("Chrome Companion localhost pairing and request relay",()=>{
       expect((await send("/v1/result",{id:actionId,ok:true,result:{title:"Reddit"}},token)).status).toBe(200);
       expect(await request).toEqual({title:"Reddit"});
       expect((await send("/v1/result",{id:actionId,ok:true,result:{}},token)).status).toBe(400);
-      const click = await bridge.command("click",{selector:"#save"});
+      const click = await bridge.command("click",{selector:"#save"},OWNER);
       expect(click).toMatchObject({pending:true,requiresUserConfirmation:true});
-      expect(bridge.result(click.requestId)).toMatchObject({pending:true});
+      expect(bridge.result(click.requestId,OWNER)).toMatchObject({pending:true});
       const clickPoll=await send("/v1/poll",{},token);
       expect(clickPoll.payload.data.requests).toHaveLength(1);
       expect(clickPoll.payload.data.requests[0].id).toBe(click.requestId);
       expect(clickPoll.payload.data.requests[0].op).toBe("click");
       await send("/v1/result",{id:click.requestId,ok:true,result:{clicked:true,explicitUserApproval:true}},token);
       await new Promise(resolve=>setImmediate(resolve));
-      expect(bridge.result(click.requestId)).toMatchObject({pending:false,done:true,ok:true,result:{clicked:true}});
-      expect(bridge.status().connected).toBe(true);
+      expect(bridge.result(click.requestId,OWNER)).toMatchObject({pending:false,done:true,ok:true,result:{clicked:true}});
+      expect(bridge.status(OWNER).connected).toBe(true);
       expect((await send("/v1/revoke",{},token)).status).toBe(200);
-      expect(bridge.status().connected).toBe(false);
+      expect(bridge.status(OWNER).connected).toBe(false);
     }finally{await bridge.close();}
   });
   it("rejects unpaired actions and arbitrary script operations",async()=>{
     const bridge=await startChromeCompanionBroker({port:0});
     try{
-      await expect(bridge.command("click",{selector:"#save"})).rejects.toThrow("COMPANION_NOT_PAIRED");
-      await expect(bridge.command("javascript",{script:"alert(1)"})).rejects.toThrow("OP_NOT_ALLOWED");
+      await expect(bridge.command("click",{selector:"#save"},OWNER)).rejects.toThrow("COMPANION_NOT_PAIRED");
+      await expect(bridge.command("javascript",{script:"alert(1)"},OWNER)).rejects.toThrow("OP_NOT_ALLOWED");
     }finally{await bridge.close();}
   });
 });

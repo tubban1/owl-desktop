@@ -244,6 +244,9 @@ async function execute(command){
   }
 }
 chrome.runtime.onMessage.addListener((message,sender,respond)=>{
+  // The offscreen frame receiver handles this private channel. Replying here
+  // would race its response and break screenshot capture.
+  if(message?.channel==="owl-offscreen")return false;
   if(sender.id!==chrome.runtime.id||
      sender.url!==chrome.runtime.getURL("popup.html")){
     respond({ok:false,error:"UNTRUSTED_SENDER"});return false;
