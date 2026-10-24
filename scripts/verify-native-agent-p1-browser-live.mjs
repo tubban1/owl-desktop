@@ -59,6 +59,15 @@ try{
         const res=await fetch("/upload",{method:"POST",body}); const data=await res.json();
         document.querySelector("#receipt").textContent=data.ok?"UPLOAD VERIFIED BY SERVER":"UPLOAD FAILED";
       });
+    </script>
+    <iframe id="foreign-frame" src="${source}/human" title="Cross origin frame"></iframe>
+    <div id="closed-shadow-host"></div>
+    <div id="shadow-host"></div>
+    <script>
+      const root=document.getElementById("shadow-host").attachShadow({mode:"open"});
+      root.innerHTML='<input type="text" placeholder="Nested note"><div contenteditable="true" aria-label="Shadow note">initial</div>';
+      document.getElementById("closed-shadow-host").attachShadow({mode:"closed"}).innerHTML=
+        '<input type="text" placeholder="Closed secret">';
     </script>`);
   });
   const source=await listen(downloader), destination=await listen(uploader);
@@ -135,6 +144,20 @@ try{
   assert.equal(rejectedEditor,true);
   const pageCaps=await call(owner,"p2_capabilities");
   assert.ok(pageCaps.counts.editableElements>=2);
+  assert.equal(pageCaps.counts.openShadowRoots,1);
+  assert.ok(pageCaps.counts.crossOriginFrames>=1);
+  assert.equal(editingSnapshot.snapshot.controls.some(c=>c.label==="Closed secret"),false);
+  const shadowSnap=await call(owner,"snapshot");
+  const nestedInput=shadowSnap.snapshot.controls.find(c=>c.label==="Nested note");
+  const shadowEdit=shadowSnap.snapshot.controls.find(c=>c.label==="Shadow note");
+  assert.equal(nestedInput?.shadowDepth,1);
+  assert.equal(shadowEdit?.shadowDepth,1);
+  const filled=await call(owner,"fill",{uid:nestedInput.uid,value:"nested value"});
+  assert.equal(filled.filled,true);
+  assert.equal(await targetPage.locator("#shadow-host").evaluate(el=>el.shadowRoot.querySelector("input").value),"nested value");
+  const shadowResult=await call(owner,"edit_text",{uid:shadowEdit.uid,value:"shadow updated"});
+  assert.equal(shadowResult.domVerified,true);
+  assert.equal(await targetPage.locator("#shadow-host").evaluate(el=>el.shadowRoot.querySelector('[contenteditable]').textContent),"shadow updated");
   const inputs=await call(owner,"file_inputs");
   assert.equal(inputs.inputs.length,1);
   assert.equal(inputs.inputs[0].hidden,true);
@@ -161,7 +184,7 @@ try{
   assert.equal((await call(owner,"tabs")).tabs.length,0);
   console.log(JSON.stringify({ok:true,isolatedChromium:true,nativeMV3:true,ownedAgentTabs:true,
     actualChromeDownload:true,downloadIdempotent:true,ownerIsolation:true,hiddenFileSelection:true,
-    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
+    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
     humanForegroundPreserved:true,privateArtifactsNotExposedToMCP:true}));
 }finally{
   await browser?.close().catch(()=>{});

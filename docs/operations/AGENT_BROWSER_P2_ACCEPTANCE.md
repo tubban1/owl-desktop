@@ -46,3 +46,5 @@ The legacy ChatGPT Computer MCP plugin remains installed for the **Windows** hos
 - P2 can now query capabilities and edit **plain** contenteditable controls; it refuses framework-managed ProseMirror/Quill/Tiptap/Slate/Lexical editors. Returns DOM confirmation, never a false server-persistence claim. Empty/undefined injected-script results fail closed.
 - Full desktop automated suite: 107 files / 483 tests passed; TypeScript and production Vite build passed.
 - **Not yet proven:** the user's already running signed-in Chrome with the updated unpacked extension and Native Messaging, cross-browser restart/disconnect recovery, OS dialogs, macOS/Windows P3, and third-party production sites. Do not report those as passed.
+
+- P2 open Shadow DOM: browser snapshot recursively discovers visible controls in open roots (bounded depth 8 and 120 controls), with owner-scoped fill/edit. Isolated Chromium verifies both actions, excludes closed roots and never traverses cross-origin iframe content. Framework-managed editor mutations remain gated.

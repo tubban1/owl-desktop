@@ -37,19 +37,41 @@ export function createNativeAgentExecutor(chrome,storage){
       const s=getComputedStyle(e),r=e.getBoundingClientRect();
       return s.visibility!=="hidden"&&s.display!=="none"&&r.width>0&&r.height>0;
     };
-    const controls=[...document.querySelectorAll("a,button,input,textarea,select,[role=button],[contenteditable]:not([contenteditable=false])")]
-      .filter(visible).slice(0,120).map((el,i)=>{
-        const key="owl-agent-"+i;
-        el.setAttribute("data-owl-agent-control",key);
-        return {uid:key,tag:el.tagName.toLowerCase(),type:el.getAttribute("type")||"",
-          label:(el.getAttribute("aria-label")||el.getAttribute("placeholder")||
-          el.textContent||el.getAttribute("name")||"").trim().slice(0,125),
-          href:el.tagName==="A"?el.href:undefined};
-      });
+    // Inspect only this Agent-owned document and its *open* shadow roots.
+    // Cross-origin frames and closed roots remain out of scope; no OS focus.
+    const nodes=[];
+    const collect=(root,depth)=>{
+      if(depth>8 || nodes.length>=120)return;
+      for(const el of root.querySelectorAll("*")){
+        if(el.matches("a,button,input,textarea,select,[role=button],[contenteditable]:not([contenteditable=false])") &&
+           visible(el))nodes.push({el,shadowDepth:depth});
+        if(nodes.length>=120)break;
+        if(el.shadowRoot)collect(el.shadowRoot,depth+1);
+      }
+    };
+    collect(document,0);
+    const controls=nodes.slice(0,120).map(({el,shadowDepth},i)=>{
+      const key="owl-agent-"+i;
+      el.setAttribute("data-owl-agent-control",key);
+      return {uid:key,tag:el.tagName.toLowerCase(),type:el.getAttribute("type")||"",
+        label:(el.getAttribute("aria-label")||el.getAttribute("placeholder")||
+        el.textContent||el.getAttribute("name")||"").trim().slice(0,125),
+        shadowDepth,href:el.tagName==="A"?el.href:undefined};
+    });
     return {title:document.title,url:location.href,text:(document.body?.innerText||"").slice(0,10000),controls};
   }
   function operate(uid,value,op){
-    const el=document.querySelector('[data-owl-agent-control="'+CSS.escape(uid)+'"]');
+    const selector='[data-owl-agent-control="'+CSS.escape(uid)+'"]';
+    const find=(root,depth=0)=>{
+      if(depth>8)return null;
+      const hit=root.querySelector(selector);
+      if(hit)return hit;
+      for(const host of root.querySelectorAll("*")){
+        if(host.shadowRoot){const nested=find(host.shadowRoot,depth+1);if(nested)return nested;}
+      }
+      return null;
+    };
+    const el=find(document);
     if(!el)throw Error("AGENT_SNAPSHOT_STALE");
     const label=(el.getAttribute("aria-label")||el.textContent||el.getAttribute("name")||"").trim();
     const danger=/delete|destroy|logout|sign.?out|purchase|payment|pay now|checkout|unsubscribe|remove account|erase|security settings|disable account|删除|注销|付款/i;
