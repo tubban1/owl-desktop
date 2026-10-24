@@ -23,7 +23,7 @@ This is the initial, manually installed Chrome Companion integration for OWL Des
 
 ## Security and limitations
 
-- The broker binds only to 127.0.0.1:8794; Chrome extension origin and a one-time pairing code are required. No Cloud transport and no credential export.
+- The extension pairs locally with the broker bound to 127.0.0.1:8794; an extension origin and one-time pairing code are required. The extension does not copy cookies or export credentials. **When an OWL agent calls snapshot or screenshot tools, selected page text/images are returned through the OWL MCP connection to the invoking ChatGPT conversation (which may use the Cloud/Tunnel).** Do not authorize tabs containing secrets or data you do not want shared with that agent.
 - Chrome permissions: activeTab, scripting, storage, alarms, tabCapture, offscreen, and localhost host permission only. No debugger, cookies, or wildcard website access.
 - Form fills reject password, hidden, and sensitive auto-complete controls. Clicking requires an additional per-action human confirmation; some obviously destructive labels are blocked, but this is not a complete policy engine for arbitrary websites.
 - Screenshot requires user-initiated tab capture. It is not an automatic capture of all Chrome tabs. Video-only, bounded JPEG width.
