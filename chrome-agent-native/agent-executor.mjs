@@ -1,4 +1,5 @@
 import {discoverFileInputs,verifyFileInput,readFileInputSelection} from "./file-inputs.mjs";
+import {createAgentDownloadWorkflow,detectPageReceipt} from "./download-workflow.mjs";
 
 // Only tabs created through this executor can be accessed by an OWL Agent.
 // The store is chrome.storage.session: survives service-worker suspension,
@@ -9,6 +10,7 @@ const urlOrigin=url=>{
   catch{return null;}
 };
 export function createNativeAgentExecutor(chrome,storage){
+  const downloads=createAgentDownloadWorkflow(chrome,storage);
   const read=async()=>({owned:(await storage.get("owlNativeOwned")).owlNativeOwned||{},
     selected:(await storage.get("owlNativeSelected")).owlNativeSelected||{}});
   const save=async s=>storage.set({owlNativeOwned:s.owned,owlNativeSelected:s.selected});
@@ -102,6 +104,28 @@ export function createNativeAgentExecutor(chrome,storage){
     if(op==="status")return {ready:true,transport:"native-messaging"};
     if(op==="close_tab"&&!Number.isInteger(args.pageId))throw Error("AGENT_TAB_ID_REQUIRED");
     const {state,tab,tabId}=await current(owner,op==="close_tab"?{tabId:args.pageId}:{});
+    if(op==="download_start"){
+      if(typeof args.linkUid!=="string"||args.linkUid.length>120)
+        throw Error("DOWNLOAD_LINK_UID_INVALID");
+      return downloads.start(owner,tab,args,inject);
+    }
+    if(op==="download_status")return downloads.state(owner,args.downloadId);
+    if(op==="download_cancel")return downloads.cancel(owner,args.downloadId);
+    if(op==="download_list")return downloads.list(owner);
+    if(op==="download_artifact"){
+      // Only the trusted local Host consumes localPath; never return this
+      // operation as an Agent-facing MCP tool.
+      return downloads.state(owner,args.downloadId,{includePath:true});
+    }
+    if(op==="receipt_check"){
+      if(typeof args.expectedText!=="string"||args.expectedText.length<3||
+         args.expectedText.length>160)throw Error("RECEIPT_TEXT_INVALID");
+      const origin=new URL(tab.url).origin;
+      const check=await inject(tabId,detectPageReceipt,[args.expectedText,origin]);
+      return {pageId:tabId,state:check?.observed?"ui_observed":"not_observed",
+        observed:!!check?.observed,websiteUploadVerified:false,
+        source:"page_visible_text",origin};
+    }
     if(op==="file_inputs"){
       const discovered=await inject(tabId,discoverFileInputs);
       return {pageId:tabId,...discovered};
