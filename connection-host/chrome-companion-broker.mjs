@@ -52,7 +52,7 @@ export async function startChromeCompanionBroker({port=8794}={}) {
     if(op==="click"){
       void operation.then(value=>completed.set(id,{done:true,ok:true,result:value,at:Date.now()}),
         error=>completed.set(id,{done:true,ok:false,error:error.code||"ACTION_FAILED",at:Date.now()}));
-      return {pending:true,requestId:id,requiresUserConfirmation:true};
+      return {pending:true,requestId:id,approvalMayBeRequired:true,checkResult:true};
     }
     return await operation;
   }

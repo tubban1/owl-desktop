@@ -37,7 +37,7 @@ describe("Chrome Companion localhost pairing and request relay",()=>{
       expect(await request).toEqual({title:"Reddit"});
       expect((await send("/v1/result",{id:actionId,ok:true,result:{}},token)).status).toBe(400);
       const click = await bridge.command("click",{selector:"#save"},OWNER);
-      expect(click).toMatchObject({pending:true,requiresUserConfirmation:true});
+      expect(click).toMatchObject({pending:true,approvalMayBeRequired:true,checkResult:true});
       expect(bridge.result(click.requestId,OWNER)).toMatchObject({pending:true});
       const clickPoll=await send("/v1/poll",{},token);
       expect(clickPoll.payload.data.requests).toHaveLength(1);
