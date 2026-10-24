@@ -70,6 +70,12 @@ describe("Chrome Companion explicit single-tab pilot", () => {
     }
     expect(() => grantFor({id: -1, url: "https://example.com"})).toThrow();
   });
+  it("service worker ignores the private offscreen capture response channel", () => {
+    let called=false;
+    const result=listeners.message({channel:"owl-offscreen",type:"frame"}, {id:"owl-test-extension"},()=>{called=true;});
+    expect(result).toBe(false);
+    expect(called).toBe(false);
+  });
   it("only grants after explicit attach from its own popup and never exposes URL path", async () => {
     expect((await command("status")).data.authorized).toBe(false);
     const before = await command("attach", {id: "another", url: "https://malicious.site"});
