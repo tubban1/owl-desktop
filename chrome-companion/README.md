@@ -6,7 +6,7 @@ This is the initial, manually installed Chrome Companion integration for OWL Des
 
 1. Update OWL Desktop / Connection Host to a build containing this code. The original Host must restart once to load the new local broker and MCP tool registry. Do this after other live MCP sessions finish; it briefly disconnects them. OWL Runtime itself does not need restarting.
 2. In regular Chrome, open chrome://extensions; enable Developer mode and choose Load unpacked; select the owl-desktop/chrome-companion directory. There is no need to restart Chrome or log out of Reddit.
-3. In ChatGPT with the connected OWL LAB MCP, request the browser_companion_pair tool; it returns a 16-character code valid for 2 minutes.
+3. In ChatGPT with the connected OWL LAB MCP, request the browser_companion_pair tool; it returns a 16-character, single-use code valid for 15 minutes.
 4. In the signed-in Reddit/website tab, click the OWL Chrome Companion icon, type the code and click 连接 OWL LAB, then 授权此标签页（2 分钟）. The agent can now call browser_companion_status or browser_companion_snapshot.
 5. To fill a normal non-password field, you must also click 允许填写表单. Then the agent uses browser_companion_fill with a CSS selector. This operation does not submit.
 6. To save, the agent calls browser_companion_click, which immediately returns a pending request ID. The extension displays a badge (!); YOU MUST reopen it, review the origin, actual button label and selector, then click 我确认，执行点击. The agent checks browser_companion_action_result with that ID; only a done=true, ok=true result is a successful click. Then re-read the page to confirm it actually saved.

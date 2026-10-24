@@ -51,6 +51,37 @@ describe("Chrome Companion localhost pairing and request relay",()=>{
       expect(bridge.status(OWNER).connected).toBe(false);
     }finally{await bridge.close();}
   });
+  it("keeps one-use pairing code valid for 15 minutes, not just two",async()=>{
+    const {vi}=await import("vitest");
+    const clock=vi.spyOn(Date,"now");
+    const baseline=new Date("2026-10-24T12:00:00Z").getTime();
+    let now=baseline;
+    clock.mockImplementation(()=>now);
+    const bridge=await startChromeCompanionBroker({port:0});
+    const send=async(code)=>{
+      const response=await fetch(bridge.url+"/v1/pair",{
+        method:"POST",
+        headers:{origin:ORIGIN,"content-type":"application/json"},
+        body:JSON.stringify({code})
+      });
+      return {status:response.status,data:await response.json()};
+    };
+    try{
+      const first=bridge.pair(OWNER);
+      expect(new Date(first.expiresAt).getTime()-baseline).toBe(15*60*1000);
+      now=baseline+4*60*1000;
+      const accepted=await send(first.code);
+      expect(accepted.status).toBe(200);
+      expect((await send(first.code)).status).toBe(400);
+      const second=bridge.pair(OWNER);
+      now=baseline+4*60*1000+15*60*1000+1;
+      const expired=await send(second.code);
+      expect(expired.data).toMatchObject({ok:false,error:"PAIRING_EXPIRED"});
+    }finally{
+      clock.mockRestore();
+      await bridge.close();
+    }
+  });
   it("rejects unpaired actions and arbitrary script operations",async()=>{
     const bridge=await startChromeCompanionBroker({port:0});
     try{

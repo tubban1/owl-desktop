@@ -4,6 +4,7 @@ import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 const digest = value => createHash("sha256").update(value).digest("hex");
 const originOK = origin => /^chrome-extension:\/\/[a-p]{32}$/.test(origin || "");
 const HOST = "127.0.0.1";
+const PAIRING_CODE_TTL_MS = 15 * 60 * 1000; // One-time code; independent of the tab grant TTL.
 const invalid = code => Object.assign(new Error(code),{code});
 
 export async function startChromeCompanionBroker({port=8794}={}) {
@@ -23,7 +24,7 @@ export async function startChromeCompanionBroker({port=8794}={}) {
     requireOwner(ownerId);
     clear("COMPANION_REPAIRED");
     const code=randomBytes(8).toString("hex").toUpperCase();
-    pairing={digest:digest(code),deadline:Date.now()+120000,ownerId};failures=0;
+    pairing={digest:digest(code),deadline:Date.now()+PAIRING_CODE_TTL_MS,ownerId};failures=0;
     return {code,expiresAt:new Date(pairing.deadline).toISOString()};
   }
   function status(ownerId) {
