@@ -1,6 +1,7 @@
 import {discoverFileInputs,verifyFileInput,readFileInputSelection} from "./file-inputs.mjs";
 import {createAgentDownloadWorkflow,detectPageReceipt} from "./download-workflow.mjs";
 import {inspectP2Capabilities} from "./p2-capabilities.mjs";
+import {pastePlainText,dragDropWithinPage} from "./p2-interactions.mjs";
 
 // Only tabs created through this executor can be accessed by an OWL Agent.
 // The store is chrome.storage.session: survives service-worker suspension,
@@ -43,7 +44,7 @@ export function createNativeAgentExecutor(chrome,storage){
     const collect=(root,depth)=>{
       if(depth>8 || nodes.length>=120)return;
       for(const el of root.querySelectorAll("*")){
-        if(el.matches("a,button,input,textarea,select,[role=button],[contenteditable]:not([contenteditable=false])") &&
+        if(el.matches("a,button,input,textarea,select,[role=button],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone]") &&
            visible(el))nodes.push({el,shadowDepth:depth});
         if(nodes.length>=120)break;
         if(el.shadowRoot)collect(el.shadowRoot,depth+1);
@@ -219,6 +220,23 @@ export function createNativeAgentExecutor(chrome,storage){
       const r=await inject(tabId,operate,[args.uid,args.value,"edit_text"]);
       if(r?.error)throw Error(r.error);
       if(r?.edited!==true)throw Error("EDITOR_NOT_CONFIRMED");
+      return {pageId:tabId,...r};
+    }
+    if(op==="paste_text"){
+      if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid)||
+         typeof args.text!=="string"||args.text.length>4000)throw Error("PASTE_ARGUMENT_INVALID");
+      const r=await inject(tabId,pastePlainText,[args.uid,args.text,new URL(tab.url).origin]);
+      if(r?.error)throw Error(r.error);
+      if(r?.pasted!==true||r?.domVerified!==true)throw Error("PASTE_NOT_CONFIRMED");
+      return {pageId:tabId,...r};
+    }
+    if(op==="drag_drop"){
+      if(typeof args.sourceUid!=="string"||typeof args.targetUid!=="string"||
+         !/^owl-agent-\d{1,3}$/.test(args.sourceUid)||!/^owl-agent-\d{1,3}$/.test(args.targetUid))
+        throw Error("DRAG_TARGET_INVALID");
+      const r=await inject(tabId,dragDropWithinPage,[args.sourceUid,args.targetUid,new URL(tab.url).origin]);
+      if(r?.error)throw Error(r.error);
+      if(!r?.domVerified)throw Error("DROP_EFFECT_NOT_OBSERVED");
       return {pageId:tabId,...r};
     }
     if(op==="click"){

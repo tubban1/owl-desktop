@@ -10,6 +10,16 @@ export function registerBrowserWorkflowTools({tool,server,z,trustedUserChrome}) 
     {uid:z.string().min(1).max(100),value:z.string().max(4000)},
     {title:"Edit Agent Page Plain Text",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async({uid,value})=>{const{bridge,owner}=trustedUserChrome();return bridge.editText(owner,uid,value);});
+  tool(server,"browser_agent_paste_text",
+    "Paste supplied plain text into a non-sensitive Agent-owned input or plain editor. Does NOT access the OS clipboard; reports DOM verification only, not persistence.",
+    {uid:z.string().min(1).max(100),text:z.string().max(4000)},
+    {title:"Paste Text in Agent Browser",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({uid,text})=>{const{bridge,owner}=trustedUserChrome();return bridge.pasteText(owner,uid,text);});
+  tool(server,"browser_agent_drag_drop",
+    "Dispatch a text-only drag from a previously observed draggable element to a dropzone inside the same Agent-owned tab, requiring observed DOM change. Does NOT move the OS pointer or transfer files.",
+    {source_uid:z.string().min(1).max(100),target_uid:z.string().min(1).max(100)},
+    {title:"Drag Within Agent Browser",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({source_uid,target_uid})=>{const{bridge,owner}=trustedUserChrome();return bridge.dragDrop(owner,source_uid,target_uid);});
   tool(server,"browser_agent_download_file",
     "Download a file only from a link UID observed on an Agent-owned signed-in Chrome tab. Same-origin safe file links only; request_id provides retry idempotency.",
     {link_uid:z.string().min(1).max(120),request_id:z.string().uuid()},

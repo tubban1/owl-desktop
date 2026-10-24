@@ -43,6 +43,8 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     snapshot:owner=>req(owner,"snapshot"),
     fill:(owner,uid,value)=>req(owner,"fill",{uid,value}),
     editText:(owner,uid,value)=>req(owner,"edit_text",{uid,value}),
+    pasteText:(owner,uid,text)=>req(owner,"paste_text",{uid,text}),
+    dragDrop:(owner,sourceUid,targetUid)=>req(owner,"drag_drop",{sourceUid,targetUid}),
     p2Capabilities:owner=>req(owner,"p2_capabilities"),
     click:(owner,uid)=>req(owner,"click",{uid}),
     screenshot:owner=>req(owner,"screenshot"),
@@ -61,7 +63,7 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     releaseFiles:(owner,tickets)=>upload.release({owner,ticketIds:tickets}),
     capabilities:()=>({transport:"chrome-native-messaging",
       fileUpload:upload?.capabilities()??{uploadFile:false},
-      standardInput:true,hiddenInput:true,downloads:true,downloadToUpload:true,uiReceiptCheck:true,dragDrop:false,nativePicker:false}),
+      standardInput:true,hiddenInput:true,downloads:true,downloadToUpload:true,uiReceiptCheck:true,plainTextPaste:true,textDragDrop:true,fileDragDrop:false,osClipboard:false,nativePicker:false}),
     status:()=>broker.status(),
     close:async()=>{} // broker/upload lifecycle belongs to Connection Host
   };

@@ -48,3 +48,11 @@ The legacy ChatGPT Computer MCP plugin remains installed for the **Windows** hos
 - **Not yet proven:** the user's already running signed-in Chrome with the updated unpacked extension and Native Messaging, cross-browser restart/disconnect recovery, OS dialogs, macOS/Windows P3, and third-party production sites. Do not report those as passed.
 
 - P2 open Shadow DOM: browser snapshot recursively discovers visible controls in open roots (bounded depth 8 and 120 controls), with owner-scoped fill/edit. Isolated Chromium verifies both actions, excludes closed roots and never traverses cross-origin iframe content. Framework-managed editor mutations remain gated.
+
+## 2026-10-25 — P2 text interactions
+
+- \`browser_agent_paste_text\` dispatches a webpage ClipboardEvent with **Agent-provided plain text** to an owned, non-sensitive control; if the page does not handle it, the Agent uses a bounded DOM-only setter. It never reads or changes the user's macOS/Windows system clipboard and never emits HTML. Result \`domVerified\` is local DOM evidence, not persistence.
+- \`browser_agent_drag_drop\` dispatches only **synthetic text-only** DragEvent events between two previously observed controls in the same Agent-owned tab, requiring a draggable source and a declared dropzone. It returns success only if the DOM changes. The result explicitly says \`fileTransferred:false\`, \`systemPointerMoved:false\`, \`syntheticEvents:true\`.
+- All actions require the existing Agent tab ownership gate. Sensitive/password targets, other Agent tabs, non-dropzones, unchanged DOM, rich editor frameworks and untrusted file drops are rejected or left to explicit adapter/P3.
+- Isolated real Chrome MV3 test: \`node scripts/verify-native-agent-p1-browser-live.mjs\`; now covers both actions and adverse cases.
+- P3 browser-native file dialogs are **not** solved by synthetic drag/drop. Only enable OS file picker fallbacks after local platform-specific consent, UI-target verification, focus impact checks, and a verified postcondition.

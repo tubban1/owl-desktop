@@ -50,6 +50,11 @@ try{
     }
     res.writeHead(200,{"content-type":"text/html","cache-control":"no-store"});
     res.end(`<!doctype html><title>Destination</title>
+    <textarea id="paste" aria-label="Paste notes"></textarea>
+    <input id="password" type="password" aria-label="Password">
+    <div id="drag-item" draggable="true" aria-label="Draft card">Card</div>
+    <div id="dropzone" data-dropzone="true" aria-label="Board slot">Empty</div>
+    <div id="no-drop" data-dropzone="true" aria-label="Inert slot">Empty</div>
     <form id="form"><input id="upload" type="file" name="attachment" style="display:none" accept=".txt">
     <span id="receipt">awaiting file</span></form><div contenteditable="true" aria-label="Simple note">original</div><div class="ProseMirror" contenteditable="true" aria-label="Rich editor">framework</div>
     <script>
@@ -66,6 +71,10 @@ try{
     <script>
       const root=document.getElementById("shadow-host").attachShadow({mode:"open"});
       root.innerHTML='<input type="text" placeholder="Nested note"><div contenteditable="true" aria-label="Shadow note">initial</div>';
+      document.querySelector("#dropzone").addEventListener("dragover",e=>e.preventDefault());
+      document.querySelector("#dropzone").addEventListener("drop",e=>{
+        e.preventDefault();document.querySelector("#dropzone").textContent="Received: "+e.dataTransfer.getData("text/plain");
+      });
       document.getElementById("closed-shadow-host").attachShadow({mode:"closed"}).innerHTML=
         '<input type="text" placeholder="Closed secret">';
     </script>`);
@@ -158,6 +167,28 @@ try{
   const shadowResult=await call(owner,"edit_text",{uid:shadowEdit.uid,value:"shadow updated"});
   assert.equal(shadowResult.domVerified,true);
   assert.equal(await targetPage.locator("#shadow-host").evaluate(el=>el.shadowRoot.querySelector('[contenteditable]').textContent),"shadow updated");
+  const interactionSnapshot=await call(owner,"snapshot");
+  const uid=label=>interactionSnapshot.snapshot.controls.find(c=>c.label===label)?.uid;
+  assert.ok(uid("Paste notes")&&uid("Password")&&uid("Draft card")&&uid("Board slot")&&uid("Inert slot"));
+  const paste=await call(owner,"paste_text",{uid:uid("Paste notes"),text:"OWL P2 pasted text"});
+  assert.equal(paste.domVerified,true);assert.equal(paste.systemClipboardTouched,false);
+  assert.equal(await targetPage.locator("#paste").inputValue(),"OWL P2 pasted text");
+  let sensitiveDenied=false;
+  try{await call(owner,"paste_text",{uid:uid("Password"),text:"not-allowed"});}
+  catch(e){sensitiveDenied=/SENSITIVE_OR_INVALID_FIELD/.test(e.message);}
+  assert.equal(sensitiveDenied,true);
+  assert.equal(await targetPage.locator("#password").inputValue(),"");
+  let foreignDenied=false;
+  try{await call("foreign-agent","drag_drop",{sourceUid:uid("Draft card"),targetUid:uid("Board slot")});}
+  catch(e){foreignDenied=/AGENT_TAB_NOT_OWNED/.test(e.message);}
+  assert.equal(foreignDenied,true);
+  let noEffectDenied=false;
+  try{await call(owner,"drag_drop",{sourceUid:uid("Draft card"),targetUid:uid("Inert slot")});}
+  catch(e){noEffectDenied=/DROP_EFFECT_NOT_OBSERVED/.test(e.message);}
+  assert.equal(noEffectDenied,true);
+  const drag=await call(owner,"drag_drop",{sourceUid:uid("Draft card"),targetUid:uid("Board slot")});
+  assert.equal(drag.domVerified,true);assert.equal(drag.fileTransferred,false);
+  assert.match(await targetPage.locator("#dropzone").textContent(),/Received:/);
   const inputs=await call(owner,"file_inputs");
   assert.equal(inputs.inputs.length,1);
   assert.equal(inputs.inputs[0].hidden,true);
@@ -184,7 +215,7 @@ try{
   assert.equal((await call(owner,"tabs")).tabs.length,0);
   console.log(JSON.stringify({ok:true,isolatedChromium:true,nativeMV3:true,ownedAgentTabs:true,
     actualChromeDownload:true,downloadIdempotent:true,ownerIsolation:true,hiddenFileSelection:true,
-    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
+    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,p2TextPaste:true,p2DragDrop:true,p2DeniedSensitiveAndInert:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
     humanForegroundPreserved:true,privateArtifactsNotExposedToMCP:true}));
 }finally{
   await browser?.close().catch(()=>{});
