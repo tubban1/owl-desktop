@@ -6,7 +6,7 @@ const memory={polling:false};
 async function get(key){return (await chrome.storage.session.get(key))[key]||null;}
 async function put(key,value){await chrome.storage.session.set({[key]:value});}
 async function clear(key){await chrome.storage.session.remove(key);}
-async function revoke(){await clear(GRANT);await clear(PENDING);await stopCapture();await chrome.action.setBadgeText({text:""}).catch(()=>{});}
+async function revoke(){await clear(GRANT);await clear(PENDING);await chrome.alarms.clear("owlCompanionGrantExpiry").catch(()=>{});await stopCapture();await chrome.action.setBadgeText({text:""}).catch(()=>{});}
 async function linkedRequest(path,payload={},tokenOverride=null){
   const link=await get(LINK);
   const token=tokenOverride||link?.token;
@@ -173,8 +173,12 @@ function ensurePolling(){
 }
 if(chrome.alarms){
   chrome.alarms.create("owlCompanionPoll",{periodInMinutes:0.5});
-  chrome.alarms.onAlarm.addListener(alarm=>{
+  chrome.alarms.onAlarm.addListener(async alarm=>{
     if(alarm.name==="owlCompanionPoll"){ensurePolling();void poll();}
+    if(alarm.name==="owlCompanionGrantExpiry"){
+      const grant=await get(GRANT);
+      if(grant && grant.expiresAt<=Date.now())await revoke();
+    }
   });
 }
 ensurePolling();
@@ -199,6 +203,7 @@ async function execute(command){
       const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
       const grant={...grantFor(tab),canFill:false};
       await put(GRANT,grant);await clear(PENDING);
+      chrome.alarms.create("owlCompanionGrantExpiry",{when:grant.expiresAt});
       return {authorized:true,origin:grant.origin,tabId:grant.tabId,expiresAt:grant.expiresAt};
     }
     case "enableEditing":{

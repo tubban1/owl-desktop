@@ -9,7 +9,7 @@ const tabs = new Map([[42, active], [43, {id: 43, url: "https://other.example/",
 let injected = 0;
 const fakeChrome = {
   action: {setBadgeText: async () => {},setBadgeBackgroundColor: async () => {}},
-  alarms: {create: () => {},onAlarm: {addListener: fn => {listeners.alarm = fn;}}},
+  alarms: {create: () => {},clear: async () => true,onAlarm: {addListener: fn => {listeners.alarm = fn;}}},
   tabCapture: {getMediaStreamId: async ({targetTabId}) => {expect(targetTabId).toBe(42);return "test-stream";}},
   offscreen: {createDocument: async () => {},closeDocument: async () => {}},
   runtime: {
@@ -123,6 +123,16 @@ describe("Chrome Companion explicit single-tab pilot", () => {
     expect((await command("status")).data.capturing).toBe(true);
     await command("stopCapture");
     expect((await command("status")).data.capturing).toBe(false);
+  });
+  it("automatically revokes authorization and stops capture at grant deadline", async () => {
+    await command("attach");
+    await command("startCapture");
+    expect(stored.get("owlCaptureTab")).toBe(42);
+    stored.get("owlAttachedTab").expiresAt=Date.now()-1;
+    await listeners.alarm({name:"owlCompanionGrantExpiry"});
+    expect(stored.has("owlAttachedTab")).toBe(false);
+    expect(stored.has("owlCaptureTab")).toBe(false);
+    expect(stored.has("owlPendingClick")).toBe(false);
   });
   it("policy enforces origin and expiry, snapshots omit input values", () => {
     const tab = {id: 11, url:"https://reddit.com/user/a?token=private"};
