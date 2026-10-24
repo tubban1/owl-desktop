@@ -1,5 +1,6 @@
 import {discoverFileInputs,verifyFileInput,readFileInputSelection} from "./file-inputs.mjs";
 import {createAgentDownloadWorkflow,detectPageReceipt} from "./download-workflow.mjs";
+import {inspectP2Capabilities} from "./p2-capabilities.mjs";
 
 // Only tabs created through this executor can be accessed by an OWL Agent.
 // The store is chrome.storage.session: survives service-worker suspension,
@@ -125,6 +126,10 @@ export function createNativeAgentExecutor(chrome,storage){
       return {pageId:tabId,state:check?.observed?"ui_observed":"not_observed",
         observed:!!check?.observed,websiteUploadVerified:false,
         source:"page_visible_text",origin};
+    }
+    if(op==="p2_capabilities"){
+      const result=await inject(tabId,inspectP2Capabilities);
+      return {pageId:tabId,...result};
     }
     if(op==="file_inputs"){
       const discovered=await inject(tabId,discoverFileInputs);
