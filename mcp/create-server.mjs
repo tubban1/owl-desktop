@@ -1989,6 +1989,62 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     async({uid})=>{const{bridge,owner}=trustedUserChrome();return bridge.click(owner,uid);}
   );
   tool(
+    server,"browser_agent_capabilities",
+    "Report which OWL browser capabilities are available and whether the Native Host has user-approved local file roots. Never infer filesystem authorization from browser access.",
+    {},{title:"Agent Browser Capabilities",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>{
+      const{bridge}=trustedUserChrome();
+      return bridge.capabilities?.()??{fileUpload:{uploadFile:false},reason:"NATIVE_FILE_UPLOAD_UNAVAILABLE"};
+    }
+  );
+  tool(
+    server,"browser_agent_file_inputs",
+    "Discover normal and hidden HTML file inputs only on the current Agent-owned tab. Returns opaque DOM control UID, accept and multiple flags; no OS file picker opened.",
+    {},{title:"Discover Browser File Inputs",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async()=>{const{bridge,owner}=trustedUserChrome();return bridge.fileInputs(owner);}
+  );
+  tool(
+    server,"browser_agent_prepare_file",
+    "Stage one local file from OWL_HOST_ALLOWLISTED file roots for upload to the current Agent tab origin. Returns a 15-minute opaque file_ticket, basename, size and hash prefix. Cannot read arbitrary paths, secrets, symlinks or files outside OWL_AGENT_UPLOAD_ROOTS.",
+    {file_path:z.string().min(1).max(4096)},
+    {title:"Authorize Local Upload File",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    async({file_path})=>{
+      const{bridge,owner}=trustedUserChrome();
+      return bridge.prepareFile(owner,file_path);
+    }
+  );
+  tool(
+    server,"browser_agent_upload_file",
+    "Attach 1–5 authorized local file tickets to an HTML input[type=file] in the current Agent-owned Chrome tab. Tab-scoped debugger DOM.setFileInputFiles; no Finder dialog, no 9222. Returns state=selected, NOT confirmed website upload. Only stage files preapproved by OWL_AGENT_UPLOAD_ROOTS, task Session and destination site.",
+    {page_id:z.number().int().nonnegative(),input_uid:z.string().min(1).max(100),
+      file_tickets:z.array(z.string().regex(/^[0-9a-f]{48}$/)).min(1).max(5)},
+    {title:"Attach Approved File to Browser Upload",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({page_id,input_uid,file_tickets})=>{
+      const{bridge,owner}=trustedUserChrome();
+      return bridge.uploadFile(owner,{pageId:page_id,inputUid:input_uid,fileTickets:file_tickets});
+    }
+  );
+  tool(
+    server,"browser_agent_upload_status",
+    "Read the owner-scoped local browser file-selection receipt. Selection does not prove the website received an upload; inspect the site UI/network receipt separately.",
+    {upload_id:z.string().uuid()},
+    {title:"Browser Upload Status",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async({upload_id})=>{
+      const{bridge,owner}=trustedUserChrome();
+      return bridge.uploadStatus(owner,upload_id);
+    }
+  );
+  tool(
+    server,"browser_agent_release_file",
+    "Release temporary local file tickets after upload/verification. Does not delete original files. Only tickets belonging to this OWL Session can be released.",
+    {file_tickets:z.array(z.string().regex(/^[0-9a-f]{48}$/)).min(1).max(5)},
+    {title:"Release Temporary Upload Files",readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async({file_tickets})=>{
+      const{bridge,owner}=trustedUserChrome();
+      return bridge.releaseFiles(owner,file_tickets);
+    }
+  );
+  tool(
     server,"browser_agent_screenshot",
     "Take a background screenshot from this Agent's current tab in the user's real Chrome, without activating the tab.",
     {},{title:"Screenshot My Agent Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},

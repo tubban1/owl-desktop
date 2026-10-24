@@ -1,3 +1,5 @@
+import {discoverFileInputs,verifyFileInput,readFileInputSelection} from "./file-inputs.mjs";
+
 // Only tabs created through this executor can be accessed by an OWL Agent.
 // The store is chrome.storage.session: survives service-worker suspension,
 // but never authorizes a pre-existing human tab.
@@ -100,6 +102,37 @@ export function createNativeAgentExecutor(chrome,storage){
     if(op==="status")return {ready:true,transport:"native-messaging"};
     if(op==="close_tab"&&!Number.isInteger(args.pageId))throw Error("AGENT_TAB_ID_REQUIRED");
     const {state,tab,tabId}=await current(owner,op==="close_tab"?{tabId:args.pageId}:{});
+    if(op==="file_inputs"){
+      const discovered=await inject(tabId,discoverFileInputs);
+      return {pageId:tabId,...discovered};
+    }
+    if(op==="upload_file"){
+      const uid=args.inputUid,files=args.files,expectedOrigin=args.origin;
+      if(args.pageId!==tabId||!Array.isArray(files)||files.length<1||files.length>5 ||
+         !files.every(f=>f && typeof f.stagedPath==="string" && f.stagedPath.startsWith("/") &&
+          typeof f.filename==="string" && f.filename.length>0 && f.filename.length<256))
+        throw Error("UPLOAD_ARGUMENTS_INVALID");
+      if(new URL(tab.url).origin!==expectedOrigin)throw Error("UPLOAD_ORIGIN_CHANGED");
+      await inject(tabId,verifyFileInput,[uid,expectedOrigin,files.length]);
+      const target={tabId};
+      await chrome.debugger.attach(target,"1.3");
+      try{
+        const doc=await chrome.debugger.sendCommand(target,"DOM.getDocument",{depth:0});
+        const found=await chrome.debugger.sendCommand(target,"DOM.querySelector",{
+          nodeId:doc?.root?.nodeId,
+          selector:'input[type="file"][data-owl-file-uid="'+uid+'"]'
+        });
+        if(!Number.isInteger(found?.nodeId)||found.nodeId<1)throw Error("UPLOAD_INPUT_NOT_FOUND_IN_DOM");
+        await chrome.debugger.sendCommand(target,"DOM.setFileInputFiles",{
+          nodeId:found.nodeId,files:files.map(f=>f.stagedPath)
+        });
+      }finally{await chrome.debugger.detach(target).catch(()=>{});}
+      const check=await inject(tabId,readFileInputSelection,[uid,expectedOrigin]);
+      if(check.selectedCount!==files.length ||
+         !check.fileNames.every((n,i)=>n===files[i].filename))throw Error("UPLOAD_SELECTION_UNCONFIRMED");
+      return {pageId:tabId,selected:true,selectedCount:check.selectedCount,
+        selectedFileNames:check.fileNames,websiteUploadVerified:false};
+    }
     if(op==="snapshot"){
       const result=await inject(tabId,inspect);
       return {pageId:tabId,snapshot:result};

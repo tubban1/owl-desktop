@@ -18,6 +18,7 @@ import { startChromeCompanionBroker } from "./chrome-companion-broker.mjs";
 import { createUserChromeBridge } from "./user-chrome-bridge.mjs";
 import { startNativeMessagingBroker } from "./native-messaging-broker.mjs";
 import { createNativeChromeBridge } from "./native-user-chrome-bridge.mjs";
+import { createAgentUploadBroker } from "./agent-upload-broker.mjs";
 
 // A detached supervising terminal must not kill the long-lived Host.
 installStdioEpipeGuard();
@@ -137,9 +138,10 @@ const nativeChromeBroker = await startNativeMessagingBroker({
   record("warn","chrome-native","Native Messaging unavailable",{code:error?.code||"NATIVE_BROKER_START_FAILED"});
   return null;
 });
+const uploadBroker=createAgentUploadBroker();
 const userChromeBridge = process.env.OWL_CHROME_BACKEND==="devtools"
   ? createUserChromeBridge() // optional legacy debugging mode
-  : nativeChromeBroker ? createNativeChromeBridge({broker:nativeChromeBroker}) : null;
+  : nativeChromeBroker ? createNativeChromeBridge({broker:nativeChromeBroker,uploadBroker}) : null;
 const browserCompanion = await startChromeCompanionBroker({ port: Number(process.env.OWL_CHROME_COMPANION_PORT || "8794") }).catch(error => {
   record("warn","chrome-companion","Browser companion unavailable; other OWL services will continue",{code:error?.code||"BROKER_START_FAILED"});
   return null;
@@ -412,9 +414,10 @@ async function shutdown(signal) {
     boundedStep("Chrome Companion broker close", () => browserCompanion?.close(), 2_500),
     boundedStep("User Chrome native bridge close", () => userChromeBridge?.close(), 3_000),
     boundedStep("Native Messaging broker close", () => nativeChromeBroker?.close(), 3_000),
+    boundedStep("Upload file staging cleanup", () => uploadBroker.close(), 5_000),
   ]);
 
-  const labels = ["listener", "tunnel", "cloud-mcp", "mcp", "chrome-companion", "user-chrome-native", "native-messaging-broker"];
+  const labels = ["listener", "tunnel", "cloud-mcp", "mcp", "chrome-companion", "user-chrome-native", "native-messaging-broker", "upload-file-cleanup"];
   results.forEach((result, index) => {
     if (result.status !== "rejected") return;
     record("warn", "connection-host", "Shutdown step did not complete cleanly", {
