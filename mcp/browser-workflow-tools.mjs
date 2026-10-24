@@ -20,6 +20,20 @@ export function registerBrowserWorkflowTools({tool,server,z,trustedUserChrome}) 
     {source_uid:z.string().min(1).max(100),target_uid:z.string().min(1).max(100)},
     {title:"Drag Within Agent Browser",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async({source_uid,target_uid})=>{const{bridge,owner}=trustedUserChrome();return bridge.dragDrop(owner,source_uid,target_uid);});
+  tool(server,"browser_agent_rich_editor_insert",
+    "Enter plain text in a previously observed framework-managed rich editor on an Agent-owned background tab using Chromium's trusted input pipeline. Does not submit or prove website persistence.",
+    {uid:z.string().min(1).max(100),value:z.string().max(4000)},
+    {title:"Edit Rich Text in Agent Browser",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({uid,value})=>{const{bridge,owner}=trustedUserChrome();return bridge.richEditorInsert(owner,uid,value);});
+  tool(server,"browser_agent_drop_files",
+    "Drop local files prepared by the OWL Native Host as owner/origin-bound tickets into a previously observed Agent-owned dropzone. Files stay on device until the approved website receives them; event dispatch does not prove upload completion.",
+    {page_id:z.number().int().nonnegative(),target_uid:z.string().min(1).max(100),
+      file_tickets:z.array(z.string().length(48)).min(1).max(5)},
+    {title:"Drop Approved Files in Agent Browser",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({page_id,target_uid,file_tickets})=>{
+      const{bridge,owner}=trustedUserChrome();
+      return bridge.dropFiles(owner,{pageId:page_id,targetUid:target_uid,fileTickets:file_tickets});
+    });
   tool(server,"browser_agent_download_file",
     "Download a file only from a link UID observed on an Agent-owned signed-in Chrome tab. Same-origin safe file links only; request_id provides retry idempotency.",
     {link_uid:z.string().min(1).max(120),request_id:z.string().uuid()},

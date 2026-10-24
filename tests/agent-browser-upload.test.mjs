@@ -43,6 +43,23 @@ describe("secure local upload staging",()=>{
     await expect(fs.stat(files[0].stagedPath)).rejects.toMatchObject({code:"ENOENT"});
   });
  });
+ it("file drop uses one-time owner+origin ticket; dispatch is not server proof",async()=>{
+  await fixtures(async({file,broker})=>{
+    const prepared=await broker.prepare({owner:OWNER,filePath:file,origin:SITE});
+    await expect(broker.recordDrop({owner:OWNER,ticketIds:[prepared.file_ticket],
+      pageId:13,targetUid:"owl-agent-1",origin:SITE,
+      result:{dispatched:false,pageId:13,transferredCount:1}}))
+      .rejects.toThrow("FILE_DROP_DISPATCH_UNCONFIRMED");
+    const selected=await broker.recordDrop({owner:OWNER,ticketIds:[prepared.file_ticket],
+      pageId:13,targetUid:"owl-agent-1",origin:SITE,
+      result:{dispatched:true,pageId:13,transferredCount:1,domObserved:false}});
+    expect(selected).toMatchObject({state:"dispatched_unconfirmed",website_upload_verified:false});
+    await expect(broker.resolve({owner:OWNER,ticketIds:[prepared.file_ticket],origin:SITE}))
+      .rejects.toThrow("UPLOAD_TICKET_NOT_AUTHORIZED");
+    await expect(broker.status({owner:"other",uploadId:selected.upload_id}))
+      .rejects.toThrow("UPLOAD_STATUS_NOT_FOUND");
+  });
+ });
  it("rejects outside root, secrets, symlink escapes, MIME mismatch and missing roots",async()=>{
   await fixtures(async({base,allowed,file,broker})=>{
     const outside=path.join(base,"outside.png");await fs.writeFile(outside,"x");

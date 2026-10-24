@@ -11,7 +11,7 @@ async function withChromeFixture(fn){
   const installed=path.join(root,"installed");
   await Promise.all([fs.mkdir(chrome),fs.mkdir(source),fs.mkdir(installed)]);
   const files=["manifest.json","service-worker.mjs","agent-executor.mjs",
-    "download-workflow.mjs","p2-capabilities.mjs","p2-interactions.mjs","file-inputs.mjs"];
+    "download-workflow.mjs","p2-capabilities.mjs","p2-interactions.mjs","file-inputs.mjs","file-drop-zone.mjs","rich-editor.mjs"];
   for(const f of files){
     await fs.writeFile(path.join(source,f),f+" expected bytes");
     await fs.writeFile(path.join(installed,f),f+" expected bytes");

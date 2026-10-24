@@ -56,3 +56,10 @@ The legacy ChatGPT Computer MCP plugin remains installed for the **Windows** hos
 - All actions require the existing Agent tab ownership gate. Sensitive/password targets, other Agent tabs, non-dropzones, unchanged DOM, rich editor frameworks and untrusted file drops are rejected or left to explicit adapter/P3.
 - Isolated real Chrome MV3 test: \`node scripts/verify-native-agent-p1-browser-live.mjs\`; now covers both actions and adverse cases.
 - P3 browser-native file dialogs are **not** solved by synthetic drag/drop. Only enable OS file picker fallbacks after local platform-specific consent, UI-target verification, focus impact checks, and a verified postcondition.
+
+## 2026-10-25 P2 approved local-file drop and rich editor
+
+- browser_agent_drop_files uses only owner/origin-bound, one-time upload-broker file tickets. Chrome debugger's tab-scoped Input.dispatchDragEvent sends OS-local staged file paths inside the device. It never moves the system pointer and does not send file bytes/paths to ChatGPT Cloud telemetry. It requires an observed, visible, non-sensitive dropzone in an Agent-owned tab.
+- A successful Chrome dispatch is NOT website persistence: the Host records ui_observed or dispatched_unconfirmed with website_upload_verified:false. A separately observed test backend receipt is required for actual completion; ticket reuse and foreign owners are rejected.
+- browser_agent_rich_editor_insert uses tab-scoped Input.insertText instead of rewriting framework-managed DOM. The website's own editor input event/state pipeline handles the change, tested in an MV3-controlled ProseMirror-shaped fixture with trusted input events. Site-framework-specific compatibility (full ProseMirror, Quill, Slate, Lexical) and server persistence are not implied by this fixture.
+- File dialogs in web pages are still preferentially handled by DOM.setFileInputFiles; a true OS file dialog needs accessibility/foreground control and explicit scope. P3 Mac native Helper permissions are present, but running a full GUI picker against a user's working desktop is not background safe; Windows acceptance requires a Windows Runtime.

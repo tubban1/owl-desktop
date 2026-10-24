@@ -161,6 +161,21 @@ export function createAgentUploadBroker({
     return {upload_id,page_id:pageId,state:"selected",website_upload_verified:false,
       files:entry.files,description:"File(s) attached to browser input; website receipt must be verified separately."};
   }
+  async function recordDrop({owner,ticketIds,pageId,targetUid,result,origin}){
+    const files=await resolve({owner,ticketIds,origin});
+    if(result?.dispatched!==true||result.pageId!==pageId||
+       result.transferredCount!==files.length)throw Error("FILE_DROP_DISPATCH_UNCONFIRMED");
+    for(const key of ticketIds)tickets.get(key).consumed=true;
+    const uploadId=randomUUID();
+    const state=result.domObserved?"ui_observed":"dispatched_unconfirmed";
+    const entry={owner,pageId,inputUid:targetUid,site:origin,
+      files:files.map(f=>({name:f.filename,bytes:f.size})),state,
+      expiresAt:now()+ttlMs};
+    uploads.set(uploadId,entry);
+    return {upload_id:uploadId,page_id:pageId,state,
+      website_upload_verified:false,files:entry.files,
+      description:"File drag event dispatched; website receipt is not independently verified."};
+  }
   async function status({owner,uploadId}) {
     await sweep();
     const r=uploads.get(uploadId);
@@ -183,7 +198,7 @@ export function createAgentUploadBroker({
     for(const key of [...tickets.keys()])await remove(key);
     uploads.clear();
   }
-  return {prepare,resolve,recordSelection,status,release,sweep,close,
+  return {prepare,resolve,recordSelection,recordDrop,status,release,sweep,close,
     capabilities:()=>({uploadFile:true,rootsConfigured:allowedRoots.length>0,
       destinationsConfigured:allowedSites.size>0,
       supportedExtensions:[...ALLOWED_SUFFIX],maxFileBytes:MAX_FILE_BYTES,maxFilesPerUpload:MAX_FILES_PER_UPLOAD})};

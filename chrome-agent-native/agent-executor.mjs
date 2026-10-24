@@ -2,6 +2,8 @@ import {discoverFileInputs,verifyFileInput,readFileInputSelection} from "./file-
 import {createAgentDownloadWorkflow,detectPageReceipt} from "./download-workflow.mjs";
 import {inspectP2Capabilities} from "./p2-capabilities.mjs";
 import {pastePlainText,dragDropWithinPage} from "./p2-interactions.mjs";
+import {locateAgentFileDropZone,checkAgentFileDropZone} from "./file-drop-zone.mjs";
+import {prepareAgentRichEditor,checkAgentRichEditor} from "./rich-editor.mjs";
 
 // Only tabs created through this executor can be accessed by an OWL Agent.
 // The store is chrome.storage.session: survives service-worker suspension,
@@ -202,6 +204,55 @@ export function createNativeAgentExecutor(chrome,storage){
          !check.fileNames.every((n,i)=>n===files[i].filename))throw Error("UPLOAD_SELECTION_UNCONFIRMED");
       return {pageId:tabId,selected:true,selectedCount:check.selectedCount,
         selectedFileNames:check.fileNames,websiteUploadVerified:false};
+    }
+    if(op==="rich_editor_insert"){
+      if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid)||
+         typeof args.value!=="string"||args.value.length>4000)
+        throw Error("RICH_EDITOR_ARGUMENT_INVALID");
+      const origin=new URL(tab.url).origin;
+      const prepared=await inject(tabId,prepareAgentRichEditor,[args.uid,origin]);
+      if(prepared?.error)throw Error(prepared.error);
+      if(!prepared?.ready)throw Error("EDITOR_NOT_READY");
+      const target={tabId};
+      await chrome.debugger.attach(target,"1.3");
+      try{
+        await chrome.debugger.sendCommand(target,"Input.insertText",{text:args.value});
+      }finally{await chrome.debugger.detach(target).catch(()=>{});}
+      const check=await inject(tabId,checkAgentRichEditor,[args.uid,origin,args.value]);
+      if(check?.error)throw Error(check.error);
+      if(!check?.domVerified)throw Error("EDITOR_FRAMEWORK_UPDATE_NOT_CONFIRMED");
+      return {pageId:tabId,edited:true,uid:args.uid,length:args.value.length,
+        domVerified:true,websitePersisted:false,systemKeyboardUsed:false,
+        inputMethod:"chromium_trusted_text"};
+    }
+    if(op==="drop_files"){
+      const files=args.files,origin=args.origin,targetUid=args.targetUid;
+      if(args.pageId!==tabId||typeof origin!=="string"||!/^owl-agent-\d{1,3}$/.test(targetUid)||
+         !Array.isArray(files)||files.length<1||files.length>5 ||
+         !files.every(f=>f&&typeof f.stagedPath==="string"&&f.stagedPath.startsWith("/")&&
+           typeof f.filename==="string"&&f.filename.length>0&&f.filename.length<256))
+        throw Error("FILE_DROP_ARGUMENT_INVALID");
+      if(new URL(tab.url).origin!==origin)throw Error("FILE_DROP_ORIGIN_CHANGED");
+      const zone=await inject(tabId,locateAgentFileDropZone,[targetUid,origin]);
+      if(zone?.error)throw Error(zone.error);
+      if(!zone?.valid)throw Error("FILE_DROP_TARGET_NOT_APPROVED");
+      const target={tabId};
+      const dragData={items:[{mimeType:"text/plain",data:"OWL approved local file"}],
+        files:files.map(f=>f.stagedPath),dragOperationsMask:1};
+      await chrome.debugger.attach(target,"1.3");
+      try{
+        for(const type of ["dragEnter","dragOver","drop"])
+          await chrome.debugger.sendCommand(target,"Input.dispatchDragEvent",{
+            type,x:zone.x,y:zone.y,data:dragData
+          });
+      }finally{await chrome.debugger.detach(target).catch(()=>{});}
+      // Dispatch success is not proof that the website uploaded or persisted data.
+      await new Promise(resolve=>setTimeout(resolve,250));
+      const observed=await inject(tabId,checkAgentFileDropZone,[targetUid,origin,zone.initialHtml]);
+      return {pageId:tabId,dispatched:true,transferredCount:files.length,
+        fileNames:files.map(f=>f.filename),domObserved:!!observed?.domChanged,
+        websiteUploadVerified:false,systemPointerMoved:false,foregroundUnchanged:true,
+        state:observed?.domChanged?"ui_observed":"dispatched_unconfirmed"};
     }
     if(op==="snapshot"){
       const result=await inject(tabId,inspect);

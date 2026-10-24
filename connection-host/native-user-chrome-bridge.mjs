@@ -28,6 +28,19 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     const result=await req(owner,"upload_file",{pageId,inputUid,origin:target.origin,files});
     return upload.recordSelection({owner,ticketIds:fileTickets,pageId,inputUid,result,origin:target.origin});
   }
+  async function dropFiles(owner,{pageId,targetUid,fileTickets}){
+    if(!upload)throw Error("UPLOAD_BROKER_UNAVAILABLE");
+    const tab=await req(owner,"snapshot");
+    if(tab?.pageId!==pageId)throw Error("FILE_DROP_PAGE_NOT_SELECTED");
+    const url=tab.snapshot?.url;
+    if(!url)throw Error("FILE_DROP_PAGE_NOT_AVAILABLE");
+    const origin=new URL(url).origin;
+    const target=tab.snapshot?.controls?.find(x=>x.uid===targetUid);
+    if(!target)throw Error("FILE_DROP_TARGET_NOT_OBSERVED");
+    const files=await upload.resolve({owner,ticketIds:fileTickets,origin});
+    const result=await req(owner,"drop_files",{pageId,targetUid,origin,files});
+    return upload.recordDrop({owner,ticketIds:fileTickets,pageId,targetUid,result,origin});
+  }
   async function prepareDownload(owner,downloadId) {
     if(!upload)throw Error("UPLOAD_BROKER_UNAVAILABLE");
     const artifact=await req(owner,"download_artifact",{downloadId});
@@ -43,6 +56,7 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     snapshot:owner=>req(owner,"snapshot"),
     fill:(owner,uid,value)=>req(owner,"fill",{uid,value}),
     editText:(owner,uid,value)=>req(owner,"edit_text",{uid,value}),
+    richEditorInsert:(owner,uid,value)=>req(owner,"rich_editor_insert",{uid,value}),
     pasteText:(owner,uid,text)=>req(owner,"paste_text",{uid,text}),
     dragDrop:(owner,sourceUid,targetUid)=>req(owner,"drag_drop",{sourceUid,targetUid}),
     p2Capabilities:owner=>req(owner,"p2_capabilities"),
@@ -59,11 +73,12 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     fileInputs,
     prepareFile,
     uploadFile,
+    dropFiles,
     uploadStatus:(owner,uploadId)=>upload.status({owner,uploadId}),
     releaseFiles:(owner,tickets)=>upload.release({owner,ticketIds:tickets}),
     capabilities:()=>({transport:"chrome-native-messaging",
       fileUpload:upload?.capabilities()??{uploadFile:false},
-      standardInput:true,hiddenInput:true,downloads:true,downloadToUpload:true,uiReceiptCheck:true,plainTextPaste:true,textDragDrop:true,fileDragDrop:false,osClipboard:false,nativePicker:false}),
+      standardInput:true,hiddenInput:true,downloads:true,downloadToUpload:true,uiReceiptCheck:true,plainTextPaste:true,textDragDrop:true,fileDragDrop:true,fileDragDropBackend:"chrome_debugger_cdp",osClipboard:false,nativePicker:false}),
     status:()=>broker.status(),
     close:async()=>{} // broker/upload lifecycle belongs to Connection Host
   };

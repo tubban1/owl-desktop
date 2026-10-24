@@ -55,9 +55,14 @@ try{
     <div id="drag-item" draggable="true" aria-label="Draft card">Card</div>
     <div id="dropzone" data-dropzone="true" aria-label="Board slot">Empty</div>
     <div id="no-drop" data-dropzone="true" aria-label="Inert slot">Empty</div>
+    <div id="file-drop" data-dropzone="true" aria-label="File drop target" style="height:80px;width:280px;border:1px solid gray">DROP FILE HERE</div>
     <form id="form"><input id="upload" type="file" name="attachment" style="display:none" accept=".txt">
     <span id="receipt">awaiting file</span></form><div contenteditable="true" aria-label="Simple note">original</div><div class="ProseMirror" contenteditable="true" aria-label="Rich editor">framework</div>
     <script>
+      document.querySelector(".ProseMirror").addEventListener("input",e=>{
+        e.currentTarget.dataset.modelText=e.currentTarget.textContent;
+        e.currentTarget.dataset.trustedInput=String(e.isTrusted);
+      });
       document.querySelector("#upload").addEventListener("change", async e=>{
         const file=e.target.files[0];if(!file)return;
         const body=new FormData();body.append("attachment",file);
@@ -74,6 +79,13 @@ try{
       document.querySelector("#dropzone").addEventListener("dragover",e=>e.preventDefault());
       document.querySelector("#dropzone").addEventListener("drop",e=>{
         e.preventDefault();document.querySelector("#dropzone").textContent="Received: "+e.dataTransfer.getData("text/plain");
+      });
+      document.querySelector("#file-drop").addEventListener("dragover",e=>e.preventDefault());
+      document.querySelector("#file-drop").addEventListener("drop",async e=>{
+        e.preventDefault();const file=e.dataTransfer.files[0];if(!file)return;
+        const data=new FormData();data.append("attachment",file);
+        const response=await fetch("/upload",{method:"POST",body:data});const receipt=await response.json();
+        document.querySelector("#file-drop").textContent=receipt.ok?"FILE DROP SERVER VERIFIED":"FILE DROP FAILED";
       });
       document.getElementById("closed-shadow-host").attachShadow({mode:"closed"}).innerHTML=
         '<input type="text" placeholder="Closed secret">';
@@ -151,6 +163,11 @@ try{
   try{await call(owner,"edit_text",{uid:framework.uid,value:"unsafe framework edit"});}
   catch(e){rejectedEditor=/RICH_EDITOR_REQUIRES_SPECIAL_ADAPTER/.test(e.message);}
   assert.equal(rejectedEditor,true);
+  const rich=await call(owner,"rich_editor_insert",{uid:framework.uid,value:"Controlled framework text"});
+  assert.equal(rich.domVerified,true);assert.equal(rich.systemKeyboardUsed,false);
+  assert.equal(await targetPage.locator(".ProseMirror").textContent(),"Controlled framework text");
+  assert.equal(await targetPage.locator(".ProseMirror").getAttribute("data-model-text"),"Controlled framework text");
+  assert.equal(await targetPage.locator(".ProseMirror").getAttribute("data-trusted-input"),"true");
   const pageCaps=await call(owner,"p2_capabilities");
   assert.ok(pageCaps.counts.editableElements>=2);
   assert.equal(pageCaps.counts.openShadowRoots,1);
@@ -207,6 +224,25 @@ try{
   const observed=await call(owner,"receipt_check",{expectedText:"UPLOAD VERIFIED BY SERVER"});
   assert.equal(observed.state,"ui_observed");
   assert.equal(observed.websiteUploadVerified,false,"UI receipt never claims independent proof");
+  const fileDropSnapshot=await call(owner,"snapshot");
+  const dropUid=fileDropSnapshot.snapshot.controls.find(x=>x.label==="File drop target")?.uid;
+  assert.ok(dropUid,"file drop target must exist in Agent snapshot");
+  const preparedDrop=await uploadBroker.prepare({owner,filePath:namedDownload,origin:destination});
+  const filesForDrop=await uploadBroker.resolve({owner,ticketIds:[preparedDrop.file_ticket],origin:destination});
+  let foreignDropRejected=false;
+  try{await call("foreign-owner","drop_files",{pageId:openedDest.pageId,targetUid:dropUid,origin:destination,files:filesForDrop});}
+  catch(e){foreignDropRejected=/AGENT_TAB_NOT_OWNED/.test(e.message);}
+  assert.equal(foreignDropRejected,true);
+  const dropped=await call(owner,"drop_files",{pageId:openedDest.pageId,targetUid:dropUid,origin:destination,files:filesForDrop});
+  assert.equal(dropped.dispatched,true);
+  assert.equal(dropped.websiteUploadVerified,false);
+  const savedDrop=await uploadBroker.recordDrop({owner,ticketIds:[preparedDrop.file_ticket],pageId:openedDest.pageId,targetUid:dropUid,result:dropped,origin:destination});
+  assert.equal(savedDrop.website_upload_verified,false);
+  await assert.rejects(uploadBroker.resolve({owner,ticketIds:[preparedDrop.file_ticket],origin:destination}),
+    /UPLOAD_TICKET_NOT_AUTHORIZED/);
+  await targetPage.locator("#file-drop").getByText("FILE DROP SERVER VERIFIED").waitFor({timeout:12000});
+  assert.equal(uploadReceipts.length,2);
+  assert.equal(uploadReceipts[1].ok,true,"real Chromium file drop reached independent backend");
   const active=await apiPage.evaluate(()=>chrome.tabs.query({active:true,currentWindow:true}));
   assert.equal(active.length,1);assert.equal(active[0].url,source+"/human");
   assert.equal(await human.title(),"Source");
@@ -215,7 +251,7 @@ try{
   assert.equal((await call(owner,"tabs")).tabs.length,0);
   console.log(JSON.stringify({ok:true,isolatedChromium:true,nativeMV3:true,ownedAgentTabs:true,
     actualChromeDownload:true,downloadIdempotent:true,ownerIsolation:true,hiddenFileSelection:true,
-    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,p2TextPaste:true,p2DragDrop:true,p2DeniedSensitiveAndInert:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
+    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2TrustedFrameworkInsert:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,p2TextPaste:true,p2DragDrop:true,p2DeniedSensitiveAndInert:true,p2FileDropWithTicket:true,p2FileDropServerReceipt:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
     humanForegroundPreserved:true,privateArtifactsNotExposedToMCP:true}));
 }finally{
   await browser?.close().catch(()=>{});
