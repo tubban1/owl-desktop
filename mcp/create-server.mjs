@@ -1946,7 +1946,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
   }
   tool(
     server,"browser_agent_open",
-    "DEFAULT BROWSER MODE: Open a background tab inside the user's ALREADY RUNNING, normally signed-in Google Chrome (not a separate headless browser). Reuses Chrome login state. Does not use Chrome Companion or pairing codes; Chrome itself requires one remote-debugging consent per persistent OWL Host connection. Do not disturb unrelated personal tabs. If Chrome asks for debugging permission, tell user to click Allow. For human CAPTCHA or login use browser_agent_focus_login.",
+    "DEFAULT BROWSER MODE: Open a background tab inside the user's ALREADY RUNNING, normally signed-in Google Chrome (not a separate headless browser). Reuses Chrome login state. Does not use Chrome Companion or pairing codes; The OWL LAB Native Messaging extension requires a one-time Chrome install/site permission, but no 9222 remote debugging or per-session pairing. Do not disturb unrelated personal tabs. If the extension is missing, direct the user to install OWL Agent Browser and its native host. For human CAPTCHA or login use browser_agent_focus_login.",
     {url:z.string().url(),wait_until:z.enum(["load","domcontentloaded","networkidle"]).optional(),headless:z.boolean().optional()},
     {title:"Open Background Tab in My Chrome",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     async({url,headless})=>{
@@ -2014,7 +2014,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
   );
   tool(
     server,"browser_agent_status",
-    "Inspect availability of the persistent Chrome-native bridge. Chrome version 144+ and one user-approved debugging connection required; no Companion pairing.",
+    "Inspect availability of the persistent Chrome-native bridge. Requires the OWL native host and a connected Chrome extension, not Chrome remote debugging.",
     {},{title:"Chrome Agent Connection Status",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     async()=> userChromeBridge?.status() ?? {connected:false,mode:"chrome-native-autoconnect"}
   );
@@ -2022,7 +2022,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
   tool(
     server,
     "browser_open",
-    "OPTIONAL isolated managed browser mode: open a URL in OWL independent Chromium (may be headless and require separate login). For DEFAULT user Chrome with existing sessions use browser_agent_open + browser_agent_snapshot/fill/click/screenshot. Never switch global headless mode to solve a user login challenge.",
+    "OPTIONAL isolated managed browser mode: open a URL in OWL independent Chromium (may be headless and require separate login). For DEFAULT user Chrome use browser_agent_open via OWL Native Messaging + browser_agent_snapshot/fill/click/screenshot. Never switch global headless mode to solve a user login challenge.",
     {
       url: z.string().url(),
       wait_until: z.enum(["load", "domcontentloaded", "networkidle"]).optional(),
@@ -2124,7 +2124,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
 
   tool(
     server, "browser_companion_pair",
-    "OPTIONAL Chrome Companion compatibility only. The default browser_agent_open connects to real Chrome through the official Chrome DevTools approval, without a Companion code, and keeps a long-lived Host connection. Companion pairing code is single use, valid 15 minutes.",
+    "OPTIONAL Chrome Companion compatibility only. Default browser_agent_open uses OWL Native Messaging (not the Chrome debugging port) with one-time extension/native host registration, no per-session pairing. Legacy Companion codes remain optional.",
     {}, {title:"Pair OWL Chrome Companion",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
     async () => {
       if (!browserCompanion) throw new Error("Chrome Companion is not enabled in this Connection Host.");

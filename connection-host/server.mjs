@@ -16,6 +16,8 @@ import { createHostDiagnosticJournal } from "./diagnostic-journal.mjs";
 import { installStdioEpipeGuard } from "../scripts/lib/stdio-epipe-guard.mjs";
 import { startChromeCompanionBroker } from "./chrome-companion-broker.mjs";
 import { createUserChromeBridge } from "./user-chrome-bridge.mjs";
+import { startNativeMessagingBroker } from "./native-messaging-broker.mjs";
+import { createNativeChromeBridge } from "./native-user-chrome-bridge.mjs";
 
 // A detached supervising terminal must not kill the long-lived Host.
 installStdioEpipeGuard();
@@ -128,7 +130,16 @@ const plannerContinuation = new PlannerContinuationStore({
 plannerContinuation.recoverConnectedTransports("connection_host_restart");
 
 let fileDeliveryCloudClient=null;
-const userChromeBridge = createUserChromeBridge(); // Lazy, always-on Host connection after Chrome consent.
+const nativeChromeBroker = await startNativeMessagingBroker({
+  port:Number(process.env.OWL_NATIVE_CHROME_PORT||"8795"),
+  configPath:path.join(userDataRoot,"native-chrome","broker.json")
+}).catch(error=>{
+  record("warn","chrome-native","Native Messaging unavailable",{code:error?.code||"NATIVE_BROKER_START_FAILED"});
+  return null;
+});
+const userChromeBridge = process.env.OWL_CHROME_BACKEND==="devtools"
+  ? createUserChromeBridge() // optional legacy debugging mode
+  : nativeChromeBroker ? createNativeChromeBridge({broker:nativeChromeBroker}) : null;
 const browserCompanion = await startChromeCompanionBroker({ port: Number(process.env.OWL_CHROME_COMPANION_PORT || "8794") }).catch(error => {
   record("warn","chrome-companion","Browser companion unavailable; other OWL services will continue",{code:error?.code||"BROKER_START_FAILED"});
   return null;
@@ -399,10 +410,11 @@ async function shutdown(signal) {
     boundedStep("Cloud MCP consumer stop", () => stopCloudMcpConsumer(), 5_000),
     boundedStep("OWL MCP close", () => mcpServer.close(), 5_000),
     boundedStep("Chrome Companion broker close", () => browserCompanion?.close(), 2_500),
-    boundedStep("User Chrome native bridge close", () => userChromeBridge.close(), 3_000),
+    boundedStep("User Chrome native bridge close", () => userChromeBridge?.close(), 3_000),
+    boundedStep("Native Messaging broker close", () => nativeChromeBroker?.close(), 3_000),
   ]);
 
-  const labels = ["listener", "tunnel", "cloud-mcp", "mcp", "chrome-companion", "user-chrome-native"];
+  const labels = ["listener", "tunnel", "cloud-mcp", "mcp", "chrome-companion", "user-chrome-native", "native-messaging-broker"];
   results.forEach((result, index) => {
     if (result.status !== "rejected") return;
     record("warn", "connection-host", "Shutdown step did not complete cleanly", {

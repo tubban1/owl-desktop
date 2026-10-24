@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "OWL LAB Agent Browser",
+  "version": "0.2.0",
+  "description": "Agent-owned background Chrome tabs through a local Native Messaging host; requires explicit Chrome extension permissions.",
+  "permissions": [
+    "nativeMessaging",
+    "scripting",
+    "tabs",
+    "storage",
+    "alarms",
+    "debugger"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.mjs",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "OWL LAB Agent Browser",
+    "default_popup": "popup.html"
+  }
+}
