@@ -8,8 +8,14 @@ let active = {id: 42, url: "https://www.reddit.com/settings/profile?view=1", tit
 const tabs = new Map([[42, active], [43, {id: 43, url: "https://other.example/", title: "Other"}]]);
 let injected = 0;
 const fakeChrome = {
+  action: {setBadgeText: async () => {},setBadgeBackgroundColor: async () => {}},
+  alarms: {create: () => {},onAlarm: {addListener: fn => {listeners.alarm = fn;}}},
+  tabCapture: {getMediaStreamId: async ({targetTabId}) => {expect(targetTabId).toBe(42);return "test-stream";}},
+  offscreen: {createDocument: async () => {},closeDocument: async () => {}},
   runtime: {
     id: "owl-test-extension", getURL: file => "chrome-extension://owl-test-extension/" + file,
+    sendMessage: async (message) => message.type === "start" ? {ok:true,data:{capturing:true}} : {ok:true,data:{capturing:false}},
+    getContexts: async () => [],
     onMessage: {addListener: fn => { listeners.message = fn; }}
   },
   storage: {session: {
@@ -103,6 +109,15 @@ describe("Chrome Companion explicit single-tab pilot", () => {
     expect((await command("detach")).data.authorized).toBe(false);
     expect(stored.size).toBe(0);
   });
+  it("requires explicit extension popup gesture to start independent tab capture", async () => {
+    await command("attach");
+    const start = await command("startCapture");
+    expect(start).toMatchObject({ok:true,data:{capturing:true,tabId:42}});
+    expect(stored.get("owlCaptureTab")).toBe(42);
+    expect((await command("status")).data.capturing).toBe(true);
+    await command("stopCapture");
+    expect((await command("status")).data.capturing).toBe(false);
+  });
   it("policy enforces origin and expiry, snapshots omit input values", () => {
     const tab = {id: 11, url:"https://reddit.com/user/a?token=private"};
     const grant = grantFor(tab, 0);
@@ -111,10 +126,10 @@ describe("Chrome Companion explicit single-tab pilot", () => {
     expect(grantIsCurrent(grant, {id:12,url:tab.url}, 5)).toBe(false);
     expect(sanitizeSnapshot({url:tab.url,title:"hi",text:"abc",controls:[{tag:"input",type:"text",label:"Name",value:"SECRET"}]}).controls[0]).not.toHaveProperty("value");
   });
-  it("extension declares no debugger, cookies, host access or network bridge", async () => {
+  it("extension declares no debugger, cookies, website host access or external inbound bridge", async () => {
     const manifest = JSON.parse(await fs.readFile(new URL("../chrome-companion/manifest.json", import.meta.url),"utf8"));
-    expect(manifest.permissions.sort()).toEqual(["activeTab","scripting","storage"].sort());
-    expect(manifest.host_permissions).toBeUndefined();
+    expect(manifest.permissions.sort()).toEqual(["activeTab","scripting","storage","alarms","tabCapture","offscreen"].sort());
+    expect(manifest.host_permissions).toEqual(["http://127.0.0.1/*"]);
     expect(manifest.optional_permissions).toBeUndefined();
     expect(manifest.externally_connectable).toBeUndefined();
   });

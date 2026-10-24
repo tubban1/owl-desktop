@@ -16,6 +16,7 @@ export async function startOwlMcpHttpServer({
   remoteDeviceControl,
   plannerContinuation,
   fileDelivery = null,
+  browserCompanion = null,
   onEvent = () => {},
   sessionIdleTtlMs = 30 * 60_000,
   ownerSupersedeGraceMs = 60_000,
@@ -181,7 +182,7 @@ export async function startOwlMcpHttpServer({
   }
 
   function createTransportSession() {
-    const server = createOwlMcpServer({ fileDelivery });
+    const server = createOwlMcpServer({ fileDelivery, browserCompanion });
     // Announce the current tool registry to clients that support live
     // notifications. ChatGPT may still cache connector schemas until its
     // plugin connection is refreshed; legacy read_multiple_files remains

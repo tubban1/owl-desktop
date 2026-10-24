@@ -962,7 +962,7 @@ function tool(server, name, description, schema, annotations, handler) {
   );
 }
 
-export function createOwlMcpServer({fileDelivery=null}={}) {
+export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={}) {
   const server = new McpServer(
     {
       name: "owl-mcp",
@@ -2012,6 +2012,73 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
       op: "close",
       args: {},
     })),
+  );
+
+  // Existing signed-in Chrome: opt-in via extension pairing code.
+  // This broker never attaches to Chrome DevTools or imports cookies.
+  tool(
+    server,"browser_companion_screenshot",
+    "Capture the selected, already-authorized Chrome tab even while the user works in other tabs. The user must explicitly enable tab capture in the Chrome extension first. Returns native image evidence, not the foreground desktop screenshot.",
+    {},{title:"Screenshot Authorized Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async()=>{
+      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
+      const proof=await browserCompanion.command("screenshot");
+      if(!proof||proof.mimeType!=="image/jpeg"||
+         typeof proof.base64!=="string"||proof.base64.length>4_500_000||
+         !/^[a-zA-Z0-9+/=]+$/.test(proof.base64)) {
+        throw new Error("Invalid authorized Chrome capture.");
+      }
+      return new NativeMcpResult([
+        {type:"image",data:proof.base64,mimeType:"image/jpeg"},
+        {type:"text",text:JSON.stringify({tabId:proof.tabId,
+          origin:proof.origin,width:proof.width,height:proof.height})}
+      ],{imageCount:1,captured:true,tabId:proof.tabId});
+    }
+  );
+
+  tool(
+    server, "browser_companion_pair",
+    "Start a one-use local pairing code. User must open OWL Chrome Companion extension on the chosen Chrome tab and enter this code. Valid for 2 minutes; do not log the code.",
+    {}, {title:"Pair OWL Chrome Companion",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    async () => {
+      if (!browserCompanion) throw new Error("Chrome Companion is not enabled in this Connection Host.");
+      return browserCompanion.pair();
+    },
+  );
+  tool(
+    server, "browser_companion_status",
+    "Check whether the opt-in Chrome Companion extension is currently paired to this Mac.",
+    {}, {title:"Chrome Companion Status",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async () => browserCompanion?.status() ?? {connected:false},
+  );
+  tool(
+    server, "browser_companion_snapshot",
+    "Read the explicitly authorized tab of the user's already-signed-in Chrome, without switching focus. The user must grant that tab in the Companion popup.",
+    {}, {title:"Inspect Authorized Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async () => {
+      if (!browserCompanion) throw new Error("Chrome Companion unavailable.");
+      return browserCompanion.command("snapshot");
+    },
+  );
+  tool(
+    server, "browser_companion_fill",
+    "Fill a safe non-password field of a user-authorized Chrome tab without submitting. Requires the user to enable editing in the extension popup; never bypass OWL approvals.",
+    {selector:z.string().min(1).max(320),text:z.string().max(4000)},
+    {title:"Fill Authorized Chrome Field",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async ({selector,text}) => {
+      if (!browserCompanion) throw new Error("Chrome Companion unavailable.");
+      return browserCompanion.command("fill",{selector,text});
+    },
+  );
+  tool(
+    server, "browser_companion_click",
+    "Ask user to approve one targeted click in their authorized Chrome tab. The extension refuses to click until user explicitly approves that exact action in its popup.",
+    {selector:z.string().min(1).max(320)},
+    {title:"Request Authorized Chrome Click",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async ({selector}) => {
+      if (!browserCompanion) throw new Error("Chrome Companion unavailable.");
+      return browserCompanion.command("click",{selector});
+    },
   );
 
   tool(

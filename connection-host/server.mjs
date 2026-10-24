@@ -14,6 +14,7 @@ import { LocalMcpExecutor } from "./local-mcp-executor.mjs";
 import {sendAuthorizedFile} from "../mcp/send-file.mjs";
 import { createHostDiagnosticJournal } from "./diagnostic-journal.mjs";
 import { installStdioEpipeGuard } from "../scripts/lib/stdio-epipe-guard.mjs";
+import { startChromeCompanionBroker } from "./chrome-companion-broker.mjs";
 
 // A detached supervising terminal must not kill the long-lived Host.
 installStdioEpipeGuard();
@@ -126,7 +127,9 @@ const plannerContinuation = new PlannerContinuationStore({
 plannerContinuation.recoverConnectedTransports("connection_host_restart");
 
 let fileDeliveryCloudClient=null;
+const browserCompanion = await startChromeCompanionBroker({ port: Number(process.env.OWL_CHROME_COMPANION_PORT || "8794") });
 const mcpServer = await startOwlMcpHttpServer({
+  browserCompanion,
   port: mcpPort,
   runtimeBaseUrl,
   runtimeToken,
@@ -389,9 +392,10 @@ async function shutdown(signal) {
     boundedStep("Tunnel stop", () => tunnelSupervisor.stop(), 6_000),
     boundedStep("Cloud MCP consumer stop", () => stopCloudMcpConsumer(), 5_000),
     boundedStep("OWL MCP close", () => mcpServer.close(), 5_000),
+    boundedStep("Chrome Companion broker close", () => browserCompanion.close(), 2_500),
   ]);
 
-  const labels = ["listener", "tunnel", "cloud-mcp", "mcp"];
+  const labels = ["listener", "tunnel", "cloud-mcp", "mcp", "chrome-companion"];
   results.forEach((result, index) => {
     if (result.status !== "rejected") return;
     record("warn", "connection-host", "Shutdown step did not complete cleanly", {
