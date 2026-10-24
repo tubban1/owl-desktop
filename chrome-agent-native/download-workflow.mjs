@@ -30,7 +30,7 @@ export function detectPageReceipt(needle,expectedOrigin) {
 }
 
 export function createAgentDownloadWorkflow(chrome,storage,{now=()=>Date.now()}={}) {
-  const read=async()=>((await storage.get("owlNativeDownloads")).owlNativeDownloads||{byId:{},requests:{}};
+  const read=async()=> (await storage.get("owlNativeDownloads")).owlNativeDownloads || {byId:{},requests:{}};
   const write=async s=>storage.set({owlNativeDownloads:s});
   const assertOwner=(s,owner,id)=>{
     const row=s.byId[String(id)];

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { registerBrowserWorkflowTools } from "./browser-workflow-tools.mjs";
 import { readAuthorizedLocalImage } from "./native-image.mjs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -1988,6 +1989,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     {title:"Click My Chrome Tab",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async({uid})=>{const{bridge,owner}=trustedUserChrome();return bridge.click(owner,uid);}
   );
+  registerBrowserWorkflowTools({tool,server,z,trustedUserChrome});
   tool(
     server,"browser_agent_capabilities",
     "Report which OWL browser capabilities are available and whether the Native Host has user-approved local file roots. Never infer filesystem authorization from browser access.",
