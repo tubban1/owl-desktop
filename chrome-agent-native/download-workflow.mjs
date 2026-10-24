@@ -6,6 +6,8 @@ const DANGER=/(?:^|[/?&=_-])(?:delete|logout|remove|destroy|purchase|checkout|pa
 export function inspectAgentDownloadLink(uid,expectedOrigin) {
   if(location.origin!==expectedOrigin)throw Error("DOWNLOAD_ORIGIN_CHANGED");
   if(!/^owl-agent-\d{1,3}$/.test(uid))throw Error("DOWNLOAD_LINK_UID_INVALID");
+  const SAFE_EXTENSION=/\\.(?:pdf|png|jpe?g|webp|gif|svg|csv|txt|json|md|zip|docx|xlsx|pptx|mp4|mov)$/i;
+  const DANGER=/(?:^|[/?&=_-])(?:delete|logout|remove|destroy|purchase|checkout|pay|submit|publish|unsubscribe)(?:$|[/?&=_-])/i;
   const anchor=document.querySelector('a[data-owl-agent-control="'+CSS.escape(uid)+'"]');
   if(!anchor)throw Error("DOWNLOAD_LINK_STALE");
   const url=new URL(anchor.href);
