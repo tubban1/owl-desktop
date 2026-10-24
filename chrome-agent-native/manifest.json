@@ -9,7 +9,8 @@
     "tabs",
     "storage",
     "alarms",
-    "debugger"
+    "debugger",
+    "downloads"
   ],
   "host_permissions": [
     "https://*/*",
