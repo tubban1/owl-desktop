@@ -1,6 +1,6 @@
 # OWL LAB Chrome Companion — local opt-in computer use
 
-This is the initial, manually installed Chrome Companion integration for OWL Desktop / Connection Host. It never copies cookies or automatically attaches to everyday Chrome tabs.
+OWL Chrome Companion uses your normal Chrome login session but only accesses user-approved sites. It never copies cookies or automatically attaches to your unrelated tabs. The Agent can create its own background tabs on an explicitly approved website.
 
 ## How to enable
 
@@ -24,7 +24,7 @@ This is the initial, manually installed Chrome Companion integration for OWL Des
 ## Security and limitations
 
 - The extension pairs locally with the broker bound to 127.0.0.1:8794; an extension origin and one-time pairing code are required. The extension does not copy cookies or export credentials. **When an OWL agent calls snapshot or screenshot tools, selected page text/images are returned through the OWL MCP connection to the invoking ChatGPT conversation (which may use the Cloud/Tunnel).** Do not authorize tabs containing secrets or data you do not want shared with that agent.
-- Chrome permissions: activeTab, scripting, storage, alarms, tabCapture, offscreen, and localhost host permission only. No debugger, cookies, or wildcard website access.
+- Chrome permissions: activeTab, scripting, storage, alarms, tabCapture, offscreen, and localhost host permission. **Optional** host patterns support per-site Chrome permission prompts only when the user presses the Agent site-authorize button. No debugger or cookies API; no automatic wildcard website access.
 - Form fills reject password, hidden, and sensitive auto-complete controls. Clicking requires an additional per-action human confirmation; some obviously destructive labels are blocked, but this is not a complete policy engine for arbitrary websites.
 - Screenshot requires user-initiated tab capture. It is not an automatic capture of all Chrome tabs. Video-only, bounded JPEG width.
 - Chromium 145 headless extension load and local pairing are verified. Live attachment + tabCapture and real Reddit saving require a human-operated Chrome acceptance check; do not call this production-equivalent to Codex yet.
@@ -35,3 +35,21 @@ This is the initial, manually installed Chrome Companion integration for OWL Des
 - npm test
 - npm run build
 - node scripts/verify-chrome-companion-live.mjs (Playwright Chromium 145, disposable profile)
+
+## Agent-owned background tabs in your existing Chrome
+
+This is the new opt-in flow for longer browser work, separate from the earlier two-minute single-tab read grant:
+
+1. Sign in to a website normally in Chrome (Reddit, for example). Your existing Chrome session/cookies are reused by **new tabs from the same Chrome profile**; OWL never exports or reads cookies.
+2. After pairing Chrome Companion with OWL MCP, open that website and click **允许 Agent 操作此网站** in the extension. Chrome will request host permission for **this website** (not all websites). The working grant lasts up to 30 minutes; the connection itself still expires after 15 minutes unless re-paired.
+3. The agent may call `browser_companion_open({url})`, `browser_companion_agent_tabs`, `browser_companion_use_agent_tab({tab_id})` or `browser_companion_close_agent_tab({tab_id})`. It can open up to ten **new** background tabs on the approved origin without selecting the human's foreground tab. It cannot select or close existing human tabs.
+4. Subsequent `browser_companion_snapshot`, `browser_companion_fill` and `browser_companion_click` act on the agent's selected tab. Filling normal text fields is allowed by the site grant; each click/save remains subject to an explicit user confirmation in the extension (pending request ID), followed by verification of the saved result.
+5. If a page redirects to a different origin (e.g. SSO login), OWL stops injecting scripts and reports that human login is required. Click **接管登录 Agent 标签页** in Companion **when you choose** to bring the agent's tab forward, authenticate, then switch back to your own tab. When the page returns to the approved origin, OWL can resume on the **same tab**. No browser passwords or OTPs are extracted.
+6. On an agent-created tab, Chrome's `tabCapture` screenshot still requires the user to bring that tab forward once and explicitly activate capture. After capture starts, screenshots can continue while the human uses other tabs. For automatic screenshots with no capture gesture, use OWL's separate managed Playwright browser, which already supports background screenshots.
+7. Click **撤销 Agent 网站权限** to remove the site's Chrome host permission and drop OWL's agent tab ownership, without closing human tabs. Other sites are never implicitly authorized.
+
+Security: `optional_host_permissions` allows Chrome to ask for one website when the user clicks, rather than silently granting every website. The extension does not gain debugger/cookies privileges, cannot read a new tab at an unapproved origin and refuses account-destructive click labels. Page text/screenshots explicitly requested by OWL still return to the invoking ChatGPT conversation.
+
+### Activation
+
+The new tools are in both Desktop and Runtime MCP source. Deploy the updated source/build for **both** services, then restart the relevant MCP/Connection Host services only when no other Session is performing work. Reload the unpacked Chrome extension from `chrome://extensions`, then re-pair if the old extension link expires. Restarting macOS or the Chrome browser application is not necessary.

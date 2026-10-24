@@ -17,6 +17,9 @@ pre{white-space:pre-wrap;max-height:160px;overflow:auto;background:#20323b;paddi
 <h2>2. 授权当前标签页</h2>
 <div class="actions"><button id="attach">授权此标签页（2 分钟）</button><button id="edit" class="secondary">允许填写表单</button><button id="detach" class="secondary">撤销网站授权</button></div>
 <div class="actions"><button id="startCapture" class="secondary">开启此标签页后台截图</button><button id="stopCapture" class="secondary">停止截图</button></div><div id="approval" hidden><strong>Agent 请求点击</strong><p id="request"></p><div class="actions"><button id="approve">我确认，执行点击</button><button id="reject" class="danger">拒绝</button></div></div>
+<h2>3. Agent 自主网站工作区</h2>
+<p>点击下方按钮会请求 Chrome 授权当前网站。授予后，OWL 可在该网站自行创建后台标签页、读取和填写，不切换你的前台页面。授权最长 30 分钟，可随时撤销。</p>
+<div class="actions"><button id="grantAgentSite">允许 Agent 操作此网站</button><button id="revokeAgentSite" class="secondary">撤销 Agent 网站权限</button><button id="focusAgentLogin" class="secondary">接管登录 Agent 标签页</button></div>
 <h2>连接状态</h2><div id="status" role="status" aria-live="polite">正在检查…</div>
 <div class="actions"><button id="inspect" class="secondary">预览当前授权页面</button></div><pre id="preview" hidden></pre>
 <small>密码字段、删除及付款操作受到保护。任何保存点击都需再次确认。关闭或跨网站导航会撤销授权。</small>

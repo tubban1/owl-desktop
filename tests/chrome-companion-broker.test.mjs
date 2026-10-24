@@ -82,6 +82,28 @@ describe("Chrome Companion localhost pairing and request relay",()=>{
       await bridge.close();
     }
   });
+  it("accepts only bounded agent-origin actions from the paired owner",async()=>{
+    const bridge=await startChromeCompanionBroker({port:0});
+    const send=async(path,data={},token="")=>{
+      const response=await fetch(bridge.url+path,{method:"POST",
+        headers:{origin:ORIGIN,"content-type":"application/json",...(token?{authorization:"Bearer "+token}:{})},
+        body:JSON.stringify(data)});
+      return {status:response.status,payload:await response.json()};
+    };
+    try{
+      const {code}=bridge.pair(OWNER);
+      const connected=await send("/v1/pair",{code});
+      const token=connected.payload.data.token;
+      await expect(bridge.command("agent_open",{url:"javascript:alert(1)"},OWNER)).rejects.toThrow("INVALID_AGENT_URL");
+      await expect(bridge.command("agent_use_tab",{tabId:-1},OWNER)).rejects.toThrow("INVALID_AGENT_TAB_ID");
+      const opened=bridge.command("agent_open",{url:"https://www.reddit.com/settings/profile"},OWNER);
+      const task=(await send("/v1/poll",{},token)).payload.data.requests[0];
+      expect(task.op).toBe("agent_open");
+      expect(task.args.url).toBe("https://www.reddit.com/settings/profile");
+      await send("/v1/result",{id:task.id,ok:true,result:{tabId:99,background:true}},token);
+      expect(await opened).toMatchObject({tabId:99,background:true});
+    }finally{await bridge.close();}
+  });
   it("rejects unpaired actions and arbitrary script operations",async()=>{
     const bridge=await startChromeCompanionBroker({port:0});
     try{
