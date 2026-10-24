@@ -9,8 +9,9 @@ const invalid = code => Object.assign(new Error(code),{code});
 export async function startChromeCompanionBroker({port=8794}={}) {
   let pairing=null, linked=null, failures=0, queue=[];
   const waiting=new Map();
+  const completed=new Map();
   function clear(code="COMPANION_DISCONNECTED") {
-    pairing=null;linked=null;queue=[];
+    pairing=null;linked=null;queue=[];completed.clear();
     for(const item of waiting.values()) {clearTimeout(item.timer);item.reject(invalid(code));}
     waiting.clear();
   }
@@ -31,13 +32,26 @@ export async function startChromeCompanionBroker({port=8794}={}) {
       throw invalid("INVALID_SELECTOR");
     if(op==="fill"&&(typeof args.text!=="string"||args.text.length>4000))throw invalid("INVALID_TEXT");
     const id=randomBytes(16).toString("hex");
-    return await new Promise((resolve,reject)=>{
+    const operation=new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{
         waiting.delete(id);queue=queue.filter(x=>x.id!==id);reject(invalid("COMPANION_ACTION_TIMEOUT"));
-      },op==="click"?90000:30000);
+      },op==="click"?90000:45000);
       waiting.set(id,{resolve,reject,timer});
       queue.push({id,op,args});
     });
+    if(op==="click"){
+      void operation.then(value=>completed.set(id,{done:true,ok:true,result:value,at:Date.now()}),
+        error=>completed.set(id,{done:true,ok:false,error:error.code||"ACTION_FAILED",at:Date.now()}));
+      return {pending:true,requestId:id,requiresUserConfirmation:true};
+    }
+    return await operation;
+  }
+  function result(id){
+    if(!/^[a-f0-9]{32}$/.test(id))throw invalid("INVALID_REQUEST_ID");
+    for(const [key,value] of completed)if(value.at<Date.now()-600000)completed.delete(key);
+    if(waiting.has(id))return {pending:true,requestId:id};
+    if(completed.has(id))return {pending:false,requestId:id,...completed.get(id)};
+    throw invalid("COMPANION_RESULT_NOT_FOUND");
   }
   const server=http.createServer(async(req,res)=>{
     const origin=req.headers.origin;
@@ -92,6 +106,6 @@ export async function startChromeCompanionBroker({port=8794}={}) {
     }
   });
   await new Promise((resolve,reject)=>{server.once("error",reject);server.listen(port,HOST,resolve);});
-  return {pair,status,command,url:"http://127.0.0.1:"+server.address().port,
+  return {pair,status,command,result,url:"http://127.0.0.1:"+server.address().port,
     close:async()=>{clear();await new Promise(resolve=>server.close(resolve));}};
 }

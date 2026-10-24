@@ -127,7 +127,10 @@ const plannerContinuation = new PlannerContinuationStore({
 plannerContinuation.recoverConnectedTransports("connection_host_restart");
 
 let fileDeliveryCloudClient=null;
-const browserCompanion = await startChromeCompanionBroker({ port: Number(process.env.OWL_CHROME_COMPANION_PORT || "8794") });
+const browserCompanion = await startChromeCompanionBroker({ port: Number(process.env.OWL_CHROME_COMPANION_PORT || "8794") }).catch(error => {
+  record("warn","chrome-companion","Browser companion unavailable; other OWL services will continue",{code:error?.code||"BROKER_START_FAILED"});
+  return null;
+});
 const mcpServer = await startOwlMcpHttpServer({
   browserCompanion,
   port: mcpPort,
@@ -392,7 +395,7 @@ async function shutdown(signal) {
     boundedStep("Tunnel stop", () => tunnelSupervisor.stop(), 6_000),
     boundedStep("Cloud MCP consumer stop", () => stopCloudMcpConsumer(), 5_000),
     boundedStep("OWL MCP close", () => mcpServer.close(), 5_000),
-    boundedStep("Chrome Companion broker close", () => browserCompanion.close(), 2_500),
+    boundedStep("Chrome Companion broker close", () => browserCompanion?.close(), 2_500),
   ]);
 
   const labels = ["listener", "tunnel", "cloud-mcp", "mcp", "chrome-companion"];

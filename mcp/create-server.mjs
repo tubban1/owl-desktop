@@ -2071,8 +2071,19 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
     },
   );
   tool(
+    server,"browser_companion_action_result",
+    "Check the result of a previously requested Chrome click. The click is NEVER considered completed until the human approves it in the extension and this tool reports done=true, ok=true.",
+    {request_id:z.string().regex(/^[a-f0-9]{32}$/)},
+    {title:"Check Chrome Action Confirmation",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async({request_id})=>{
+      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
+      return browserCompanion.result(request_id);
+    }
+  );
+
+  tool(
     server, "browser_companion_click",
-    "Ask user to approve one targeted click in their authorized Chrome tab. The extension refuses to click until user explicitly approves that exact action in its popup.",
+    "Queue an authorized Chrome click and return a pending request ID immediately. The extension will NOT click until the user confirms it. Use browser_companion_action_result to verify actual completion; do not claim it saved yet.",
     {selector:z.string().min(1).max(320)},
     {title:"Request Authorized Chrome Click",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async ({selector}) => {

@@ -31,6 +31,16 @@ describe("Chrome Companion localhost pairing and request relay",()=>{
       expect((await send("/v1/result",{id:actionId,ok:true,result:{title:"Reddit"}},token)).status).toBe(200);
       expect(await request).toEqual({title:"Reddit"});
       expect((await send("/v1/result",{id:actionId,ok:true,result:{}},token)).status).toBe(400);
+      const click = await bridge.command("click",{selector:"#save"});
+      expect(click).toMatchObject({pending:true,requiresUserConfirmation:true});
+      expect(bridge.result(click.requestId)).toMatchObject({pending:true});
+      const clickPoll=await send("/v1/poll",{},token);
+      expect(clickPoll.payload.data.requests).toHaveLength(1);
+      expect(clickPoll.payload.data.requests[0].id).toBe(click.requestId);
+      expect(clickPoll.payload.data.requests[0].op).toBe("click");
+      await send("/v1/result",{id:click.requestId,ok:true,result:{clicked:true,explicitUserApproval:true}},token);
+      await new Promise(resolve=>setImmediate(resolve));
+      expect(bridge.result(click.requestId)).toMatchObject({pending:false,done:true,ok:true,result:{clicked:true}});
       expect(bridge.status().connected).toBe(true);
       expect((await send("/v1/revoke",{},token)).status).toBe(200);
       expect(bridge.status().connected).toBe(false);
