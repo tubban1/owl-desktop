@@ -1,6 +1,15 @@
 // Register P1 browser workflow tools with the same session owner checks as
 // existing OWL browser_agent_* tools. Do not expose the private download path.
 export function registerBrowserWorkflowTools({tool,server,z,trustedUserChrome}) {
+  tool(server,"browser_agent_p2_capabilities",
+    "Read P2 DOM capability counts only in this Agent-owned tab; cross-origin frames and OS rights are not granted.",
+    {},{title:"Inspect Agent Page Capabilities",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>{const{bridge,owner}=trustedUserChrome();return bridge.p2Capabilities(owner);});
+  tool(server,"browser_agent_edit_text",
+    "Replace plain contenteditable text in a previously observed Agent-owned control, without submission; framework-managed editors require an adapter. DOM verification does not prove website persistence.",
+    {uid:z.string().min(1).max(100),value:z.string().max(4000)},
+    {title:"Edit Agent Page Plain Text",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({uid,value})=>{const{bridge,owner}=trustedUserChrome();return bridge.editText(owner,uid,value);});
   tool(server,"browser_agent_download_file",
     "Download a file only from a link UID observed on an Agent-owned signed-in Chrome tab. Same-origin safe file links only; request_id provides retry idempotency.",
     {link_uid:z.string().min(1).max(120),request_id:z.string().uuid()},

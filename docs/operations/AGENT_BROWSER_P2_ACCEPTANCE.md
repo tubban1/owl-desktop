@@ -34,3 +34,15 @@ OS file dialogs and native apps are deliberately outside P2. Require a per-platf
 ## Legacy Computer MCP routing
 
 The legacy ChatGPT Computer MCP plugin remains installed for the **Windows** host. On Mac, do not run its old standalone launch agent or attach a second Computer MCP tunnel. The current OWL LAB tunnel and Mac development Runtime/Helper are separate from this Windows-only plugin and must not be deleted as a side effect.
+
+
+## Verified 2026-10-25
+
+- Isolated real Chromium Manifest V3 extension run: \`node scripts/verify-native-agent-p1-browser-live.mjs\`.
+- Uses temporary profile/extension, local test origins and content-controlled files; does not reuse the personal Chrome profile or access production Tunnel.
+- Verified real Chrome downloads, idempotent requests, per-owner isolation, local Host file-ticket staging and origin denial, hidden file input, cross-origin upload, independent fixture server body receipt, and foreground tab preservation.
+- Playwright stores controlled downloads under opaque temporary names; test re-materializes the verified downloaded bytes under the original response basename before passing them to the actual Host upload broker. This is a test-environment compatibility step, **not** a general bypass of source-file permissions.
+- P1 download link filename regular expression corrected after live test exposed an otherwise missed bug.
+- P2 can now query capabilities and edit **plain** contenteditable controls; it refuses framework-managed ProseMirror/Quill/Tiptap/Slate/Lexical editors. Returns DOM confirmation, never a false server-persistence claim. Empty/undefined injected-script results fail closed.
+- Full desktop automated suite: 107 files / 483 tests passed; TypeScript and production Vite build passed.
+- **Not yet proven:** the user's already running signed-in Chrome with the updated unpacked extension and Native Messaging, cross-browser restart/disconnect recovery, OS dialogs, macOS/Windows P3, and third-party production sites. Do not report those as passed.

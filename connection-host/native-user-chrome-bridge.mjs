@@ -42,6 +42,8 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     use:(owner,pageId)=>req(owner,"use",{pageId}),
     snapshot:owner=>req(owner,"snapshot"),
     fill:(owner,uid,value)=>req(owner,"fill",{uid,value}),
+    editText:(owner,uid,value)=>req(owner,"edit_text",{uid,value}),
+    p2Capabilities:owner=>req(owner,"p2_capabilities"),
     click:(owner,uid)=>req(owner,"click",{uid}),
     screenshot:owner=>req(owner,"screenshot"),
     focusForLogin:owner=>req(owner,"focus_login"),

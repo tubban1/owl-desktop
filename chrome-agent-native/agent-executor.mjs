@@ -27,14 +27,17 @@ export function createNativeAgentExecutor(chrome,storage){
   }
   async function inject(tabId,func,args=[]){
     const result=await chrome.scripting.executeScript({target:{tabId},func,args});
-    return result?.[0]?.result;
+    // Chrome may return an undefined result when a page-injected function throws.
+    // Fail closed instead of reporting a pageId-only phantom success.
+    if(result?.[0]?.result===undefined)throw Error("BROWSER_PAGE_EXECUTION_FAILED");
+    return result[0].result;
   }
   function inspect(){
     const visible=e=>{
       const s=getComputedStyle(e),r=e.getBoundingClientRect();
       return s.visibility!=="hidden"&&s.display!=="none"&&r.width>0&&r.height>0;
     };
-    const controls=[...document.querySelectorAll("a,button,input,textarea,select,[role=button],[contenteditable=true]")]
+    const controls=[...document.querySelectorAll("a,button,input,textarea,select,[role=button],[contenteditable]:not([contenteditable=false])")]
       .filter(visible).slice(0,120).map((el,i)=>{
         const key="owl-agent-"+i;
         el.setAttribute("data-owl-agent-control",key);
@@ -62,6 +65,21 @@ export function createNativeAgentExecutor(chrome,storage){
       el.dispatchEvent(new Event("input",{bubbles:true}));
       el.dispatchEvent(new Event("change",{bubbles:true}));
       return {filled:true,uid,length:value.length};
+    }
+    if(op==="edit_text"){
+      // DOM-only plain contenteditable; never claim the website's editor state persisted.
+      if(!el.isContentEditable || el.matches("[aria-readonly=true],[contenteditable=false]") ||
+         el.closest(".ProseMirror,.ql-editor,.tiptap,[data-slate-editor],[data-lexical-editor]"))
+        return {error:"RICH_EDITOR_REQUIRES_SPECIAL_ADAPTER"};
+      if(/password|cc-|one.time|otp|token|secret|passkey/i.test(
+         label+" "+(el.getAttribute("autocomplete")||"")))
+        throw Error("SENSITIVE_OR_INVALID_FIELD");
+      const ev=new InputEvent("beforeinput",{bubbles:true,cancelable:true,inputType:"insertReplacementText",data:value});
+      if(!el.dispatchEvent(ev))return {error:"EDITOR_BEFOREINPUT_REJECTED"};
+      el.replaceChildren(document.createTextNode(value)); // text, never HTML
+      el.dispatchEvent(new InputEvent("input",{bubbles:true,inputType:"insertReplacementText",data:value}));
+      if(el.textContent!==value)return {error:"EDITOR_DOM_POSTCONDITION_FAILED"};
+      return {edited:true,uid,length:value.length,domVerified:true,websitePersisted:false};
     }
     if(op==="click"){
       // V1 automated click only on ordinary same-origin links.
@@ -170,6 +188,15 @@ export function createNativeAgentExecutor(chrome,storage){
       if(typeof args.uid!=="string"||args.uid.length>100||typeof args.value!=="string"||args.value.length>4000)
         throw Error("FILL_ARGUMENT_INVALID");
       const r=await inject(tabId,operate,[args.uid,args.value,"fill"]);
+      return {pageId:tabId,...r};
+    }
+    if(op==="edit_text"){
+      if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid)||
+         typeof args.value!=="string"||args.value.length>4000)
+        throw Error("EDITOR_ARGUMENT_INVALID");
+      const r=await inject(tabId,operate,[args.uid,args.value,"edit_text"]);
+      if(r?.error)throw Error(r.error);
+      if(r?.edited!==true)throw Error("EDITOR_NOT_CONFIRMED");
       return {pageId:tabId,...r};
     }
     if(op==="click"){
