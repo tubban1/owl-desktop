@@ -53,6 +53,8 @@ describe("Chrome agent-owned background tabs and site consent",()=>{
     expect(f.foreground).toBe(7);
     expect((await f.controller.tabs())).toHaveLength(2);
     expect((await f.controller.active()).tab.id).toBe(b.tabId);
+    await f.controller.authorize("https://www.reddit.com");
+    expect((await f.controller.active()).tab.id).toBe(b.tabId);
     await f.controller.select(a.tabId);
     expect((await f.controller.active()).tab.id).toBe(a.tabId);
     expect(f.foreground).toBe(7);

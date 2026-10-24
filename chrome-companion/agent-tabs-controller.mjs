@@ -25,9 +25,13 @@ export function createAgentTabController(chrome, { get, put, clear }) {
     await requireHostPermission(normalized);
     const previous=await grant();
     await put(SITE, {origin: normalized, expiresAt: Date.now() + AGENT_SITE_GRANT_MS});
-    if(previous?.origin!==normalized)await clear(TABS);
-    await clear(ACTIVE);
-    await clear(MODE);
+    if(previous?.origin!==normalized){
+      // Changing sites drops the prior Agent workspace; renewing the same
+      // site must not silently fall back to the user's foreground tab.
+      await clear(TABS);
+      await clear(ACTIVE);
+      await clear(MODE);
+    }
     return {authorized: true, origin: normalized, expiresAt: Date.now() + AGENT_SITE_GRANT_MS};
   }
   async function requireHostPermission(origin) {
