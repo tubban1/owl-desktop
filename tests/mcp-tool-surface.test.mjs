@@ -144,7 +144,11 @@ describe("OWL MCP compatibility surface", () => {
     expect(missing).toEqual([]);
 
     const browserOpen = listed.tools.find((tool) => tool.name === "browser_open");
-    expect(browserOpen?.description).toContain("last-resort interaction path");
+    expect(browserOpen?.description).toContain("writable OWL browser");
+    expect(browserOpen?.description).toContain("Prefer official API/CLI");
+    expect(browserOpen?.description).toContain("do not silently borrow personal Chrome cookies");
+    const useTab = listed.tools.find((tool) => tool.name === "browser_use_tab");
+    expect(useTab?.description).toContain("tab_id");
 
     const workstreamProgress = listed.tools.find(
       (tool) => tool.name === "workstream_progress",
