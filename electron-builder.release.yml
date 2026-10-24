@@ -10,9 +10,17 @@ files:
   - electron/**/*
   - mcp/**/*
   - connection-host/**/*
+  - chrome-agent-native/**/*
+  - scripts/install-chrome-native-host.mjs
   - shared/**/*
   - package.json
 extraResources:
+  - from: chrome-agent-native
+    to: chrome-agent-native
+  - from: connection-host/native-messaging-host.mjs
+    to: native-messaging/native-messaging-host.mjs
+  - from: scripts/install-chrome-native-host.mjs
+    to: native-messaging/install-chrome-native-host.mjs
   - from: vendor/owl-runtime
     to: owl-runtime
   - from: vendor/owl-tunnel
