@@ -28,6 +28,14 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     const result=await req(owner,"upload_file",{pageId,inputUid,origin:target.origin,files});
     return upload.recordSelection({owner,ticketIds:fileTickets,pageId,inputUid,result,origin:target.origin});
   }
+  async function prepareDownload(owner,downloadId) {
+    if(!upload)throw Error("UPLOAD_BROKER_UNAVAILABLE");
+    const artifact=await req(owner,"download_artifact",{downloadId});
+    if(!artifact?.completed||typeof artifact.localPath!=="string")
+      throw Error("DOWNLOAD_NOT_COMPLETE");
+    const target=await fileInputs(owner);
+    return upload.prepare({owner,filePath:artifact.localPath,origin:target.origin});
+  }
   return {
     open:(owner,url)=>req(owner,"open",{url}),
     tabs:owner=>req(owner,"tabs"),
@@ -38,6 +46,12 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     screenshot:owner=>req(owner,"screenshot"),
     focusForLogin:owner=>req(owner,"focus_login"),
     closeTab:(owner,pageId)=>req(owner,"close_tab",{pageId}),
+    downloadStart:(owner,linkUid,requestId)=>req(owner,"download_start",{linkUid,requestId}),
+    downloadStatus:(owner,downloadId)=>req(owner,"download_status",{downloadId}),
+    downloadList:owner=>req(owner,"download_list"),
+    downloadCancel:(owner,downloadId)=>req(owner,"download_cancel",{downloadId}),
+    prepareDownload,
+    receiptCheck:(owner,expectedText)=>req(owner,"receipt_check",{expectedText}),
     fileInputs,
     prepareFile,
     uploadFile,
@@ -45,7 +59,7 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     releaseFiles:(owner,tickets)=>upload.release({owner,ticketIds:tickets}),
     capabilities:()=>({transport:"chrome-native-messaging",
       fileUpload:upload?.capabilities()??{uploadFile:false},
-      standardInput:true,hiddenInput:true,dragDrop:false,nativePicker:false}),
+      standardInput:true,hiddenInput:true,downloads:true,downloadToUpload:true,uiReceiptCheck:true,dragDrop:false,nativePicker:false}),
     status:()=>broker.status(),
     close:async()=>{} // broker/upload lifecycle belongs to Connection Host
   };
