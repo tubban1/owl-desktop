@@ -1937,7 +1937,7 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
   tool(
     server,
     "browser_open",
-    "Compatibility tool: open a URL in the managed OWL browser. Browser UI is a last-resort interaction path, not the default for developer/deployment services. Prefer a dedicated connector, API or CLI with existing project credentials; use browser_open for genuinely UI-only work, explicit user requests to use the web UI, or after the non-interactive path is verified unavailable.",
+    "Open a URL in an OWL-managed interactive Chrome tab. For user-requested website edits, choose this writable OWL browser together with browser_snapshot, browser_click, browser_type and browser_screenshot even if a separate ChatGPT Browser connector is read-only. Prefer official API/CLI when suitable. Requires OWL browser login and Runtime authorization; do not silently borrow personal Chrome cookies.",
     {
       url: z.string().url(),
       wait_until: z.enum(["load", "domcontentloaded", "networkidle"]).optional(),
@@ -1960,7 +1960,7 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
   tool(
     server,
     "browser_list_tabs",
-    "Compatibility tool: list managed browser tabs.",
+    "List OWL-managed Chrome tabs including stable Chromium tabId and owner-scoped active status. This list is not the same as read-only ChatGPT Browser tabs; tab IDs are locators, not permissions.",
     {},
     {
       title: "Browser Tabs",
@@ -1979,8 +1979,8 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
   tool(
     server,
     "browser_use_tab",
-    "Compatibility tool: switch the managed browser tab.",
-    { index: z.number().int().min(0) },
+    "Select one OWL-managed browser tab without stealing the user\'s foreground focus. Prefer stable tab_id from browser_list_tabs over index; selecting a tab owned by another agent is denied.",
+    { index: z.number().int().min(0).optional(), tab_id: z.string().regex(/^[a-fA-F0-9]{32}$/).optional() },
     {
       title: "Use Browser Tab",
       readOnlyHint: false,
@@ -2017,7 +2017,7 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
   tool(
     server,
     "browser_snapshot",
-    "Compatibility tool: inspect the visible managed browser page.",
+    "Read the current agent-owned OWL browser tab DOM/text and controls before or after a UI action; this is independent of the user\'s foreground tab.",
     {
       max_chars: z.number().int().min(1000).max(100000).optional(),
     },
@@ -2038,7 +2038,7 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
   tool(
     server,
     "browser_click",
-    "Compatibility tool: click a selector in the managed browser.",
+    "Click a selector in the current agent-owned writable OWL browser tab. Use after a snapshot for authorized website edits, then inspect or screenshot to verify the changed page. This is not the read-only ChatGPT Browser connector.",
     { selector: z.string().min(1) },
     {
       title: "Browser Click",
@@ -2057,7 +2057,7 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
   tool(
     server,
     "browser_type",
-    "Compatibility tool: fill a selector in the managed browser.",
+    "Fill a selector in the current agent-owned writable OWL browser tab. Does not activate the human\'s other tabs. Follow with page inspection and verification before reporting a saved change.",
     {
       selector: z.string().min(1),
       text: z.string(),
@@ -2080,7 +2080,7 @@ export function createOwlMcpServer({fileDelivery=null}={}) {
   tool(
     server,
     "browser_screenshot",
-    "Compatibility tool: save a managed browser page screenshot.",
+    "Capture the current agent-owned OWL browser tab directly, without screen focus or interrupting human browsing. The returned Chromium tabId identifies the page for verification when supported by Runtime.",
     {
       path: z.string().min(1),
       full_page: z.boolean().optional(),
