@@ -119,6 +119,14 @@ describe("OWL MCP compatibility surface", () => {
       "task_status",
       "browser_open",
       "browser_agent_open",
+      "browser_agent_status",
+      "browser_agent_tabs",
+      "browser_agent_snapshot",
+      "browser_agent_fill",
+      "browser_agent_click",
+      "browser_agent_screenshot",
+      "browser_agent_focus_login",
+      "browser_agent_close_tab",
       "browser_list_tabs",
       "browser_use_tab",
       "browser_close",
@@ -145,12 +153,12 @@ describe("OWL MCP compatibility surface", () => {
     expect(missing).toEqual([]);
 
     const browserOpen = listed.tools.find((tool) => tool.name === "browser_open");
-    expect(browserOpen?.description).toContain("writable OWL browser");
+    expect(browserOpen?.description).toContain("OPTIONAL isolated managed browser");
     const agentOpen = listed.tools.find(tool => tool.name === "browser_agent_open");
-    expect(agentOpen?.description).toContain("No Chrome Companion");
-    expect(agentOpen?.description).toContain("no per-tab authorization");
-    expect(browserOpen?.description).toContain("Prefer official API/CLI");
-    expect(browserOpen?.description).toContain("do not silently borrow personal Chrome cookies");
+    expect(agentOpen?.description).toContain("ALREADY RUNNING");
+    expect(agentOpen?.description).toContain("normally signed-in Google Chrome");
+    expect(browserOpen?.description).toContain("DEFAULT user Chrome");
+    expect(browserOpen?.description).toContain("Never switch global headless mode");
     const useTab = listed.tools.find((tool) => tool.name === "browser_use_tab");
     expect(useTab?.description).toContain("tab_id");
 
