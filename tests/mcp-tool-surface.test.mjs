@@ -118,6 +118,7 @@ describe("OWL MCP compatibility surface", () => {
       "task_start",
       "task_status",
       "browser_open",
+      "browser_agent_open",
       "browser_list_tabs",
       "browser_use_tab",
       "browser_close",
@@ -145,6 +146,9 @@ describe("OWL MCP compatibility surface", () => {
 
     const browserOpen = listed.tools.find((tool) => tool.name === "browser_open");
     expect(browserOpen?.description).toContain("writable OWL browser");
+    const agentOpen = listed.tools.find(tool => tool.name === "browser_agent_open");
+    expect(agentOpen?.description).toContain("No Chrome Companion");
+    expect(agentOpen?.description).toContain("no per-tab authorization");
     expect(browserOpen?.description).toContain("Prefer official API/CLI");
     expect(browserOpen?.description).toContain("do not silently borrow personal Chrome cookies");
     const useTab = listed.tools.find((tool) => tool.name === "browser_use_tab");

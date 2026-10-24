@@ -1934,10 +1934,28 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
     },
   );
 
+  // Default agent-owned browser path. Direct Runtime-managed Chromium requires
+  // no Chrome Companion pairing or Chrome per-site/tab grants.
+  tool(
+    server,
+    "browser_agent_open",
+    "DEFAULT FOR AGENT WEBSITE WORK: Open an Agent-owned background tab in OWL's persistent managed Chromium profile. No Chrome Companion pairing code, no per-tab authorization and no personal Chrome access. OWL may navigate, inspect, type, click and screenshot its own tabs through normal browser_* tools. Login manually once in the separate OWL browser if requested; Runtime security policy still governs sensitive actions.",
+    {
+      url: z.string().url(),
+      wait_until: z.enum(["load", "domcontentloaded", "networkidle"]).optional(),
+      headless: z.boolean().optional(),
+    },
+    { title: "Open OWL Agent Browser (No Pairing)", readOnlyHint: false,
+      destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    async (args) => primitiveResult(await invoke("primitive.call", {
+      primitive: "web.open", op: "navigate", args,
+    }, BROWSER_OPEN_RUNTIME_TIMEOUT_MS)),
+  );
+
   tool(
     server,
     "browser_open",
-    "Open a URL in an OWL-managed interactive Chrome tab. For user-requested website edits, choose this writable OWL browser together with browser_snapshot, browser_click, browser_type and browser_screenshot even if a separate ChatGPT Browser connector is read-only. Prefer official API/CLI when suitable. Requires OWL browser login and Runtime authorization; do not silently borrow personal Chrome cookies.",
+    "Open a URL in the writable OWL browser. DEFAULT agent-owned browser mode is browser_agent_open: no Chrome Companion pairing, no per-tab grants, no personal Chrome access. Use browser_snapshot/browser_click/browser_type/browser_screenshot; Prefer official API/CLI for service tasks when suitable. If needed, sign in once in the separate OWL browser; do not silently borrow personal Chrome cookies.",
     {
       url: z.string().url(),
       wait_until: z.enum(["load", "domcontentloaded", "networkidle"]).optional(),
@@ -2039,7 +2057,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
 
   tool(
     server, "browser_companion_pair",
-    "Start a one-use local pairing code. User must open OWL Chrome Companion extension on the chosen Chrome tab and enter this code. Valid for 2 minutes; do not log the code.",
+    "OPTIONAL LEGACY PATH ONLY when the user explicitly chooses their everyday signed-in Chrome. Default OWL Agent browser requires NO pairing; use browser_agent_open instead. If requested, generate a single-use Chrome Companion code valid for 15 minutes.",
     {}, {title:"Pair OWL Chrome Companion",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
     async () => {
       if (!browserCompanion) throw new Error("Chrome Companion is not enabled in this Connection Host.");
