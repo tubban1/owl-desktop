@@ -56,7 +56,7 @@ describe("OWL browser P1 downloads",()=>{
    expect(completed).toMatchObject({state:"complete",completed:true,filename:"report.pdf"});
    expect(completed).not.toHaveProperty("localPath");
    expect((await x.run({owner:"agent-A",op:"download_artifact",args:{downloadId:812}})).localPath).toMatch(/report.pdf$/);
-   expect((await x.run({owner:"agent-A",op:"receipt_check",args:{expectedText:"Upload succeeded"})).state).toBe("ui_observed");
+   expect((await x.run({owner:"agent-A",op:"receipt_check",args:{expectedText:"Upload succeeded"}})).state).toBe("ui_observed");
  });
  it("cancels only own incomplete download",async()=>{
    const f=fakeChrome(),x=createNativeAgentExecutor(f.chrome,f.session);
