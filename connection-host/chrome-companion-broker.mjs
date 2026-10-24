@@ -33,11 +33,13 @@ export async function startChromeCompanionBroker({port=8794}={}) {
   }
   async function command(op,args={},ownerId) {
     requireOwner(ownerId);
-    if(!["snapshot","fill","click","screenshot"].includes(op))throw invalid("OP_NOT_ALLOWED");
+    if(!["snapshot","fill","click","screenshot","agent_open","agent_tabs","agent_use_tab","agent_close_tab"].includes(op))throw invalid("OP_NOT_ALLOWED");
     if(!status(ownerId).connected)throw invalid("COMPANION_NOT_PAIRED");
     if(waiting.size>=2)throw invalid("COMPANION_BUSY");
-    if(!["snapshot","screenshot"].includes(op)&&(typeof args.selector!=="string"||args.selector.length>320||args.selector.length===0))
+    if(!["snapshot","screenshot","agent_open","agent_tabs","agent_use_tab","agent_close_tab"].includes(op)&&(typeof args.selector!=="string"||args.selector.length>320||args.selector.length===0))
       throw invalid("INVALID_SELECTOR");
+    if(op==="agent_open"&&(typeof args.url!=="string"||args.url.length>2048||!/^https?:\/\//.test(args.url)))throw invalid("INVALID_AGENT_URL");
+    if(["agent_use_tab","agent_close_tab"].includes(op)&&(!Number.isInteger(args.tabId)||args.tabId<0))throw invalid("INVALID_AGENT_TAB_ID");
     if(op==="fill"&&(typeof args.text!=="string"||args.text.length>4000))throw invalid("INVALID_TEXT");
     const id=randomBytes(16).toString("hex");
     const operation=new Promise((resolve,reject)=>{

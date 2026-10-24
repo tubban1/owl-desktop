@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "OWL LAB Chrome Companion (Experimental)",
   "version": "0.1.0",
-  "description": "Opt-in single-tab pilot; no network connection or background screenshots.",
+  "description": "Consent-based local OWL agent tabs, independent browser automation and screenshots.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -12,6 +12,7 @@
     "offscreen"
   ],
   "host_permissions": ["http://127.0.0.1/*"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {
     "service_worker": "service-worker.mjs",
     "type": "module"

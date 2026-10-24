@@ -1,4 +1,6 @@
 import {grantFor, grantIsCurrent, sanitizeSnapshot} from "./permission-policy.mjs";
+import {permittedOrigin, originPattern} from "./agent-tab-policy.mjs";
+import {createAgentTabController} from "./agent-tabs-controller.mjs";
 
 const GRANT="owlAttachedTab", LINK="owlDesktopLink", PENDING="owlPendingClick";
 const BROKER="http://127.0.0.1:8794";
@@ -6,6 +8,7 @@ const memory={polling:false};
 async function get(key){return (await chrome.storage.session.get(key))[key]||null;}
 async function put(key,value){await chrome.storage.session.set({[key]:value});}
 async function clear(key){await chrome.storage.session.remove(key);}
+const agentTabs=createAgentTabController(chrome,{get,put,clear});
 async function revoke(){await clear(GRANT);await clear(PENDING);await chrome.alarms.clear("owlCompanionGrantExpiry").catch(()=>{});await stopCapture();await chrome.action.setBadgeText({text:""}).catch(()=>{});}
 async function linkedRequest(path,payload={},tokenOverride=null){
   const link=await get(LINK);
@@ -90,8 +93,16 @@ async function executeInPage(tab,func,args=[]){
   const result=await chrome.scripting.executeScript({target:{tabId:tab.id},func,args});
   return result?.[0]?.result;
 }
+async function targetTab(){
+  const agent=await agentTabs.active();
+  if(agent){
+    if(agent.loginRequired)throw new Error("AGENT_LOGIN_REQUIRED: Open the agent tab from Companion to finish login; then let OWL continue.");
+    return {...agent, agentOwned:true, grant:{canFill:true,origin:agent.record.origin}};
+  }
+  return {...await authorizedTab(),agentOwned:false};
+}
 async function snapshot(){
-  const {tab}=await authorizedTab();
+  const {tab}=await targetTab();
   const payload=await executeInPage(tab,readVisiblePage);
   if(!payload||new URL(payload.url).origin!==new URL(tab.url).origin){
     await revoke();throw new Error("Site changed during inspection.");
@@ -104,7 +115,7 @@ async function stopCapture(){
   try{await chrome.offscreen.closeDocument();}catch{}
 }
 async function startCapture(){
-  const {tab}=await authorizedTab();
+  const {tab}=await targetTab();
   const [active]=await chrome.tabs.query({active:true,currentWindow:true});
   if(active?.id!==tab.id)throw new Error("Switch to the authorized tab before starting capture.");
   const contexts=await chrome.runtime.getContexts({contextTypes:["OFFSCREEN_DOCUMENT"]});
@@ -119,7 +130,7 @@ async function startCapture(){
   return {capturing:true,tabId:tab.id};
 }
 async function captureFrame(){
-  const {tab,grant}=await authorizedTab();
+  const {tab,grant}=await targetTab();
   if(await get("owlCaptureTab")!==tab.id)throw new Error("User must first enable tab capture in the extension popup.");
   const result=await chrome.runtime.sendMessage({channel:"owl-offscreen",type:"frame"});
   if(!result?.ok)throw new Error(result?.error||"Tab video capture unavailable");
@@ -127,7 +138,11 @@ async function captureFrame(){
 }
 
 async function executeWork(request){
-  const {tab,grant}=await authorizedTab();
+  if(request.op==="agent_open") return await agentTabs.open(request.args.url);
+  if(request.op==="agent_tabs") return {tabs:await agentTabs.tabs()};
+  if(request.op==="agent_use_tab") return await agentTabs.select(request.args.tabId);
+  if(request.op==="agent_close_tab") return await agentTabs.close(request.args.tabId);
+  const {tab,grant}=await targetTab();
   if(request.op==="snapshot")return await snapshot();
   if(request.op==="screenshot")return await captureFrame();
   if(!grant.canFill)throw new Error("User has not enabled form editing.");
@@ -188,11 +203,14 @@ async function execute(command){
       const storedGrant=await get(GRANT),link=await get(LINK),pending=await get(PENDING);
       let grant=null;
       if(storedGrant){try{await authorizedTab();grant=storedGrant;}catch{grant=null;}}
-      return {authorized:!!grant,paired:!!link&&Date.parse(link.expiresAt)>Date.now(),
+      const autonomous=await agentTabs.status();
+      const owned=await agentTabs.tabs();
+      return {agentSite:autonomous,agentTabs:owned,authorized:!!grant,paired:!!link&&Date.parse(link.expiresAt)>Date.now(),
         origin:grant?.origin||null,expiresAt:grant?.expiresAt||null,
         canFill:!!grant?.canFill,capturing:Boolean(grant&&await get("owlCaptureTab")===grant.tabId),pending:pending?{selector:pending.selector,label:pending.label,origin:pending.origin}:null};
     }
     case "pair":{
+      await agentTabs.revoke();
       const code=String(command.code||"").replaceAll(" ","").trim().toUpperCase();
       if(!/^[0-9A-F]{16}$/.test(code))throw new Error("Enter the 16-character OWL pairing code.");
       const result=await linkedRequest("/v1/pair",{code});
@@ -211,13 +229,31 @@ async function execute(command){
       grant.canFill=true;await put(GRANT,grant);
       return {authorized:true,canFill:true,origin:grant.origin};
     }
+    case "grantAgentSite":{
+      const link=await get(LINK);
+      if(!link||Date.parse(link.expiresAt)<=Date.now())throw new Error("Pair OWL LAB before authorizing agent site access.");
+      const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+      const current=permittedOrigin(tab?.url);
+      if(!current||command.origin!==current)throw new Error("AGENT_SITE_ORIGIN_MISMATCH");
+      return await agentTabs.authorize(current);
+    }
+    case "agentStatus":return agentTabs.status();
+    case "focusAgentLoginTab":return agentTabs.focusForLogin();
+    case "revokeAgentSite":{
+      const previous=await get("owlAgentSiteGrant");
+      await agentTabs.revoke();
+      if(previous.origin){
+        await chrome.permissions.remove({origins:[originPattern(previous.origin)]}).catch(()=>{});
+      }
+      return {enabled:false};
+    }
     case "snapshot":return snapshot();
     case "startCapture":return startCapture();
     case "stopCapture":await stopCapture();return {capturing:false};
     case "approveClick":{
       const request=await get(PENDING);
       if(!request||Date.now()>request.expiresAt)throw new Error("Click request expired.");
-      const {tab}=await authorizedTab();
+      const {tab}=await targetTab();
       if(tab.id!==request.tabId||new URL(tab.url).origin!==request.origin)
         throw new Error("Click target changed.");
       await clear(PENDING);
@@ -243,7 +279,7 @@ async function execute(command){
     }
     case "disconnect":{
       await linkedRequest("/v1/revoke").catch(()=>{});
-      await clear(LINK);await revoke();return {paired:false};
+      await clear(LINK);await revoke();await agentTabs.revoke();return {paired:false};
     }
     default:throw new Error("Unsupported command");
   }
@@ -262,6 +298,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   return true;
 });
 chrome.tabs.onRemoved.addListener(async id=>{
+  await agentTabs.remove(id);
   const grant=await get(GRANT);if(grant?.tabId===id)await revoke();
 });
 chrome.tabs.onUpdated.addListener(async(id,change,tab)=>{

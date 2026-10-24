@@ -1,5 +1,9 @@
 const $=id=>document.getElementById(id);
 const buttons=[...document.querySelectorAll("button")];
+let currentSiteOrigin=null;
+chrome.tabs.query({active:true,currentWindow:true}).then(([tab])=>{
+  try{const u=new URL(tab?.url);currentSiteOrigin=["http:","https:"].includes(u.protocol)?u.origin:null;}catch{currentSiteOrigin=null;}
+}).catch(()=>{});
 function busy(on){buttons.forEach(b=>b.disabled=on);}
 async function ask(op,extra={}){
   busy(true);
@@ -25,6 +29,7 @@ async function updateStatus(){
   if(!r?.ok)return;
   const s=r.data;
   $("status").textContent=(s.paired?"已连接 OWL；":"未连接 OWL；")+
+    (s.agentSite?.enabled?" Agent 可操作 "+s.agentSite.origin+"，后台标签页 "+(s.agentTabs?.length||0)+" 个；":"")+
     (s.authorized?" 已授权 "+s.origin:" 未授权网站")+
     (s.canFill?"；允许填写":"；只读")+(s.capturing?"；后台截图已开启":"");
   $("approval").hidden=!s.pending;
@@ -39,6 +44,17 @@ $("disconnect").onclick=()=>ask("disconnect");
 $("inspect").onclick=()=>ask("snapshot");
 $("startCapture").onclick=()=>ask("startCapture");
 $("stopCapture").onclick=()=>ask("stopCapture");
+$("revokeAgentSite").onclick=()=>ask("revokeAgentSite");
+$("focusAgentLogin").onclick=()=>ask("focusAgentLoginTab");
+$("grantAgentSite").addEventListener("click",()=>{
+  // Request Chrome permission immediately from the real user gesture.
+  if(!currentSiteOrigin){$("status").textContent="请先打开一个普通网站，再打开扩展授权。";return;}
+  const site=new URL(currentSiteOrigin);
+  chrome.permissions.request({origins:[site.protocol+"//"+site.hostname+"/*"]}).then(granted=>{
+    if(!granted){$("status").textContent="Chrome 网站权限未获批准。";return;}
+    return ask("grantAgentSite",{origin:currentSiteOrigin});
+  }).catch(error=>{$("status").textContent="授权失败："+String(error?.message||error);});
+});
 $("approve").onclick=()=>ask("approveClick");
 $("reject").onclick=()=>ask("rejectClick");
 void updateStatus();

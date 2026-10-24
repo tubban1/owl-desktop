@@ -2048,6 +2048,50 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
     },
   );
   tool(
+    server,"browser_companion_open",
+    "Open an Agent-owned background tab in the user's signed-in Chrome at a website they have explicitly approved for site automation. Does NOT activate the tab or change the user's foreground window. If site permission is missing, ask the user to grant it in Chrome Companion.",
+    {url:z.string().url().max(2048)},
+    {title:"Open Background Chrome Agent Tab",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
+    async({url})=>{
+      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      return browserCompanion.command("agent_open",{url},owner.runtimeSessionId);
+    }
+  );
+  tool(
+    server,"browser_companion_agent_tabs",
+    "List only OWL-created background Chrome tabs for this paired Companion session; never enumerate the user's unrelated tabs.",
+    {},{title:"List OWL Chrome Agent Tabs",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>{
+      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      return browserCompanion.command("agent_tabs",{},owner.runtimeSessionId);
+    }
+  );
+  tool(
+    server,"browser_companion_use_agent_tab",
+    "Select one already-owned Chrome Agent tab by its returned tabId without bringing it to the foreground or taking over a user's tab.",
+    {tab_id:z.number().int().nonnegative()},
+    {title:"Select OWL Chrome Agent Tab",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    async({tab_id})=>{
+      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      return browserCompanion.command("agent_use_tab",{tabId:tab_id},owner.runtimeSessionId);
+    }
+  );
+
+  tool(
+    server,"browser_companion_close_agent_tab",
+    "Close only a tab OWL created for the authorized Chrome Agent workspace. Cannot close a user's unrelated tab or a tab from another origin.",
+    {tab_id:z.number().int().nonnegative()},
+    {title:"Close OWL Chrome Agent Tab",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:false},
+    async({tab_id})=>{
+      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
+      const owner=currentMcpRequestContext();requireStableOwner(owner);
+      return browserCompanion.command("agent_close_tab",{tabId:tab_id},owner.runtimeSessionId);
+    }
+  );
+  tool(
     server, "browser_companion_status",
     "Check whether the opt-in Chrome Companion extension is currently paired to this Mac.",
     {}, {title:"Chrome Companion Status",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
