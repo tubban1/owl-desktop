@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OWL Chrome Companion Pilot</title>
+<style>
+body{font:13px/1.5 system-ui,sans-serif;background:#111a20;color:#e7eef1;width:340px;margin:0;padding:16px;box-sizing:border-box}
+h1{font-size:17px;margin:0 0 4px}p{color:#b9c5cf;margin:6px 0 12px}
+button{background:#254e43;color:white;border:1px solid #477967;border-radius:7px;padding:8px 12px;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}button.secondary{background:#28323b}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+#status{min-height:30px;color:#d9d2ae;overflow-wrap:anywhere}
+pre{white-space:pre-wrap;max-height:260px;overflow:auto;background:#202d34;padding:10px;border-radius:7px;font-size:11px}
+small{color:#a7b5bd;display:block;margin-top:10px}
+</style></head><body>
+<h1>OWL Chrome Companion</h1>
+<p>Experimental single-tab permission pilot. Nothing is uploaded or sent to OWL Cloud.</p>
+<div class="actions"><button id="attach">Attach this tab</button><button id="inspect" class="secondary">Inspect</button><button id="detach" class="secondary">Disconnect</button></div>
+<div id="status" role="status" aria-live="polite"></div>
+<pre id="preview" hidden></pre>
+<small>Attaching requires a click here, lasts up to 2 minutes, and ends when the tab changes website or closes. No form edits or screenshots in this pilot.</small>
+<script type="module" src="popup.mjs"></script>
+</body></html>

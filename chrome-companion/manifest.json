@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "OWL LAB Chrome Companion (Experimental)",
+  "version": "0.1.0",
+  "description": "Opt-in single-tab pilot; no network connection or background screenshots.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "service-worker.mjs",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "OWL LAB: authorize this tab",
+    "default_popup": "popup.html"
+  }
+}
