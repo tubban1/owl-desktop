@@ -16,7 +16,7 @@ let browser,bridge;
 const server=http.createServer((req,res)=>{
   res.writeHead(200,{"content-type":"text/html; charset=utf-8"});
   const title=req.url?.startsWith("/agent")?"Agent workspace":"Human workspace";
-  res.end('<!doctype html><title>'+title+'</title><h1>'+title+'</h1><input id="note" value="">');
+  res.end('<!doctype html><title>'+title+'</title><h1>'+title+'</h1><input id="note" value=""><a id="details" href="/agent/details">View details</a><button id="save" type="submit">Save</button>');
 });
 await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
 const address=server.address();
@@ -62,6 +62,22 @@ try{
   await bridge.command("fill",{selector:"#note",text:"Agent filled silently"},owner);
   assert.equal(await agentPage.locator("#note").inputValue(),"Agent filled silently");
   assert.equal(await human.locator("#note").inputValue(),"");
+  const nav=await bridge.command("click",{selector:"#details"},owner);
+  assert.equal(nav.pending,true);
+  await agentPage.waitForURL(website+"/agent/details",{timeout:15000});
+  let navigationResult=null;
+  for(let i=0;i<20;i++){
+    navigationResult=bridge.result(nav.requestId,owner);
+    if(navigationResult.done)break;
+    await new Promise(resolve=>setTimeout(resolve,300));
+  }
+  assert.equal(navigationResult?.ok,true,JSON.stringify(navigationResult));
+  assert.equal(navigationResult.result.automatic,true);
+  assert.equal(navigationResult.result.reason,"safe_same_origin_navigation");
+  const save=await bridge.command("click",{selector:"#save"},owner);
+  assert.equal(save.pending,true);
+  await new Promise(resolve=>setTimeout(resolve,2200));
+  assert.equal(bridge.result(save.requestId,owner).pending,true);
   const foreground=await popup.evaluate(()=>new Promise(resolve=>chrome.tabs.query({active:true,currentWindow:true},resolve)));
   assert.ok(foreground[0].url.endsWith("/human"),JSON.stringify(foreground.map(t=>t.url)));
   await bridge.command("agent_close_tab",{tabId:created.tabId},owner);

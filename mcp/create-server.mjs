@@ -2135,7 +2135,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null}={})
 
   tool(
     server, "browser_companion_click",
-    "Queue an authorized Chrome click and return a pending request ID immediately. The extension will NOT click until the user confirms it. Use browser_companion_action_result to verify actual completion; do not claim it saved yet.",
+    "Queue an authorized Chrome click. Safe same-origin navigation links in OWL-created tabs may click automatically; save/submit/buttons/cross-site effects still require user confirmation. Returns requestId immediately: check browser_companion_action_result for completion before claiming success.",
     {selector:z.string().min(1).max(320)},
     {title:"Request Authorized Chrome Click",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async ({selector}) => {

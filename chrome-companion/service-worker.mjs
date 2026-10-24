@@ -73,10 +73,19 @@ function inspectClickTarget(selector){
     throw new Error("Click target is not an interactive control.");
   if(/delete|remove|pay|purchase|checkout|buy|erase|logout|sign out|supprimer|löschen/i.test(label))
     throw new Error("Destructive action must be done manually.");
-  return {label:label.slice(0,120),tag};
+  const href=tag==="a" ? el.href : null;
+  let safeNavigation=false;
+  if(href && !el.hasAttribute("download") &&
+     !el.hasAttribute("onclick") && (!el.target || el.target==="_self")) {
+    const target=new URL(href);
+    safeNavigation=(target.protocol==="https:" || target.protocol==="http:") &&
+      target.origin===location.origin &&
+      !/(delete|remove|destroy|logout|signout|unsubscribe|pay|purchase|checkout|approve|confirm|submit|publish|post|follow|upvote|downvote|vote|like|share)/i.test(target.pathname+target.search);
+  }
+  return {label:label.slice(0,120),tag,safeNavigation};
 }
 
-function clickControl(selector){
+function clickControl(selector,onlySafeNavigation=false){
   const elements=document.querySelectorAll(selector);
   if(elements.length!==1)throw new Error("Selector must match exactly one element.");
   const el=elements[0],label=(el.innerText||el.getAttribute("aria-label")||"").trim();
@@ -86,6 +95,15 @@ function clickControl(selector){
   if(/delete|remove|pay|purchase|checkout|buy|erase|logout|sign out|supprimer|löschen/i.test(label))
     throw new Error("Protected action: use the website manually.");
   if(el.disabled)throw new Error("Button disabled.");
+  if(onlySafeNavigation){
+    if(el.tagName.toLowerCase()!=="a" || el.hasAttribute("download") ||
+       el.hasAttribute("onclick") || (el.target && el.target!=="_self"))
+      throw new Error("SAFE_NAVIGATION_REQUIRES_A_SAME_TAB_LINK");
+    const dest=new URL(el.href);
+    if(!["http:","https:"].includes(dest.protocol) || dest.origin!==location.origin ||
+       /(delete|remove|destroy|logout|signout|unsubscribe|pay|purchase|checkout|approve|confirm|submit|publish|post|follow|upvote|downvote|vote|like|share)/i.test(dest.pathname+dest.search))
+      throw new Error("SAFE_NAVIGATION_TARGET_CHANGED");
+  }
   el.click();
   return {clicked:true,selector,label:label.slice(0,80),origin:location.origin};
 }
@@ -151,8 +169,15 @@ async function executeWork(request){
     return {tabId:tab.id,...data};
   }
   if(request.op==="click"){
-    // Never auto-click. Store until the human explicitly approves in popup.
     const target=await executeInPage(tab,inspectClickTarget,[request.args.selector]);
+    // Only Agent-created tabs may navigate to clearly safe, same-origin links
+    // without extra confirmation. Every submit/button/cross-site click still
+    // goes through the human approval popup.
+    if((await agentTabs.status()).enabled && (await agentTabs.active())?.tab?.id===tab.id &&
+       target.safeNavigation===true){
+      const completed=await executeInPage(tab,clickControl,[request.args.selector,true]);
+      return {tabId:tab.id,...completed,automatic:true,reason:"safe_same_origin_navigation"};
+    }
     await put(PENDING,{id:request.id,selector:request.args.selector,
       label:target.label,tag:target.tag,
       origin:grant.origin,tabId:tab.id,expiresAt:Date.now()+75000});
