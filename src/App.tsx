@@ -18,6 +18,7 @@ import owlLogo from "../assets/owl-logo-ui.png";
 import { StatisticsPanel } from "./statistics/StatisticsPanel";
 import { deviceCopy } from "./deviceCopy";
 import { RuntimePermissionCenter } from "./permissions/RuntimePermissionCenter";
+import { MissionReviewPanel } from "./permissions/MissionReviewPanel";
 import type { UsageStatisticsSnapshot } from "./statistics/statisticsModel";
 import {
   ApprovalAttention,
@@ -1924,6 +1925,7 @@ export default function App() {
             </div>
           </section>
 
+          <MissionReviewPanel />
           <RuntimePermissionCenter approvals={liveApprovals??snapshot?.approvals} access={runtimeAccess}
             endpoint={snapshot?.runtimeEndpoint} onApprove={approveRuntimeApproval}
             onDeny={denyRuntimeApproval} />

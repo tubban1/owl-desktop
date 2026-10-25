@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { missionApprovalDigest, missionApprovalScope, missionApprovalStatus } from "./mission-approval.mjs";
 
 function readJson(file, fallback) {
   try {
@@ -419,6 +420,54 @@ export class PlannerContinuationStore {
     owner.updatedAt = now;
     this.write(state);
     return compactOwner(owner);
+  }
+  listMissionReviews({ limit = 30, sinceMs = 7 * 86_400_000 } = {}) {
+    const now = Date.now();
+    return Object.values(this.read().owners)
+      .filter(owner =>
+        owner?.workstream?.status !== "completed" &&
+        (owner?.workstream?.missionContract?.allowedRepositories?.length ?? 0) > 0 &&
+        Date.parse(owner.updatedAt ?? owner.workstream.createdAt ?? "") >= now - sinceMs)
+      .sort((a,b)=> Date.parse(b.updatedAt??"") - Date.parse(a.updatedAt??""))
+      .slice(0, Math.min(limit, 100))
+      .map(owner => {
+        const status = missionApprovalStatus(owner, path.join(path.dirname(this.file),"human-approval-signer.json"));
+        return {
+          workstreamId: owner.ownerId,
+          goal: owner.workstream.goal,
+          label: owner.workstream.label ?? null,
+          status: status.approved ? "approved" : "needs_review",
+          reason: status.reason,
+          scope: status.scope,
+          pendingProgressBoundary: owner.workstream.progressBoundary?.pending === true,
+        };
+      });
+  }
+
+  attachMissionApproval(ownerId, signed, now = new Date().toISOString()) {
+    const state = this.read();
+    const owner = state.owners[ownerId];
+    if (!owner?.workstream || owner.workstream.status === "completed")
+      throw Object.assign(new Error("MISSION_WORKSTREAM_NOT_ACTIVE"), {code:"MISSION_WORKSTREAM_NOT_ACTIVE"});
+    const scope = missionApprovalScope(owner);
+    const digest = missionApprovalDigest(scope);
+    if (!scope?.workspaceRoot || !Array.isArray(scope.allowedRepositories) ||
+        scope.allowedRepositories.length === 0 ||
+        !scope.allowedRepositories.includes(path.basename(scope.workspaceRoot)))
+      throw Object.assign(new Error("MISSION_SCOPE_INCOMPLETE"), {code:"MISSION_SCOPE_INCOMPLETE"});
+    const before = owner.workstream.missionContract.approval;
+    owner.workstream.missionContract = {
+      ...owner.workstream.missionContract,
+      approval: {digest,signature:signed,approvedAt:now,source:"desktop_human_dialog"},
+    };
+    const verification = missionApprovalStatus(owner,path.join(path.dirname(this.file),"human-approval-signer.json"));
+    if (!verification.approved) {
+      owner.workstream.missionContract.approval = before;
+      throw Object.assign(new Error("MISSION_SIGNATURE_INVALID"), {code:"MISSION_SIGNATURE_INVALID"});
+    }
+    owner.updatedAt = now;
+    this.write(state);
+    return {workstreamId:ownerId, approved:true, digest, scope};
   }
 
   noteProgressAdvisory(ownerId, now = new Date().toISOString()) {

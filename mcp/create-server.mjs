@@ -5,6 +5,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { RuntimeHttpClient } from "../electron/runtime-http-client.mjs";
 import { currentMcpRequestContext } from "./request-context.mjs";
+import { assertMissionAction } from "../electron/services/mission-approval.mjs";
+import path from "node:path";
 
 // Trusted tool handlers alone may create native content. Runtime JSON never
 // passes the native-result guard or provides untrusted media blocks.
@@ -835,6 +837,25 @@ function tool(server, name, description, schema, annotations, handler) {
       });
       try {
         requireProgressBoundary(context, name, args);
+        if (!WORKSTREAM_META_TOOLS.has(name) &&
+            !isProgressSafeRead(name) &&
+            name !== "task_cancel" && name !== "kill_process" &&
+            !(
+              annotations?.readOnlyHint === true &&
+              annotations?.destructiveHint !== true &&
+              annotations?.openWorldHint !== true
+            )) {
+          const store = context.plannerContinuation;
+          const owner = store?.get?.(context.runtimeSessionId);
+          if (owner?.workstream?.missionContract?.allowedRepositories?.length) {
+            assertMissionAction(
+              owner,
+              path.join(path.dirname(store.file), "human-approval-signer.json"),
+              name,
+              args,
+            );
+          }
+        }
         const value = await handler(args);
         const durationMs = Date.now() - started;
         const pendingRecoveryRead =

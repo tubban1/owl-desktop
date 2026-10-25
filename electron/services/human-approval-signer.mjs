@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {generateKeyPairSync,createPrivateKey,sign} from "node:crypto";
+import { missionApprovalMessage } from "./mission-approval.mjs";
 
 export function approvalHumanMessage(r){
  return JSON.stringify({domain:"OWL_HUMAN_APPROVAL_V1",id:r.id,
@@ -44,5 +45,17 @@ export function createHumanApprovalSigner({root,secureStorage}){
   const key=createPrivateKey({key:Buffer.from(privateB64,"base64"),format:"der",type:"pkcs8"});
   return sign(null,Buffer.from(approvalHumanMessage(approval),"utf8"),key).toString("base64");
  };
- return {publicKey,provision,signApproval};
+ const signMission=(scope)=>{
+  if(!secureStorage.isEncryptionAvailable())throw new Error("MISSION_SIGNER_OS_ENCRYPTION_REQUIRED");
+  if(scope?.domain!=="OWL_MISSION_APPROVAL_V1" ||
+     !scope?.workstreamId?.startsWith("owl-workstream:") ||
+     !scope?.workspaceRoot || !scope.allowedRepositories?.length)
+    throw new Error("MISSION_SCOPE_INCOMPLETE");
+  const row=read();
+  if(!row)throw new Error("HUMAN_SIGNER_NOT_PROVISIONED");
+  const privateB64=secureStorage.decryptString(Buffer.from(row.encrypted,"base64"));
+  const key=createPrivateKey({key:Buffer.from(privateB64,"base64"),format:"der",type:"pkcs8"});
+  return sign(null,Buffer.from(missionApprovalMessage(scope),"utf8"),key).toString("base64");
+ };
+ return {publicKey,provision,signApproval,signMission};
 }

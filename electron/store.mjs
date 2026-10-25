@@ -27,6 +27,8 @@ export class DesktopStore {
   ensureHumanApprovalSigner(){return this.approvalSigner.provision();}
   signHumanApproval(approval){return this.approvalSigner.signApproval(approval);}
 
+  signMissionScope(scope){return this.approvalSigner.signMission(scope);}
+
   getSettings() {
     const stored = readJson(this.settingsFile, {});
     const standardFolders = [

@@ -40,6 +40,25 @@ declare global {
       statistics(): Promise<import("./statistics/statisticsModel").UsageStatisticsSnapshot>;
       refreshRuntime(options?: { quiet?: boolean; detailedMcp?: boolean }): Promise<RuntimeSnapshot>;
       listRuntimeApprovals(): Promise<unknown>;
+      listMissionReviews(): Promise<Array<{
+        workstreamId: string;
+        goal: string;
+        label: string | null;
+        status: "approved" | "needs_review";
+        reason: string;
+        scope: {
+          workspaceRoot: string | null;
+          allowedRepositories: string[];
+          prohibitedChanges: string[];
+          acceptanceCriteria: string[];
+        } | null;
+        pendingProgressBoundary: boolean;
+      }>>;
+      approveMission(workstreamId: string): Promise<{
+        approved: boolean;
+        cancelled?: boolean;
+        workstreamId?: string;
+      }>;
       approveRuntimeApproval(approvalId: string): Promise<unknown>;
       denyRuntimeApproval(approvalId: string): Promise<unknown>;
       monitorTaskDetail(

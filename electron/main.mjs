@@ -39,6 +39,7 @@ import { CloudControlPlaneService } from "./services/cloud-control-plane-service
 import { RemoteSubmissionStore } from "./services/remote-submission-store.mjs";
 import { RemoteDeviceControlService } from "./services/remote-device-control-service.mjs";
 import { PlannerContinuationStore } from "./services/planner-continuation-store.mjs";
+import { missionApprovalScope } from "./services/mission-approval.mjs";
 import {
   DevAuthCallbackServer,
   DEV_AUTH_CALLBACK_URI,
@@ -1817,6 +1818,52 @@ function registerIpc() {
       mcpPort: store.getSettings().mcpPort,
     }),
   );
+  ipcMain.handle("mission:review:list", () =>
+    plannerContinuationStore?.listMissionReviews() ?? []);
+  ipcMain.handle("mission:review:approve", async (_event, workstreamId) => {
+    if (typeof workstreamId !== "string" || !/^owl-workstream:[\w-]+$/.test(workstreamId))
+      throw new Error("MISSION_WORKSTREAM_ID_REQUIRED");
+    const before = plannerContinuationStore?.get(workstreamId);
+    if (!before?.workstream || before.workstream.status === "completed")
+      throw new Error("MISSION_WORKSTREAM_NOT_ACTIVE");
+    const scope = missionApprovalScope(before);
+    if (!scope?.workspaceRoot || !scope.allowedRepositories.length ||
+        !scope.allowedRepositories.includes(path.basename(scope.workspaceRoot)))
+      throw new Error("MISSION_SCOPE_INCOMPLETE: planner must provide an exact workspace.worktree and allowed repository.");
+    const detail = [
+      "This approval is only for the mission and repository shown below.",
+      "It does not bypass Runtime permissions or authorize raw shell commands.",
+      "",
+      "Workstream: " + workstreamId,
+      "Original goal: " + scope.originalGoal,
+      "Workspace root: " + scope.workspaceRoot,
+      "Allowed repositories: " + scope.allowedRepositories.join(", "),
+      "Prohibited changes: " + (scope.prohibitedChanges.join("; ") || "(none specified)"),
+      "Acceptance: " + (scope.acceptanceCriteria.join("; ") || "(not specified)"),
+      "",
+      "Reject if these are not exactly what you requested."
+    ].join("\n");
+    const {response} = await dialog.showMessageBox(mainWindow ?? undefined,{
+      type:"warning",
+      buttons:["Cancel", "Approve exactly this mission"],
+      defaultId:0,cancelId:0,noLink:true,
+      title:"OWL Mission scope approval",
+      message:"Confirm mission and repository scope",
+      detail,
+    });
+    if (response !== 1) return {approved:false, cancelled:true};
+    // Re-read after the user's decision: consent cannot cover a changed scope.
+    const latest = plannerContinuationStore.get(workstreamId);
+    if (JSON.stringify(missionApprovalScope(latest)) !== JSON.stringify(scope))
+      throw new Error("MISSION_SCOPE_CHANGED_DURING_REVIEW");
+    store.ensureHumanApprovalSigner();
+    const signature=store.signMissionScope(scope);
+    const result=plannerContinuationStore.attachMissionApproval(workstreamId,signature);
+    record("info","desktop","Mission scope approved by local human dialog",{
+      workstreamId, digest:result.digest,
+    });
+    return result;
+  });
   ipcMain.handle("runtime:approvals:list", () => runtimeClient().approvals());
   ipcMain.handle("runtime:approval:approve", async (_event, approvalId) => {
     if (typeof approvalId !== "string" || !approvalId.trim()) {

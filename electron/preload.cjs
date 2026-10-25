@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   listActivity: () => ipcRenderer.invoke("desktop:activity:list"),
   statistics: () => ipcRenderer.invoke("desktop:statistics"),
   refreshRuntime: (options) => ipcRenderer.invoke("runtime:refresh", options),
+  listMissionReviews: () => ipcRenderer.invoke("mission:review:list"),
+  approveMission: (workstreamId) => ipcRenderer.invoke("mission:review:approve", workstreamId),
   listRuntimeApprovals: () => ipcRenderer.invoke("runtime:approvals:list"),
   approveRuntimeApproval: (approvalId) =>
     ipcRenderer.invoke("runtime:approval:approve", approvalId),
