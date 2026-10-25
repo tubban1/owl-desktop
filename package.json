@@ -25,6 +25,8 @@
     "package:mac:x64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-node && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon && npm run build && electron-builder --mac --x64",
     "package:mac:smoke:arm64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-node && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon && npm run build && electron-builder --mac --arm64 --dir",
     "package:mac:smoke:x64": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-node && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon && npm run build && electron-builder --mac --x64 --dir",
+    "verify:windows:native-host": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/verify-native-host.ps1",
+    "verify:windows:release": "node scripts/windows/verify-release-components.mjs",
     "verify:mac:release": "node scripts/verify-macos-release-env.mjs",
     "package:mac:release": "npm run stage:runtime && npm run prepare:tunnel && npm run prepare:runtime-node && npm run prepare:runtime-host && npm run prepare:helper && npm run prepare:icon && npm run verify:mac:release && npm run build && electron-builder --config electron-builder.release.yml --mac --arm64 --x64",
     "start": "electron .",
