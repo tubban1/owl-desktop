@@ -34,9 +34,13 @@ async function main(){
   const file=fs.realpathSync(configFile);
   const stat=fs.statSync(file);
   if(process.platform!=="win32"&&(stat.mode&0o077)!==0)throw Error("NATIVE_HOST_CONFIG_NOT_PRIVATE");
-  const {port,token}=JSON.parse(fs.readFileSync(file,"utf8"));
-  if(!Number.isInteger(port)||port<=0||port>65535||!/^[a-f0-9]{64}$/.test(token))throw Error("NATIVE_CONFIG_INVALID");
-  const base=`http://127.0.0.1:${port}`;
+  function loadBrokerConfig(){
+    const next=JSON.parse(fs.readFileSync(file,"utf8"));
+    if(!Number.isInteger(next.port)||next.port<=0||next.port>65535||
+       !/^[a-f0-9]{64}$/.test(next.token))throw Error("NATIVE_CONFIG_INVALID");
+    return next;
+  }
+  let {port,token}=loadBrokerConfig();
   const messages=new Map();
   let alive=true;
   const send=msg=>process.stdout.write(frame(msg));
@@ -49,7 +53,7 @@ async function main(){
   process.stdin.once("end",()=>{alive=false;});
   process.stdin.once("error",()=>{alive=false;});
   async function req(endpoint,data){
-    const reply=await fetch(base+endpoint,{method:"POST",headers:{
+    const reply=await fetch("http://127.0.0.1:"+port+endpoint,{method:"POST",headers:{
       authorization:"Bearer "+token,"content-type":"application/json"
     },body:JSON.stringify(data),signal:AbortSignal.timeout(4500)});
     if(!reply.ok)throw Error("NATIVE_BROKER_HTTP_"+reply.status);
@@ -72,11 +76,30 @@ async function main(){
         await req("/v1/native/result",response);
       }
     }catch(e){
-      if(/NATIVE_BROKER_HTTP_401/.test(String(e.message))&&++denied>=3)break;
+      if(/NATIVE_BROKER_HTTP_401/.test(String(e.message))){
+        // Retry only when the trusted private Broker config has rotated.
+        try {
+          const updated=loadBrokerConfig();
+          if(updated.port!==port || updated.token!==token){
+            ({port,token}=updated);
+            denied=0;
+            continue;
+          }
+        }catch{}
+        if(++denied>=3)break;
+      }
       process.stderr.write("OWL native host reconnect: "+String(e.message).slice(0,100)+"\n");
     }
     await sleep(450);
   }
+  // A rejected/revoked Broker token must close Chrome's native transport.
+  // Keeping stdin in flowing mode leaves the child process alive forever,
+  // falsely connected but unable to deliver any further browser commands.
+  process.stdin.pause();
+  process.stdin.removeAllListeners("data");
+  process.stdin.removeAllListeners("end");
+  process.stdin.removeAllListeners("error");
+  process.stdin.destroy();
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   main().catch(e=>{process.stderr.write("OWL native host: "+e.message+"\n");process.exitCode=1;});
