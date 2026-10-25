@@ -27,7 +27,7 @@ describe("secure local upload staging",()=>{
     expect(prep.bytes).toBe(31);
     expect(prep.file_ticket).toMatch(/^[0-9a-f]{48}$/);
     const files=await broker.resolve({owner:OWNER,ticketIds:[prep.file_ticket],origin:SITE});
-    expect(files[0].stagedPath).toMatch(/\/photo\.png$/);
+    expect(path.basename(files[0].stagedPath)).toBe("photo.png");
     expect(await fs.readFile(files[0].stagedPath)).toEqual(await fs.readFile(file));
     await expect(broker.resolve({owner:"owl-other",ticketIds:[prep.file_ticket],origin:SITE})).rejects.toThrow("UPLOAD_TICKET_NOT_AUTHORIZED");
     await expect(broker.resolve({owner:OWNER,ticketIds:[prep.file_ticket],origin:"https://attacker.com"})).rejects.toThrow("UPLOAD_TICKET_NOT_AUTHORIZED");

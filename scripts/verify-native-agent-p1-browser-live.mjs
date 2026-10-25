@@ -106,7 +106,7 @@ try{
   });
   const source=await listen(downloader), destination=await listen(uploader);
   browser=await chromium.launchPersistentContext(path.join(tmp,"profile"),{
-    headless:true,channel:"chromium",acceptDownloads:true,
+    headless:true,channel:process.env.OWL_CHROME_CHANNEL||"chromium",acceptDownloads:true,
     downloadsPath:files,
     args:["--disable-extensions-except="+ext,"--load-extension="+ext],timeout:20000
   });

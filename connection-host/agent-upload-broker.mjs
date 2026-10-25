@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import {constants as flags} from "node:fs";
 import {createHash,randomBytes,randomUUID} from "node:crypto";
+import {secureUploadStagingRoot} from "./private-upload-staging.mjs";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_FILES_PER_UPLOAD = 5;
@@ -94,10 +95,7 @@ export function createAgentUploadBroker({
       const stat=await h.stat();
       if(!stat.isFile()||stat.size<=0||stat.size>MAX_FILE_BYTES)throw Error("UPLOAD_FILE_SIZE_OR_TYPE_INVALID");
       if(!stagingReady){
-        await fs.mkdir(tempRoot,{recursive:true,mode:0o700});
-        const rootStat=await fs.lstat(tempRoot);
-        if(!rootStat.isDirectory()||(rootStat.mode&0o077)!==0 ||
-           (process.getuid&&rootStat.uid!==process.getuid()))throw Error("UPLOAD_STAGING_ROOT_NOT_PRIVATE");
+        await secureUploadStagingRoot(tempRoot);
         stagingReady=true;
       }
       // Unique private directory retains exact basename for browser file input.

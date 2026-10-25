@@ -171,7 +171,7 @@ export function createNativeAgentExecutor(chrome,storage){
     if(op==="upload_file"){
       const uid=args.inputUid,files=args.files,expectedOrigin=args.origin;
       if(args.pageId!==tabId||!Array.isArray(files)||files.length<1||files.length>5 ||
-         !files.every(f=>f && typeof f.stagedPath==="string" && f.stagedPath.startsWith("/") &&
+         !files.every(f=>f && typeof f.stagedPath==="string" && (f.stagedPath.startsWith("/")||/^[a-zA-Z]:[\\/]/.test(f.stagedPath)) &&
           typeof f.filename==="string" && f.filename.length>0 && f.filename.length<256))
         throw Error("UPLOAD_ARGUMENTS_INVALID");
       if(new URL(tab.url).origin!==expectedOrigin)throw Error("UPLOAD_ORIGIN_CHANGED");
@@ -219,7 +219,7 @@ export function createNativeAgentExecutor(chrome,storage){
       const files=args.files,origin=args.origin,targetUid=args.targetUid;
       if(args.pageId!==tabId||typeof origin!=="string"||!/^owl-agent-\d{1,3}$/.test(targetUid)||
          !Array.isArray(files)||files.length<1||files.length>5 ||
-         !files.every(f=>f&&typeof f.stagedPath==="string"&&f.stagedPath.startsWith("/")&&
+         !files.every(f=>f&&typeof f.stagedPath==="string"&&(f.stagedPath.startsWith("/")||/^[a-zA-Z]:[\\/]/.test(f.stagedPath))&&
            typeof f.filename==="string"&&f.filename.length>0&&f.filename.length<256))
         throw Error("FILE_DROP_ARGUMENT_INVALID");
       if(new URL(tab.url).origin!==origin)throw Error("FILE_DROP_ORIGIN_CHANGED");
