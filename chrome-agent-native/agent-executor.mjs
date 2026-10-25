@@ -107,17 +107,6 @@ export function createNativeAgentExecutor(chrome,storage){
       if(el.textContent!==value)return {error:"EDITOR_DOM_POSTCONDITION_FAILED"};
       return {edited:true,uid,length:value.length,domVerified:true,websitePersisted:false};
     }
-    if(op==="click"){
-      // V1 automated click only on ordinary same-origin links.
-      // Submission and arbitrary JS buttons remain manually controlled.
-      if(el.tagName!=="A"||el.hasAttribute("download")||el.hasAttribute("onclick")||
-        (el.target&&el.target!=="_self"))throw Error("CLICK_REQUIRES_HUMAN_CONFIRMATION");
-      const url=new URL(el.href);
-      if(!["https:","http:"].includes(url.protocol)||url.origin!==location.origin||
-        /delete|remove|destroy|logout|pay|buy|checkout|submit|publish|post|share|vote|follow|confirm|approve/i.test(url.pathname+url.search))
-        throw Error("CLICK_REQUIRES_HUMAN_CONFIRMATION");
-      el.click();return {clicked:true,uid};
-    }
     throw Error("UNKNOWN_PAGE_OPERATION");
   }
   async function run({owner,op,args={}}){
@@ -255,7 +244,7 @@ export function createNativeAgentExecutor(chrome,storage){
         websiteUploadVerified:false,systemPointerMoved:false,foregroundUnchanged:true,
         state:observed?.domChanged?"ui_observed":"dispatched_unconfirmed"};
     }
-    if(op==="cursor_move"||op==="cursor_click"){
+    if(op==="cursor_move"||op==="cursor_click"||op==="click"){
       if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid))
         throw Error("CURSOR_UID_INVALID");
       // A personal Chrome foreground tab is not an autonomous target,
@@ -263,7 +252,7 @@ export function createNativeAgentExecutor(chrome,storage){
       if(tab.active)throw Error("AGENT_TAB_FOREGROUND_NEEDS_HUMAN");
       const origin=urlOrigin(tab.url);
       if(!origin)throw Error("CURSOR_UNSAFE_ORIGIN");
-      const click=op==="cursor_click";
+      const click=op!=="cursor_move";
       const zone=await inject(tabId,locateVirtualCursorTarget,
         [args.uid,origin,click?"click":"move"]);
       if(zone?.error)throw Error(zone.error);
@@ -340,13 +329,6 @@ export function createNativeAgentExecutor(chrome,storage){
       if(r?.error)throw Error(r.error);
       if(!r?.domVerified)throw Error("DROP_EFFECT_NOT_OBSERVED");
       return {pageId:tabId,...r};
-    }
-    if(op==="click"){
-      if(typeof args.uid!=="string"||args.uid.length>100)throw Error("CLICK_ARGUMENT_INVALID");
-      // Compatibility: legacy safe-link behavior remains available; the
-      // explicit cursor_click API is recommended for trusted real mouse events.
-      const r=await inject(tabId,operate,[args.uid,null,"click"]);
-      return {pageId:tabId,...r,osPointerMoved:false,method:"dom_click_legacy"};
     }
     if(op==="screenshot"){
       const target={tabId};

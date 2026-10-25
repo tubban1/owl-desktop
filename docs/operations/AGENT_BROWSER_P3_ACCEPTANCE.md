@@ -1,7 +1,7 @@
 
 ## 2026-10-25 — Virtual cursor / focus isolation
 
-- Cursor API: browser_agent_cursor_move(uid), browser_agent_cursor_click(uid), browser_agent_cursor_hide(). OWL's purple pointer is a non-interactive, shadow-isolated overlay in an Agent-created tab, not the OS mouse pointer.
+- Cursor API: browser_agent_cursor_move(uid), browser_agent_cursor_click(uid), browser_agent_cursor_hide(). Existing browser_agent_click(uid) also routes through the trusted cursor by default. OWL's purple pointer is a non-interactive, shadow-isolated overlay in an Agent-created tab, not the OS mouse pointer.
 - Chrome Input.dispatchMouseEvent sends real trusted mouseMoved/mousePressed/mouseReleased to exactly one tab-scoped Chrome debugger session. No operating-system event injection, remote debugging port 9222, window activation or Chrome Companion is involved.
 - A safe observed UID, same origin, visible hit-test and no overlay occlusion are mandatory. Automated click is restricted to safe same-origin links and non-form benign buttons. Consequential actions, file dialogs, account/security/payment/publish/submit actions remain human-owned.
 - If the Agent-owned tab becomes active in Chrome, P3 refuses a cursor command (AGENT_TAB_FOREGROUND_NEEDS_HUMAN), allowing the user to operate that tab uninterrupted. Other Agent sessions and pre-existing personal tabs cannot be targeted.

@@ -1984,7 +1984,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
   );
   tool(
     server,"browser_agent_click",
-    "Click one element from the most recent Agent-owned Chrome snapshot. Human/foreign tabs cannot be targeted. Consequential actions require task authorization; destructive/payment/account security actions must remain manual.",
+    "Default trusted OWL Agent virtual-cursor click in the Agent-owned background Chrome tab. Never moves the system mouse or activates a human tab; dangerous actions, file dialogs and covered controls are refused.",
     {uid:z.string().min(1).max(180)},
     {title:"Click My Chrome Tab",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async({uid})=>{const{bridge,owner}=trustedUserChrome();return bridge.click(owner,uid);}

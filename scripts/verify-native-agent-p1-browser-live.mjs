@@ -256,6 +256,9 @@ try{
   assert.equal(clicked.websitePersisted,false);
   assert.equal(clicked.osPointerMoved,false);
   assert.equal(await targetPage.locator("#cursor-click-receipt").textContent(),"TRUSTED TAB CLICK");
+  const defaultClick=await call(owner,"click",{uid:cursorUid("Expand details")});
+  assert.equal(defaultClick.clicked,true,"legacy browser_agent_click routes to trusted tab cursor");
+  assert.equal(defaultClick.inputMethod,"tab_scoped_chrome_debugger");
   assert.equal((await apiPage.evaluate(()=>chrome.tabs.query({active:true,currentWindow:true})))[0].url,source+"/human");
   // Agent must yield immediately when the human foregrounds their Agent-created tab.
   await targetPage.bringToFront();
@@ -308,7 +311,7 @@ try{
   assert.equal((await call(owner,"tabs")).tabs.length,0);
   console.log(JSON.stringify({ok:true,isolatedChromium:true,nativeMV3:true,ownedAgentTabs:true,
     actualChromeDownload:true,downloadIdempotent:true,ownerIsolation:true,hiddenFileSelection:true,
-    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2TrustedFrameworkInsert:true,p3VirtualCursor:true,p3TrustedTabClick:true,p3SensitiveClickDenied:true,p3ForegroundYield:true,p3OcclusionGuard:true,p3SystemPointerUnchanged:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,p2TextPaste:true,p2DragDrop:true,p2DeniedSensitiveAndInert:true,p2FileDropWithTicket:true,p2FileDropServerReceipt:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
+    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2TrustedFrameworkInsert:true,p3VirtualCursor:true,p3TrustedTabClick:true,p3DefaultClickUpgraded:true,p3SensitiveClickDenied:true,p3ForegroundYield:true,p3OcclusionGuard:true,p3SystemPointerUnchanged:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,p2TextPaste:true,p2DragDrop:true,p2DeniedSensitiveAndInert:true,p2FileDropWithTicket:true,p2FileDropServerReceipt:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
     humanForegroundPreserved:true,privateArtifactsNotExposedToMCP:true}));
 }finally{
   await browser?.close().catch(()=>{});
