@@ -66,8 +66,16 @@ describe("secure local upload staging",()=>{
     await expect(broker.prepare({owner:OWNER,filePath:outside,origin:SITE})).rejects.toThrow("UPLOAD_FILE_OUTSIDE_ALLOWED_ROOTS");
     const secret=path.join(allowed,".env");await fs.writeFile(secret,"TOKEN=abc");
     await expect(broker.prepare({owner:OWNER,filePath:secret,origin:SITE})).rejects.toThrow("UPLOAD_FILE_TYPE_OR_PATH_NOT_ALLOWED");
-    const link=path.join(allowed,"linked.png");await fs.symlink(outside,link);
-    await expect(broker.prepare({owner:OWNER,filePath:link,origin:SITE})).rejects.toThrow("UPLOAD_FILE_OUTSIDE_ALLOWED_ROOTS");
+    const link=path.join(allowed,"linked.png");
+    let symlinkReady=false;
+    try{await fs.symlink(outside,link);symlinkReady=true;}
+    catch(error){
+      // Non-admin Windows installations often lack SeCreateSymbolicLinkPrivilege.
+      // No symlink was created, so the escape check cannot be exercised here.
+      if(process.platform!=="win32"||!["EPERM","EACCES"].includes(error.code))throw error;
+    }
+    if(symlinkReady)
+      await expect(broker.prepare({owner:OWNER,filePath:link,origin:SITE})).rejects.toThrow("UPLOAD_FILE_OUTSIDE_ALLOWED_ROOTS");
     await expect(broker.prepare({owner:OWNER,filePath:file,origin:"file:///etc/passwd"})).rejects.toThrow("UPLOAD_ORIGIN_INVALID");
     await expect(broker.prepare({owner:OWNER,filePath:file,origin:"https://evil.example"})).rejects.toThrow("UPLOAD_DESTINATION_NOT_APPROVED");
     const none=createAgentUploadBroker({allowedRoots:[],allowedOrigins:[SITE],tempRoot:path.join(base,"none")});
