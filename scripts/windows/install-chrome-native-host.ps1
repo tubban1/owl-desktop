@@ -82,7 +82,7 @@ $json=@{
 if((Test-Path $launcher) -and -not $ReplaceRegistration){
   throw 'NATIVE_HOST_ALREADY_EXISTS_USE_REPLACE_REGISTRATION'
 }
-[IO.File]::WriteAllText($manifest,$json+"\n",[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($manifest,$json+"`n",[Text.UTF8Encoding]::new($false))
 Move-Item -LiteralPath $temporary -Destination $launcher -Force
 if(-not $SkipRegistration){
  $key='HKCU:\Software\Google\Chrome\NativeMessagingHosts\ai.owl.lab.agent'
