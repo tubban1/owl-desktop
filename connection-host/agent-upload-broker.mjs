@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import {constants as flags} from "node:fs";
 import {createHash,randomBytes,randomUUID} from "node:crypto";
+import {currentUploadScope} from "./agent-upload-policy.mjs";
 import {secureUploadStagingRoot} from "./private-upload-staging.mjs";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -41,21 +42,26 @@ function sourceAllowed(full) {
 // Files cannot be prepared unless the local Host was explicitly configured with
 // authorized upload roots. An Agent cannot add new roots through the MCP API.
 export function createAgentUploadBroker({
-  allowedRoots=process.env.OWL_AGENT_UPLOAD_ROOTS?.split(path.delimiter).filter(Boolean)||[],
-  allowedOrigins=process.env.OWL_AGENT_UPLOAD_ORIGINS?.split(/[;,]/).filter(Boolean)||[],
+  allowedRoots,
+  allowedOrigins,
+  scopeReader=currentUploadScope,
   tempRoot=path.join(os.tmpdir(),"owl-lab-agent-uploads-"+(process.getuid?.()??"user")),
   now=()=>Date.now(),
   ttlMs=TTL_MS
 }={}) {
   const tickets=new Map();
   const uploads=new Map();
-  const allowedSites=new Set(allowedOrigins.map(originOf).filter(Boolean));
+  const currentOrigins=()=>allowedOrigins ?? String(scopeReader("OWL_AGENT_UPLOAD_ORIGINS")||"").split(/[;,]/).filter(Boolean);
+  const currentRoots=()=>allowedRoots ?? String(scopeReader("OWL_AGENT_UPLOAD_ROOTS")||"").split(path.delimiter).filter(Boolean);
+  const isSiteApproved=site=>new Set(currentOrigins().map(originOf).filter(Boolean)).has(site);
+  async function approvedRoots(){
+    return Promise.all(currentRoots().map(async x=>{
+      const root=await fs.realpath(path.resolve(x));
+      if(!(await fs.stat(root)).isDirectory())throw Error("UPLOAD_ROOT_INVALID");
+      return root;
+    }));
+  }
   let stagingReady=false;
-  const realRootsPromise=Promise.all(allowedRoots.map(async x=>{
-    const root=await fs.realpath(path.resolve(x));
-    if(!(await fs.stat(root)).isDirectory())throw Error("UPLOAD_ROOT_INVALID");
-    return root;
-  }));
   async function remove(ticket) {
     const t=tickets.get(ticket);
     if(!t)return;
@@ -74,8 +80,8 @@ export function createAgentUploadBroker({
     if(typeof owner!=="string"||!owner.trim())throw Error("UPLOAD_OWNER_REQUIRED");
     const site=originOf(origin);
     if(!site)throw Error("UPLOAD_ORIGIN_INVALID");
-    if(!allowedSites.has(site))throw Error("UPLOAD_DESTINATION_NOT_APPROVED");
-    const roots=await realRootsPromise;
+    if(!isSiteApproved(site))throw Error("UPLOAD_DESTINATION_NOT_APPROVED");
+    const roots=await approvedRoots();
     if(roots.length===0)throw Error("UPLOAD_ROOT_NOT_CONFIGURED");
     if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw Error("UPLOAD_ABSOLUTE_PATH_REQUIRED");
     const requested=path.resolve(filePath);
@@ -144,6 +150,7 @@ export function createAgentUploadBroker({
     return ticketIds.map(key=>{
       const t=tickets.get(key);
       if(!t||t.consumed||t.owner!==owner||t.site!==site)throw Error("UPLOAD_TICKET_NOT_AUTHORIZED");
+      if(!isSiteApproved(site))throw Error("UPLOAD_DESTINATION_NOT_APPROVED");
       return {ticket:key,stagedPath:t.stage,filename:t.basename,size:t.size,mime:t.mime};
     });
   }
@@ -153,11 +160,14 @@ export function createAgentUploadBroker({
        result.selectedCount!==files.length)throw Error("UPLOAD_INPUT_SELECTION_UNCONFIRMED");
     for(const key of ticketIds)tickets.get(key).consumed=true;
     const upload_id=randomUUID();
+    const state=result.siteUiObserved===true?"ui_observed":"selected";
     const entry={owner,pageId,inputUid,site:origin,files:files.map(f=>({name:f.filename,bytes:f.size})),
-      state:"selected",expiresAt:now()+ttlMs};
+      state,expiresAt:now()+ttlMs};
     uploads.set(upload_id,entry);
-    return {upload_id,page_id:pageId,state:"selected",website_upload_verified:false,
-      files:entry.files,description:"File(s) attached to browser input; website receipt must be verified separately."};
+    return {upload_id,page_id:pageId,state,website_upload_verified:false,
+      files:entry.files,description:state==="ui_observed"?
+        "Filename visible on website after file selection; server upload not independently verified.":
+        "File(s) attached to browser input; website receipt must be verified separately."};
   }
   async function recordDrop({owner,ticketIds,pageId,targetUid,result,origin}){
     const files=await resolve({owner,ticketIds,origin});
@@ -197,7 +207,7 @@ export function createAgentUploadBroker({
     uploads.clear();
   }
   return {prepare,resolve,recordSelection,recordDrop,status,release,sweep,close,
-    capabilities:()=>({uploadFile:true,rootsConfigured:allowedRoots.length>0,
-      destinationsConfigured:allowedSites.size>0,
+    capabilities:()=>({uploadFile:true,rootsConfigured:currentRoots().length>0,
+      destinationsConfigured:currentOrigins().length>0,
       supportedExtensions:[...ALLOWED_SUFFIX],maxFileBytes:MAX_FILE_BYTES,maxFilesPerUpload:MAX_FILES_PER_UPLOAD})};
 }

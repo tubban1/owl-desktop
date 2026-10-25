@@ -1,4 +1,11 @@
 import {discoverFileInputs,verifyFileInput,readFileInputSelection} from "./file-inputs.mjs";
+// CDP accepts both POSIX and Windows drive-absolute file paths. The Native
+// Host supplies these paths only after owner/root/origin authorization.
+export function isNativeAbsoluteStagePath(value) {
+  return typeof value==="string" && !value.includes("\0") &&
+    (value.startsWith("/") || /^[A-Za-z]:\\[^\\]+/.test(value));
+}
+
 import {createAgentDownloadWorkflow,detectPageReceipt} from "./download-workflow.mjs";
 import {inspectP2Capabilities} from "./p2-capabilities.mjs";
 import {pastePlainText,dragDropWithinPage} from "./p2-interactions.mjs";
@@ -171,7 +178,7 @@ export function createNativeAgentExecutor(chrome,storage){
     if(op==="upload_file"){
       const uid=args.inputUid,files=args.files,expectedOrigin=args.origin;
       if(args.pageId!==tabId||!Array.isArray(files)||files.length<1||files.length>5 ||
-         !files.every(f=>f && typeof f.stagedPath==="string" && (f.stagedPath.startsWith("/")||/^[a-zA-Z]:[\\/]/.test(f.stagedPath)) &&
+         !files.every(f=>f && typeof f.stagedPath==="string" && isNativeAbsoluteStagePath(f.stagedPath) &&
           typeof f.filename==="string" && f.filename.length>0 && f.filename.length<256))
         throw Error("UPLOAD_ARGUMENTS_INVALID");
       if(new URL(tab.url).origin!==expectedOrigin)throw Error("UPLOAD_ORIGIN_CHANGED");
@@ -189,11 +196,31 @@ export function createNativeAgentExecutor(chrome,storage){
           nodeId:found.nodeId,files:files.map(f=>f.stagedPath)
         });
       }finally{await chrome.debugger.detach(target).catch(()=>{});}
-      const check=await inject(tabId,readFileInputSelection,[uid,expectedOrigin]);
-      if(check.selectedCount!==files.length ||
-         !check.fileNames.every((n,i)=>n===files[i].filename))throw Error("UPLOAD_SELECTION_UNCONFIRMED");
-      return {pageId:tabId,selected:true,selectedCount:check.selectedCount,
-        selectedFileNames:check.fileNames,websiteUploadVerified:false};
+      // Upload widgets (including Teamtailor) may consume the chosen file,
+      // clear/recreate the input, and immediately show the filename elsewhere.
+      // A DOM input selection is preferred; the precise same-origin filename
+      // label is a weaker UI receipt, never a server-upload confirmation.
+      let check=null;
+      try {check=await inject(tabId,readFileInputSelection,[uid,expectedOrigin]);}
+      catch(error){
+        if(!String(error).includes("BROWSER_PAGE_EXECUTION_FAILED"))throw error;
+      }
+      const selected=!!check && check.selectedCount===files.length &&
+        Array.isArray(check.fileNames) &&
+        check.fileNames.every((n,i)=>n===files[i].filename);
+      let siteUiObserved=false;
+      if(!selected){
+        const latest=await chrome.tabs.get(tabId);
+        if(urlOrigin(latest.url)!==expectedOrigin)throw Error("UPLOAD_ORIGIN_CHANGED");
+        const observed=await Promise.all(files.map(f=>
+          inject(tabId,detectPageReceipt,[f.filename,expectedOrigin])));
+        if(!observed.every(r=>r?.observed===true))
+          throw Error("UPLOAD_INPUT_OR_UI_CONFIRMATION_MISSING");
+        siteUiObserved=true;
+      }
+      return {pageId:tabId,selected:true,selectedCount:files.length,
+        selectedFileNames:files.map(f=>f.filename),siteUiObserved,
+        websiteUploadVerified:false};
     }
     if(op==="rich_editor_insert"){
       if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid)||
@@ -219,7 +246,7 @@ export function createNativeAgentExecutor(chrome,storage){
       const files=args.files,origin=args.origin,targetUid=args.targetUid;
       if(args.pageId!==tabId||typeof origin!=="string"||!/^owl-agent-\d{1,3}$/.test(targetUid)||
          !Array.isArray(files)||files.length<1||files.length>5 ||
-         !files.every(f=>f&&typeof f.stagedPath==="string"&&(f.stagedPath.startsWith("/")||/^[a-zA-Z]:[\\/]/.test(f.stagedPath))&&
+         !files.every(f=>f&&typeof f.stagedPath==="string"&&isNativeAbsoluteStagePath(f.stagedPath)&&
            typeof f.filename==="string"&&f.filename.length>0&&f.filename.length<256))
         throw Error("FILE_DROP_ARGUMENT_INVALID");
       if(new URL(tab.url).origin!==origin)throw Error("FILE_DROP_ORIGIN_CHANGED");
