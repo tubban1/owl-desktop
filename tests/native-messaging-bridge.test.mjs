@@ -53,7 +53,8 @@ function fakeChrome(){
  const chrome={
   storage:{session:{get:async key=>({[key]:st[key]}),set:async data=>Object.assign(st,data)}},
   tabs:{
-   create:async({url,active})=>{calls.push(["create",active]);const tab={id:next++,url,windowId:1};all.set(tab.id,tab);return tab;},
+   create:async({url,active})=>{calls.push(["create",active]);const tab={id:next++,url,active,windowId:1};all.set(tab.id,tab);return tab;},
+   query:async()=>[...all.values()],
    get:async id=>{if(!all.has(id))throw Error("not found");return all.get(id);},
    remove:async id=>{calls.push(["remove",id]);all.delete(id);},
    update:async(id,args)=>{calls.push(["update",id,args]);return all.get(id);}

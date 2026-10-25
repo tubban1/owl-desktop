@@ -13,9 +13,11 @@ import {locateAgentFileDropZone,checkAgentFileDropZone} from "./file-drop-zone.m
 import {prepareAgentRichEditor,checkAgentRichEditor} from "./rich-editor.mjs";
 import {locateVirtualCursorTarget,showVirtualCursor,hideVirtualCursor} from "./virtual-cursor.mjs";
 
-// Only tabs created through this executor can be accessed by an OWL Agent.
-// The store is chrome.storage.session: survives service-worker suspension,
-// but never authorizes a pre-existing human tab.
+// An explicit Agent open(url) can reuse an already-open INACTIVE tab with
+// the exact same URL (including path, query and fragment). Adoption grants
+// only the requesting Agent Session access to that tab, not other user tabs.
+// Created tabs may be closed; adopted human tabs must be preserved on release.
+// The store is chrome.storage.session and survives service-worker suspension.
 const MAX_TABS_PER_OWNER=12;
 const urlOrigin=url=>{
   try{const u=new URL(url);return ["http:","https:"].includes(u.protocol)?u.origin:null;}
@@ -34,6 +36,11 @@ export function createNativeAgentExecutor(chrome,storage){
     let tab;
     try{tab=await chrome.tabs.get(tabId);}
     catch{delete state.owned[tabId];if(state.selected[owner]===tabId)delete state.selected[owner];await save(state);throw Error("AGENT_TAB_CLOSED");}
+    const binding=state.owned[tabId];
+    // A human-owned tab can later navigate somewhere unrelated. Re-check its
+    // origin on every action rather than silently extending the adoption.
+    if(binding.adopted && urlOrigin(tab.url)!==binding.origin &&
+       args.allowOriginChanged!==true)throw Error("AGENT_REUSED_TAB_ORIGIN_CHANGED");
     return {state,tab,tabId};
   }
   async function inject(tabId,func,args=[]){
@@ -122,18 +129,49 @@ export function createNativeAgentExecutor(chrome,storage){
       const url=args.url;
       if(typeof url!=="string"||url.length>2048||!urlOrigin(url))throw Error("NATIVE_URL_INVALID");
       const state=await read();
-      if(Object.values(state.owned).filter(x=>x.owner===owner).length>=MAX_TABS_PER_OWNER)throw Error("OWNER_TAB_LIMIT");
+      const targetUrl=new URL(url).href;
+      // No wildcard/site-only matching: never hijack an unrelated page,
+      // including pages with different query strings, accounts or paths.
+      const visibleTabs=await chrome.tabs.query({});
+      const eligible=visibleTabs.filter(tab=>Number.isInteger(tab.id) &&
+        !tab.incognito && !tab.pinned && urlOrigin(tab.url) &&
+        new URL(tab.url).href===targetUrl);
+      // Inactive first, regardless of whether this Session already owns it.
+      // Do not adopt a foreground human tab solely because its URL matches.
+      // A previously owned foreground tab can still be reused and operated.
+      const reusable=eligible.find(tab=>tab.active===false &&
+        (!state.owned[tab.id] || state.owned[tab.id].owner===owner)) ||
+        eligible.find(tab=>state.owned[tab.id]?.owner===owner);
+      if(reusable){
+        const adopted=!state.owned[reusable.id];
+        if(adopted && Object.values(state.owned).filter(x=>x.owner===owner).length>=MAX_TABS_PER_OWNER)
+          throw Error("OWNER_TAB_LIMIT");
+        if(adopted)state.owned[reusable.id]={owner,adopted:true,origin:urlOrigin(url),
+          initialUrl:targetUrl,createdAt:Date.now()};
+        state.selected[owner]=reusable.id;
+        await save(state);
+        return {pageId:reusable.id,tabId:reusable.id,url:reusable.url,
+          background:reusable.active===false,usesExistingChromeProfile:true,
+          reusedExistingTab:true,tabCreated:false,adoptedHumanTab:adopted};
+      }
+      if(Object.values(state.owned).filter(x=>x.owner===owner).length>=MAX_TABS_PER_OWNER)
+        throw Error("OWNER_TAB_LIMIT");
       const tab=await chrome.tabs.create({url,active:false});
-      state.owned[tab.id]={owner,createdAt:Date.now()};
+      state.owned[tab.id]={owner,createdAt:Date.now(),adopted:false};
       state.selected[owner]=tab.id;await save(state);
-      return {pageId:tab.id,tabId:tab.id,url,background:true,usesExistingChromeProfile:true};
+      return {pageId:tab.id,tabId:tab.id,url,background:true,
+        usesExistingChromeProfile:true,reusedExistingTab:false,tabCreated:true};
     }
     if(op==="tabs"){
       const s=await read(),tabs=[];
       for(const [key,value] of Object.entries(s.owned)){
         if(value.owner!==owner)continue;
-        try{const tab=await chrome.tabs.get(Number(key));tabs.push({pageId:tab.id,url:tab.url,selected:s.selected[owner]===tab.id});}
-        catch{}
+        try{
+          const tab=await chrome.tabs.get(Number(key));
+          if(value.adopted && urlOrigin(tab.url)!==value.origin)continue;
+          tabs.push({pageId:tab.id,url:tab.url,selected:s.selected[owner]===tab.id,
+            adoptedHumanTab:!!value.adopted,background:tab.active===false});
+        }catch{}
       }
       return {tabs};
     }
@@ -144,7 +182,8 @@ export function createNativeAgentExecutor(chrome,storage){
     }
     if(op==="status")return {ready:true,transport:"native-messaging"};
     if(op==="close_tab"&&!Number.isInteger(args.pageId))throw Error("AGENT_TAB_ID_REQUIRED");
-    const {state,tab,tabId}=await current(owner,op==="close_tab"?{tabId:args.pageId}:{});
+    const {state,tab,tabId}=await current(owner,op==="close_tab"?
+      {tabId:args.pageId,allowOriginChanged:true}:{});
     if(op==="download_start"){
       if(typeof args.linkUid!=="string"||args.linkUid.length>120)
         throw Error("DOWNLOAD_LINK_UID_INVALID");
@@ -274,9 +313,8 @@ export function createNativeAgentExecutor(chrome,storage){
     if(op==="cursor_move"||op==="cursor_click"||op==="click"){
       if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid))
         throw Error("CURSOR_UID_INVALID");
-      // A personal Chrome foreground tab is not an autonomous target,
-      // even when the Agent originally created it: hand it to its human.
-      if(tab.active)throw Error("AGENT_TAB_FOREGROUND_NEEDS_HUMAN");
+      // Foreground and background are both valid for an explicitly
+      // selected Agent-owned or exact-URL adopted tab. Focus is unchanged.
       const origin=urlOrigin(tab.url);
       if(!origin)throw Error("CURSOR_UNSAFE_ORIGIN");
       const click=op!=="cursor_move";
@@ -304,8 +342,8 @@ export function createNativeAgentExecutor(chrome,storage){
           await chrome.debugger.sendCommand(target,"Page.setInterceptFileChooserDialog",{enabled:true});
         }
         const latest=await chrome.tabs.get(tabId);
-        if(latest.active||urlOrigin(latest.url)!==origin)
-          throw Error("CURSOR_PAGE_OR_FOCUS_CHANGED");
+        if(urlOrigin(latest.url)!==origin)
+          throw Error("CURSOR_PAGE_OR_ORIGIN_CHANGED");
         await inject(tabId,showVirtualCursor,[zone.x,zone.y,click?"click":"move"]);
         await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
           type:"mouseMoved",x:zone.x,y:zone.y});
@@ -390,11 +428,14 @@ export function createNativeAgentExecutor(chrome,storage){
       return {pageId:tabId,waitingForHumanLogin:true};
     }
     if(op==="close_tab"){
-      await chrome.tabs.remove(tabId);
+      // close_tab on an adopted human tab means releasing Agent access;
+      // never close a tab that the human had opened before adoption.
+      const adopted=!!state.owned[tabId]?.adopted;
+      if(!adopted)await chrome.tabs.remove(tabId);
       delete state.owned[tabId];
       if(state.selected[owner]===tabId)delete state.selected[owner];
       await save(state);
-      return {pageId:tabId,closed:true};
+      return {pageId:tabId,closed:!adopted,released:true,tabPreserved:adopted};
     }
     throw Error("NATIVE_ACTION_NOT_ALLOWED");
   }

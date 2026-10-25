@@ -12,7 +12,8 @@ function fakeChrome(){
       set:async next=>Object.assign(data,next)
     }},
     tabs:{
-      create:async args=>{calls.push(["create",args]);return {id:44,url:args.url,windowId:1};},
+      query:async()=>[],
+      create:async args=>{calls.push(["create",args]);return {id:44,url:args.url,active:false,windowId:1};},
       get:async id=>({id,url:"https://files.example.com/report.pdf",windowId:1}),
       remove:async()=>{}
     },

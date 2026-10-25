@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "OWL LAB Agent Browser",
   "version": "0.4.0",
-  "description": "Agent-owned background Chrome tabs through a local Native Messaging host; requires explicit Chrome extension permissions.",
+  "description": "Foreground/background Chrome Agent Browser with exact-URL tab reuse through Native Messaging.",
   "permissions": [
     "nativeMessaging",
     "scripting",
