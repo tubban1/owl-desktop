@@ -71,6 +71,12 @@ if(-not (Test-Path -LiteralPath $temporary)){throw 'NATIVE_HOST_COMPILE_FAILED'}
 $invalid=Start-Process -FilePath $temporary -ArgumentList 'chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' -NoNewWindow -PassThru -Wait
 if($invalid.ExitCode -ne 12){throw 'NATIVE_HOST_INVALID_ORIGIN_NOT_REJECTED'}
 $manifest=Join-Path $dir 'ai.owl.lab.agent.json'
+# Do not compile/overwrite launcher if Chrome is already bound to a different
+# native host, unless the user explicitly requests an approved replacement.
+$key='HKCU:\Software\Google\Chrome\NativeMessagingHosts\ai.owl.lab.agent'
+if(-not $SkipRegistration -and (Test-Path $key) -and -not $ReplaceRegistration){
+  throw 'NATIVE_HOST_REGISTRATION_EXISTS'
+}
 $json=@{
  name='ai.owl.lab.agent';
  description='OWL LAB Agent Browser local Native Messaging host';
@@ -85,10 +91,7 @@ if((Test-Path $launcher) -and -not $ReplaceRegistration){
 [IO.File]::WriteAllText($manifest,$json+"`n",[Text.UTF8Encoding]::new($false))
 Move-Item -LiteralPath $temporary -Destination $launcher -Force
 if(-not $SkipRegistration){
- $key='HKCU:\Software\Google\Chrome\NativeMessagingHosts\ai.owl.lab.agent'
- if(Test-Path $key){
-   if(-not $ReplaceRegistration){throw 'NATIVE_HOST_REGISTRATION_EXISTS'}
- }else{New-Item -Path $key -Force | Out-Null}
+ if(-not (Test-Path $key)){New-Item -Path $key -Force | Out-Null}
  Set-Item -Path $key -Value $manifest -ErrorAction Stop
 }
 [pscustomobject]@{
