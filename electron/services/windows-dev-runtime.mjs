@@ -34,6 +34,18 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
   }catch(error) {
     if(error?.message==="WINDOWS_DEV_RUNTIME_PORT_IN_USE")throw error;
   }
+  // DEV-only UI Automation read access. Existing Windows provider deliberately
+  // refuses ALL native click/key/clipboard/screenshot actions until a reviewed
+  // Windows Helper is installed. Never turn on shell/delete as a side effect.
+  const readOnlyUi = process.env.OWL_WIN_DEV_UIA_READ_ONLY === "true";
+  const uiHelper = path.join(canonicalRoot, "scripts", "windows", "desktop-readonly.ps1");
+  if (readOnlyUi) {
+    if (!fs.existsSync(uiHelper) ||
+        !fs.readFileSync(uiHelper, "utf8").includes("UIAutomationClient") ||
+        !fs.readFileSync(path.join(canonicalRoot,"dist","providers","desktopProvider.js"),"utf8").includes("WindowsDesktopProvider")) {
+      throw Error("WINDOWS_UIA_READONLY_ADAPTER_MISSING");
+    }
+  }
   const env={
     ...process.env,
     OWL_RUNTIME_API_TOKEN:token,
@@ -46,7 +58,7 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
     ALLOW_WRITE:"false",
     ALLOW_DELETE:"false",
     ALLOW_SHELL:"false",
-    ALLOW_GUI:"false",
+    ALLOW_GUI:readOnlyUi ? "true" : "false",
     ALLOW_BROWSER:"false",
     ALLOW_GIT_PUSH:"false",
     ALLOW_ROLLBACK:"false"
