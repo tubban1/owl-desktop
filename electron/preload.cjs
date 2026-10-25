@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("owlDesktop", {
   environment: () => ipcRenderer.invoke("desktop:environment"),
+  directMcpStatus: () => ipcRenderer.invoke("desktop:direct-mcp-status"),
   listActivity: () => ipcRenderer.invoke("desktop:activity:list"),
   statistics: () => ipcRenderer.invoke("desktop:statistics"),
   refreshRuntime: (options) => ipcRenderer.invoke("runtime:refresh", options),

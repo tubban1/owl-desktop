@@ -125,6 +125,11 @@ export default function App() {
   const [connectivityTimeline,setConnectivityTimeline]=useState<ConnectivityTimelineEntry[]>([]);
   const [liveApprovals,setLiveApprovals]=useState<unknown>(null);
   const [cloudAccount, setCloudAccount] = useState<CloudAccountStatus | null>(null);
+  const [devDirectMcp, setDevDirectMcp] = useState<{
+    ready: boolean;
+    mode: string;
+    tunnelId?: string;
+  }>({ ready: false, mode: "unknown" });
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
   const [accounts, setAccounts] = useState<AccountMeta[]>([]);
   const [youtubeClientSecretDraft,setYoutubeClientSecretDraft]=useState("");
@@ -204,10 +209,13 @@ export default function App() {
     managedTunnelSelected &&
     tunnelTransportReady &&
     Boolean(snapshot?.tunnel.controlPlaneBaseUrl);
+  const externalDevTunnelReady =
+    env?.platform === "win32" && env.isPackaged === false && devDirectMcp.ready;
   const remoteTransportReady =
-    settings?.connectivityMode === "custom_tunnel"
+    externalDevTunnelReady ||
+    (settings?.connectivityMode === "custom_tunnel"
       ? tunnelTransportReady
-      : durableMcpReady;
+      : durableMcpReady);
   const cloudStatusLabel = snapshot?.cloud.status
     ? snapshot.cloud.status.replaceAll("_", " ")
     : "stopped";
@@ -272,13 +280,16 @@ export default function App() {
       state: "READY",
       label: "Ready",
       title: "OWL LAB is ready",
-      description: "Account, local execution authority and ChatGPT transport are ready.",
+      description: externalDevTunnelReady
+        ? "Your Windows OWL MCP is reachable through its dedicated OpenAI Tunnel. Open OWL LAB to manage your device."
+        : "Account, local execution authority and ChatGPT transport are ready.",
     };
   }, [
     online,
     snapshot?.error,
     snapshot?.mcp.status,
     remoteTransportReady,
+    externalDevTunnelReady,
     settings?.connectivityMode,
     cloudAccount?.status,
     executionReady,
@@ -317,13 +328,14 @@ export default function App() {
     if (interactive) setBusy(true);
     const running = (async () => {
       await window.owlDesktop.runtimeEventSync().catch(() => undefined);
-      const [runtimeResult, requestsResult, accountResult] = await Promise.allSettled([
+      const [runtimeResult, requestsResult, accountResult, directResult] = await Promise.allSettled([
         window.owlDesktop.refreshRuntime({
           quiet: !interactive,
           detailedMcp: page === "monitor",
         }),
         window.owlDesktop.listAgentRequests({ limit: 100 }),
         window.owlDesktop.cloudAccountStatus(),
+        window.owlDesktop.directMcpStatus(),
       ]);
       // Runtime status is independent of optional agent inbox and account IPCs.
       // Their individual failures must not freeze the readiness dashboard.
@@ -331,6 +343,8 @@ export default function App() {
       else if (interactive) setNotice("Runtime status refresh failed; retrying on the next poll.");
       if (requestsResult.status === "fulfilled") setAgentRequests(requestsResult.value);
       if (accountResult.status === "fulfilled") setCloudAccount(accountResult.value);
+      setDevDirectMcp(directResult.status === "fulfilled"
+        ? directResult.value : { ready: false, mode: "probe_failed" });
       setNow(Date.now());
     })();
     refreshInFlight.current = running;

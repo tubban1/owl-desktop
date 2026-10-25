@@ -31,6 +31,11 @@ declare global {
   interface Window {
     owlDesktop: {
       environment(): Promise<DesktopEnvironment>;
+      directMcpStatus(): Promise<{
+        ready: boolean;
+        mode: string;
+        tunnelId?: string;
+      }>;
       listActivity(): Promise<ActivityEntry[]>;
       statistics(): Promise<import("./statistics/statisticsModel").UsageStatisticsSnapshot>;
       refreshRuntime(options?: { quiet?: boolean; detailedMcp?: boolean }): Promise<RuntimeSnapshot>;

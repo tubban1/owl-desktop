@@ -11,6 +11,7 @@ import { DesktopStore } from "./store.mjs";
 import { UsageStatisticsStore } from "./services/usage-statistics-store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
 import { startWindowsDevRuntime, stopWindowsDevRuntime } from "./services/windows-dev-runtime.mjs";
+import { probeWindowsDevDirectMcp } from "./services/windows-dev-direct-mcp.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
 import { LocalRuntimeBootstrap } from "./services/local-runtime-bootstrap.mjs";
@@ -1791,6 +1792,13 @@ function registerIpc() {
   }));
 
   ipcMain.handle("runtime:refresh", (_event, options) => runtimeSnapshot(options ?? {}));
+  ipcMain.handle("desktop:direct-mcp-status", () =>
+    probeWindowsDevDirectMcp({
+      platform: process.platform,
+      packaged: app.isPackaged,
+      mcpPort: store.getSettings().mcpPort,
+    }),
+  );
   ipcMain.handle("runtime:approvals:list", () => runtimeClient().approvals());
   ipcMain.handle("runtime:approval:approve", async (_event, approvalId) => {
     if (typeof approvalId !== "string" || !approvalId.trim()) {

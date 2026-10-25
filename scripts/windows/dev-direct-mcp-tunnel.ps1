@@ -54,6 +54,16 @@ try {
     throw 'OWL_WINDOWS_TUNNEL_KEY_FORMAT_INVALID'
   }
   $env:CONTROL_PLANE_API_KEY = $key
+  # Public metadata only. The Desktop uses this plus live tunnel health to
+  # recognize an independently managed direct MCP connection during DEV setup.
+  $metadataFile = Join-Path (Split-Path -Parent $EncryptedKeyFile) 'direct-mcp-tunnel.json'
+  $metadata = @{
+    tunnelId = $TunnelId
+    mcpPort = $owlPort
+    mcpUrl = "http://127.0.0.1:$owlPort/mcp"
+    healthPort = $tunnelHealthPort
+  } | ConvertTo-Json -Compress
+  [IO.File]::WriteAllText($metadataFile, $metadata, [Text.UTF8Encoding]::new($false))
   Write-Output "OWL_WINDOWS_DIRECT_MCP_TUNNEL_STARTING tunnel=$TunnelId target=127.0.0.1:8790"
   $clientArgs = @(
     "run", "--control-plane.api-key", "env:CONTROL_PLANE_API_KEY",
