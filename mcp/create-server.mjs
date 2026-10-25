@@ -2010,6 +2010,43 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     {title:"Click My Chrome Tab",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async({uid})=>{const{bridge,owner}=trustedUserChrome();return bridge.click(owner,uid);}
   );
+  tool(
+    server,"browser_agent_form_controls",
+    "Inspect consent, referral, salary and other safe form controls on the selected Agent Chrome tab. Excludes credentials.",
+    {},{title:"Inspect Chrome Form Controls",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async()=>{const{bridge,owner}=trustedUserChrome();return bridge.formControls(owner);}
+  );
+  tool(
+    server,"browser_agent_form_set",
+    "Set exactly one observed radio/checkbox/number field. Radio requires exact expectedValue and checkbox requires checked=true/false. Does not submit. User consent is required before checking legal declarations.",
+    {uid:z.string().regex(/^owl-agent-\\d{1,3}$/),
+      change:z.object({checked:z.boolean().optional(),expectedValue:z.string().optional(),
+        value:z.string().optional()})},
+    {title:"Set Approved Form Field",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({uid,change})=>{const{bridge,owner}=trustedUserChrome();return bridge.formSet(owner,uid,change);}
+  );
+  tool(
+    server,"browser_agent_form_review",
+    "Read-only preflight of the exact selected job application URL, submitted CV, required consent, salary, referral and notice. Does not submit.",
+    {page_url:z.string().url(),submit_uid:z.string().regex(/^owl-agent-\\d{1,3}$/)},
+    {title:"Review Job Application",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async({page_url,submit_uid})=>{
+      const{bridge,owner}=trustedUserChrome();return bridge.formReview(owner,page_url,submit_uid);
+    }
+  );
+  tool(
+    server,"browser_agent_form_submit",
+    "Submit only the exact reviewed careers.axpo.com job form when the local OS user previously granted that exact URL, salary, notice, referral choice and consent for a short time. Grant is one-time, not created by this Agent. Dispatch alone is not confirmation; verify Axpo receipt.",
+    {page_url:z.string().url(),submit_uid:z.string().regex(/^owl-agent-\\d{1,3}$/),
+      salary:z.string().min(1).max(20),notice:z.string().min(1).max(250),
+      referral_value:z.string().min(1).max(80)},
+    {title:"Submit User-Approved Job Application",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({page_url,submit_uid,salary,notice,referral_value})=>{
+      const{bridge,owner}=trustedUserChrome();
+      return bridge.submitReviewed(owner,{pageUrl:page_url,submitUid:submit_uid,
+        salary,notice,referralValue:referral_value});
+    }
+  );
   registerBrowserWorkflowTools({tool,server,z,trustedUserChrome});
   tool(
     server,"browser_agent_capabilities",

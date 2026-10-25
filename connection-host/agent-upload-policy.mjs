@@ -3,7 +3,7 @@ import {execFileSync} from "node:child_process";
 // On Windows, user environment changes are saved in HKCU and are not copied
 // into already-running Connection Host processes. Read only two named,
 // owner-controlled values at each staging decision.
-const ALLOWED_NAMES=new Set(["OWL_AGENT_UPLOAD_ROOTS","OWL_AGENT_UPLOAD_ORIGINS"]);
+const ALLOWED_NAMES=new Set(["OWL_AGENT_UPLOAD_ROOTS","OWL_AGENT_UPLOAD_ORIGINS","OWL_AGENT_FORM_SUBMISSION_GRANT"]);
 export function readWindowsUserUploadSetting(name,{platform=process.platform,runner=execFileSync}={}){
   if(platform!=="win32"||!ALLOWED_NAMES.has(name))return undefined;
   try{
