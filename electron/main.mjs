@@ -13,6 +13,7 @@ import { RuntimeHttpClient } from "./runtime-http-client.mjs";
 import { startWindowsDevRuntime, stopWindowsDevRuntime } from "./services/windows-dev-runtime.mjs";
 import { probeWindowsDevDirectMcp } from "./services/windows-dev-direct-mcp.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
+import { startWindowsDevNativeBrowser } from "./services/windows-dev-native-browser.mjs";
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
 import { LocalRuntimeBootstrap } from "./services/local-runtime-bootstrap.mjs";
 import { runtimePermissionProjection, validateRuntimePermissionChange, installedRuntimeSupportsSignedReview, runtimePermissionChangeCopy, assertSafePermissionCombination } from "./services/runtime-permissions.mjs";
@@ -130,6 +131,7 @@ let cloudAccountState = {
   lastErrorMessage: null,
 };
 let mcpServer;
+let windowsDevBrowser = null;
 let mcpState = { status: "stopped", url: null, error: null };
 let connectionHostClient;
 let connectionHostSnapshot = null;
@@ -1543,6 +1545,21 @@ async function startMcp() {
   mcpState = { status: "starting", url: null, error: null };
 
   try {
+    if (!windowsDevBrowser) {
+      // The macOS Connection Host and Windows DEV use exactly the same
+      // Native Messaging browser bridge contract; never enable in packages.
+      windowsDevBrowser = await startWindowsDevNativeBrowser({
+        platform: process.platform,
+        packaged: app.isPackaged,
+        enabled: process.env.OWL_WIN_DEV_NATIVE_BROWSER === "true",
+        userDataRoot: app.getPath("userData"),
+      }).catch((error) => {
+        record("warn", "agent-browser", "Windows DEV Native Messaging unavailable", {
+          code: error?.code ?? error?.message ?? "NATIVE_BRIDGE_START_FAILED",
+        });
+        return null;
+      });
+    }
     mcpServer = await startOwlMcpHttpServer({
       port: settings.mcpPort,
       runtimeBaseUrl: effectiveRuntimeBaseUrl(settings),
@@ -1551,6 +1568,7 @@ async function startMcp() {
       fallbackOwnerId: settings.sessionId,
       agentInbox,
       remoteDeviceControl: remoteDeviceControl(),
+      userChromeBridge: windowsDevBrowser?.bridge ?? null,
       plannerContinuation: plannerContinuationStore,
       onEvent(level, message, meta) {
         record(level, "mcp", message, meta);
@@ -3493,6 +3511,7 @@ if (packagedConnectivityHostSoakOnly) {
     if (!externalConnectionHostEnabled) {
       void tunnelSupervisor?.stop();
       void stopMcp();
+      void windowsDevBrowser?.close();
     }
   });
 

@@ -16,6 +16,9 @@ if(-not (Test-Path -LiteralPath (Join-Path $project "node_modules/electron/dist/
 }
 $env:OWL_LAB_WINDOWS_SMOKE="1"
 $env:OWL_WIN_DEV_MANAGE_RUNTIME="true"
+# Reuse the Mac native browser bridge on Windows DEV; the actual extension
+# must connect via the registered host before it can control a Chrome tab.
+$env:OWL_WIN_DEV_NATIVE_BROWSER="true"
 $env:OWL_WIN_DEV_RUNTIME_ROOT=$runtime
 $env:OWL_WIN_DEV_RUNTIME_PUBLIC_KEY=$key
 Set-Location -LiteralPath $project
