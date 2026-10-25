@@ -121,6 +121,7 @@ let cloudBridgeState = {
   running: false,
   lastErrorCode: null,
 };
+let runtimeAccessProjectionFailure = null;
 let cloudAccountState = {
   status: "signed_out",
   account: null,
@@ -687,6 +688,10 @@ function ensureCloudEnrollmentService() {
 function cloudAccountSnapshot() {
   return {
     ...cloudAccountState,
+    ...(runtimeAccessProjectionFailure ? {
+      lastErrorCode: runtimeAccessProjectionFailure.code,
+      lastErrorMessage: runtimeAccessProjectionFailure.message,
+    } : {}),
     deviceId:
       cloudAccountState.deviceId ??
       store?.getSettings()?.cloudDeviceId ??
@@ -753,6 +758,7 @@ async function safeSyncRuntimeAccess(
       deviceId,
       runtimeLease,
     );
+    runtimeAccessProjectionFailure = null;
     record("info", "runtime-access", "Runtime access projection updated", {
       state: state?.state ?? null,
       reasonCode: state?.reasonCode ?? null,
@@ -761,6 +767,17 @@ async function safeSyncRuntimeAccess(
     });
     return state;
   } catch (error) {
+    // Preserve the underlying signature/lease failure instead of turning a
+    // stale LOCKED grant into a misleading ACCOUNT_LOGIN_REQUIRED instruction.
+    const raw = error instanceof Error ? error.message : String(error);
+    const leaseCode = raw.match(/RUNTIME_ACCESS_[A-Z_]+/)?.[0];
+    const code = leaseCode || (typeof error?.code === "string" ?
+      error.code : "RUNTIME_ACCESS_PROJECTION_FAILED");
+    runtimeAccessProjectionFailure = {
+      code,
+      message: "Cloud sign-in succeeded, but Runtime lease projection failed ("+
+        code+"). Check the trusted Cloud verifier, current device, and signed lease.",
+    };
     record("warn", "runtime-access", "Runtime access projection failed", {
       code: error?.code ?? null,
       message: error instanceof Error ? error.message : String(error),
@@ -959,10 +976,13 @@ async function reauthorizeCloudAccount() {
       };
     }
 
-    const error = new Error(
-      "Cloud account session is valid, but Runtime access projection did not reach READY.",
-    );
-    error.code = "RUNTIME_ACCESS_PROJECTION_FAILED";
+    const code = runtimeAccessProjectionFailure?.code ||
+      recovered?.reasonCode || currentAccess?.reasonCode ||
+      "RUNTIME_ACCESS_PROJECTION_FAILED";
+    const error = new Error(runtimeAccessProjectionFailure?.message ||
+      "Cloud account is signed in, but Runtime authorization is not READY ("+
+      code+"). Inspect the Cloud device entitlement and the signed lease verifier.");
+    error.code = code;
     throw error;
   }
 
@@ -1589,13 +1609,12 @@ async function runtimeSnapshot(options = {}) {
   const client = runtimeClient();
 
   const started = Date.now();
-  const [info, runtimeAccess, health, tasks, approvals, processes, diagnostics, host] =
+  const [info, runtimeAccess, health, tasks, processes, diagnostics, host] =
     await Promise.allSettled([
       client.info(),
       client.runtimeAccess(),
       client.health(),
       client.tasks(),
-      client.approvals(),
       client.processes(),
       settings.diagnosticsEnabled ? client.diagnostics(40) : Promise.resolve(null),
       runtimeHostSupervisor().status(),
@@ -1627,6 +1646,13 @@ async function runtimeSnapshot(options = {}) {
       effectiveRuntimeAccess = await client.runtimeAccess().catch(() => recovered);
     }
   }
+
+  // Never poll the protected approvals projection while Runtime is locked.
+  // A legitimate LOCKED state is not a flood-worthy error condition.
+  const approvals = effectiveRuntimeAccess?.state === "READY" ||
+    effectiveRuntimeAccess?.mode === "compat"
+    ? (await Promise.allSettled([client.approvals()]))[0]
+    : { status: "fulfilled", value: [] };
 
   const result = {
     mode: online ? "live" : "offline",

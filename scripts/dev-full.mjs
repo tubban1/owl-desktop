@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { DevChildSupervisor } from "./lib/dev-child-supervisor.mjs";
 import { installStdioEpipeGuard } from "./lib/stdio-epipe-guard.mjs";
+import { ensureRuntimeLeaseTrust, OFFICIAL_OWL_CLOUD_ORIGIN } from "./lib/runtime-lease-trust.mjs";
 import { writeDevOwner, removeDevOwner } from "./lib/dev-full-owner.mjs";
 import { buildDevRuntimePermissionPolicy, writeDevRuntimePermissionStatus, devPermissionStatusFile, DEV_PERMISSION_FLAG_NAMES } from "./lib/dev-runtime-permissions.mjs";
 
@@ -230,10 +231,14 @@ if (runtimeDevPort === 8788 && process.env.OWL_ALLOW_SHARED_DEV_PORT !== "true")
 if (!fs.existsSync(tsxCli)) {
   throw new Error(`OWL Runtime DEV tsx CLI not found: ${tsxCli}. Run npm install in owl-runtime.`);
 }
-if (enforceCloudAccess && !fs.existsSync(runtimeLeasePublicKeyFile)) {
-  throw new Error(
-    `OWL LAB Cloud authorization is enforced, but the Runtime lease trust key is missing: ${runtimeLeasePublicKeyFile}. Provision the dev Cloud signing key first with "npm run provision:runtime-lease-key" in owl-cloud, or set OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE.`,
-  );
+if (enforceCloudAccess) {
+  const trust = await ensureRuntimeLeaseTrust({
+    cloudBaseUrl: desktopUserSettings.cloudBaseUrl?.trim() ||
+      process.env.OWL_CLOUD_BASE_URL?.trim() || OFFICIAL_OWL_CLOUD_ORIGIN,
+    filePath: runtimeLeasePublicKeyFile,
+    expectedFingerprint: process.env.OWL_RUNTIME_LEASE_EXPECTED_SPKI_SHA256,
+  });
+  console.log("[dev:full] Runtime Cloud verifier "+trust.status+" (SPKI SHA-256 "+trust.fingerprint+")");
 }
 
 const childSupervisor = new DevChildSupervisor({

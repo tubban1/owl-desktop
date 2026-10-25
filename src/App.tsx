@@ -261,14 +261,25 @@ export default function App() {
       };
     }
     if (!executionReady) {
+      const issue = cloudAccount?.lastErrorCode || runtimeAccess?.reasonCode;
       return {
         state: "AUTHORIZATION_REQUIRED",
         label: "Authorization required",
         title: "Execution access needs renewal",
-        description: "Read-only Runtime status is available, but new work needs a valid execution lease.",
+        description: cloudAccount?.lastErrorMessage ||
+          ("Read-only Runtime status is available, but new work needs a valid signed execution lease."+
+            (issue ? " Reason: "+issue+"." : "")),
       };
     }
-    if (snapshot?.mcp.status !== "running" || !remoteTransportReady) {
+    if (snapshot?.mcp.status !== "running") {
+      return {
+        state: "CHATGPT_CONNECTION_REQUIRED",
+        label: "Recover local MCP",
+        title: "Local OWL MCP is unavailable",
+        description: "A connected Tunnel does not prove the local MCP is running. Restart the coordinated OWL Desktop / Connection Host source stack; keep the existing Tunnel and account registration. Then refresh local MCP status.",
+      };
+    }
+    if (!remoteTransportReady) {
       const customTunnel = settings?.connectivityMode === "custom_tunnel";
       return {
         state: "CHATGPT_CONNECTION_REQUIRED",
@@ -298,6 +309,9 @@ export default function App() {
     executionReady,
     accessView,
     snapshot?.runtimeAccessError?.code,
+    cloudAccount?.lastErrorCode,
+    cloudAccount?.lastErrorMessage,
+    runtimeAccess?.reasonCode,
     env?.platform,
     env?.isPackaged,
   ]);
@@ -838,7 +852,9 @@ export default function App() {
   useEffect(()=>{
     let alive=true,inFlight=false;
     const poll=async()=>{
-      if(inFlight||document.hidden)return;
+      // Approval reads are protected by Runtime execution authority. Polling
+    // while LOCKED floods the main-process log and provides no useful data.
+    if(!executionReady||inFlight||document.hidden)return;
       inFlight=true;
       try{
         const result=await window.owlDesktop.listRuntimeApprovals();
@@ -852,7 +868,7 @@ export default function App() {
     const timer=window.setInterval(()=>void poll(),3000);
     return ()=>{alive=false;window.clearInterval(timer);
       document.removeEventListener("visibilitychange",visible);};
-  },[]);
+  },[executionReady]);
   const pendingRuntimeApprovals = useMemo(
     () => pendingApprovals(liveApprovals??snapshot?.approvals),
     [liveApprovals,snapshot?.approvals],
