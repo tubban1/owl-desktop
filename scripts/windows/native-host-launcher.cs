@@ -26,6 +26,38 @@ internal static class Program {
     result.Append('"');
     return result.ToString();
   }
+  // Chrome uses length-prefixed binary JSON over stdin. Pump one complete frame
+  // at a time instead of CopyTo's large-buffer streaming path, so small
+  // request receipts are forwarded promptly on Windows anonymous pipes.
+  static bool ReadFully(Stream input, byte[] buffer, int length) {
+    int used=0;
+    while(used<length) {
+      int n=input.Read(buffer,used,length-used);
+      if(n<=0) {
+        if(used==0)return false;
+        throw new EndOfStreamException("NATIVE_INPUT_TRUNCATED");
+      }
+      used+=n;
+    }
+    return true;
+  }
+  static void PumpChromeInput(Stream input, Stream output) {
+    var header=new byte[4];
+    var payload=new byte[8192];
+    while(ReadFully(input,header,4)) {
+      int length=header[0] | (header[1]<<8) | (header[2]<<16) | (header[3]<<24);
+      if(length<1 || length>8000000)throw new InvalidDataException("NATIVE_INPUT_LENGTH_INVALID");
+      output.Write(header,0,4);
+      int left=length;
+      while(left>0) {
+        int count=Math.Min(left,payload.Length);
+        if(!ReadFully(input,payload,count))throw new EndOfStreamException("NATIVE_INPUT_TRUNCATED");
+        output.Write(payload,0,count);
+        left-=count;
+      }
+      output.Flush();
+    }
+  }
   public static int Main(string[] args) {
     string id="__OWL_EXTENSION_ID__";
     string origin="chrome-extension://" + id + "/";
@@ -61,7 +93,7 @@ internal static class Program {
         var inbound=Task.Run(()=>{
           try{
             using(var input=Console.OpenStandardInput()) {
-              input.CopyTo(child.StandardInput.BaseStream);
+              PumpChromeInput(input,child.StandardInput.BaseStream);
             }
           }catch(IOException){}catch(ObjectDisposedException){}
           finally{try{child.StandardInput.Close();}catch(Exception){}}

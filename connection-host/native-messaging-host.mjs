@@ -42,11 +42,13 @@ async function main(){
   }
   let {port,token}=loadBrokerConfig();
   const messages=new Map();
+  const receiptAcks=new Map();
   let alive=true;
   const send=msg=>process.stdout.write(frame(msg));
   process.stdin.on("data",decoder(msg=>{
     if(msg?.type==="command_received"&&typeof msg.id==="string"){
-      void req("/v1/native/ack",{id:msg.id}).catch(()=>{});
+      // Preserve the receipt until Broker ACK completes; never retain payloads.
+      receiptAcks.set(msg.id,req("/v1/native/ack",{id:msg.id}).catch(()=>{}));
     }
     if(msg?.type==="result"&&typeof msg.id==="string"){
       const pending=messages.get(msg.id);
@@ -76,6 +78,8 @@ async function main(){
           sleep(22000).then(()=>({id:task.id,ok:false,error:"NATIVE_EXTENSION_TIMEOUT"})),
         ]);
         messages.delete(task.id);
+        await receiptAcks.get(task.id);
+        receiptAcks.delete(task.id);
         await req("/v1/native/result",response);
       }
     }catch(e){
