@@ -57,13 +57,17 @@ try{
     <div id="no-drop" data-dropzone="true" aria-label="Inert slot">Empty</div>
     <button type="button" aria-label="Expand details" id="safe-click">Expand details</button>
     <button type="button" aria-label="Delete account" id="danger-click">Delete account</button>
+    <button type="button" aria-label="Open panel" id="indirect-trigger">Open panel</button>
     <button type="button" aria-label="Upload file" id="picker-trigger">Upload file</button>
     <button type="submit" aria-label="Proceed" id="submit-trigger">Proceed</button>
     <p id="cursor-click-receipt">not clicked</p>
     <div id="file-drop" data-dropzone="true" aria-label="File drop target" style="height:80px;width:280px;border:1px solid gray">DROP FILE HERE</div>
     <form id="form"><input id="upload" type="file" name="attachment" style="display:none" accept=".txt">
-    <span id="receipt">awaiting file</span></form><div contenteditable="true" aria-label="Simple note">original</div><div class="ProseMirror" contenteditable="true" aria-label="Rich editor">framework</div>
+    <span id="receipt">awaiting file</span></form><input type="file" style="display:none" id="indirect-file"><div contenteditable="true" aria-label="Simple note">original</div><div class="ProseMirror" contenteditable="true" aria-label="Rich editor">framework</div>
     <script>
+      document.querySelector("#indirect-trigger").addEventListener("click",()=>{
+        document.querySelector("#indirect-file").click();
+      });
       document.querySelector("#safe-click").addEventListener("click",e=>{
         document.querySelector("#cursor-click-receipt").textContent=
           e.isTrusted?"TRUSTED TAB CLICK":"UNTRUSTED CLICK";
@@ -216,7 +220,7 @@ try{
   assert.equal(drag.domVerified,true);assert.equal(drag.fileTransferred,false);
   assert.match(await targetPage.locator("#dropzone").textContent(),/Received:/);
   const inputs=await call(owner,"file_inputs");
-  assert.equal(inputs.inputs.length,1);
+  assert.equal(inputs.inputs.length,2);
   assert.equal(inputs.inputs[0].hidden,true);
   const result=await call(owner,"upload_file",{
     pageId:openedDest.pageId,inputUid:inputs.inputs[0].uid,origin:destination,
@@ -235,7 +239,7 @@ try{
   assert.equal(observed.websiteUploadVerified,false,"UI receipt never claims independent proof");
   const cursorSnapshot=await call(owner,"snapshot");
   const cursorUid=label=>cursorSnapshot.snapshot.controls.find(x=>x.label===label)?.uid;
-  assert.ok(cursorUid("Expand details")&&cursorUid("Delete account")&&cursorUid("Upload file"));
+  assert.ok(cursorUid("Expand details")&&cursorUid("Delete account")&&cursorUid("Upload file")&&cursorUid("Open panel"));
   const moved=await call(owner,"cursor_move",{uid:cursorUid("Expand details")});
   assert.equal(moved.moved,true);
   assert.equal(moved.osPointerMoved,false);
@@ -247,6 +251,10 @@ try{
     catch(e){blocked=/CURSOR_ACTION_REQUIRES_HUMAN/.test(e.message);}
     assert.equal(blocked,true,"consequential click must be human-owned: "+label);
   }
+  let indirectFileChooserBlocked=false;
+  try{await call(owner,"cursor_click",{uid:cursorUid("Open panel")});}
+  catch(e){indirectFileChooserBlocked=/CURSOR_NATIVE_PICKER_INTERCEPTED/.test(e.message);}
+  assert.equal(indirectFileChooserBlocked,true,"indirect JS-triggered file picker intercepted inside tab");
   let foreignCursorBlocked=false;
   try{await call("other-owner","cursor_click",{uid:cursorUid("Expand details")});}
   catch(e){foreignCursorBlocked=/AGENT_TAB_NOT_OWNED/.test(e.message);}
@@ -311,7 +319,7 @@ try{
   assert.equal((await call(owner,"tabs")).tabs.length,0);
   console.log(JSON.stringify({ok:true,isolatedChromium:true,nativeMV3:true,ownedAgentTabs:true,
     actualChromeDownload:true,downloadIdempotent:true,ownerIsolation:true,hiddenFileSelection:true,
-    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2TrustedFrameworkInsert:true,p3VirtualCursor:true,p3TrustedTabClick:true,p3DefaultClickUpgraded:true,p3SensitiveClickDenied:true,p3ForegroundYield:true,p3OcclusionGuard:true,p3SystemPointerUnchanged:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,p2TextPaste:true,p2DragDrop:true,p2DeniedSensitiveAndInert:true,p2FileDropWithTicket:true,p2FileDropServerReceipt:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
+    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2TrustedFrameworkInsert:true,p3VirtualCursor:true,p3TrustedTabClick:true,p3DefaultClickUpgraded:true,p3SensitiveClickDenied:true,p3ForegroundYield:true,p3OcclusionGuard:true,p3NativeFileChooserIntercept:true,p3SystemPointerUnchanged:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,p2TextPaste:true,p2DragDrop:true,p2DeniedSensitiveAndInert:true,p2FileDropWithTicket:true,p2FileDropServerReceipt:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
     humanForegroundPreserved:true,privateArtifactsNotExposedToMCP:true}));
 }finally{
   await browser?.close().catch(()=>{});

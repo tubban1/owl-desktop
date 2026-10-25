@@ -260,9 +260,22 @@ export function createNativeAgentExecutor(chrome,storage){
       // Overlay is page-local and pointer-events:none. It is not the
       // actual OS cursor; browser input goes to this tab only.
       const target={tabId};
-      await chrome.debugger.attach(target,"1.3");
+      let attached=false,fileChooserIntercepted=false;
+      const onEvent=(source,method)=>{
+        if(source.tabId===tabId&&method==="Page.fileChooserOpened")
+          fileChooserIntercepted=true;
+      };
+      if(click)chrome.debugger.onEvent.addListener(onEvent);
       let dispatched=false;
       try{
+        await chrome.debugger.attach(target,"1.3");
+        attached=true;
+        if(click){
+          await chrome.debugger.sendCommand(target,"Page.enable");
+          // Prevent JS click handlers from opening a shared OS Finder/Explorer
+          // picker: DOM.setFileInputFiles is the safe file-attachment route.
+          await chrome.debugger.sendCommand(target,"Page.setInterceptFileChooserDialog",{enabled:true});
+        }
         const latest=await chrome.tabs.get(tabId);
         if(latest.active||urlOrigin(latest.url)!==origin)
           throw Error("CURSOR_PAGE_OR_FOCUS_CHANGED");
@@ -279,10 +292,14 @@ export function createNativeAgentExecutor(chrome,storage){
             type:"mousePressed",x:zone.x,y:zone.y,button:"left",clickCount:1});
           await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
             type:"mouseReleased",x:zone.x,y:zone.y,button:"left",clickCount:1});
+          await new Promise(resolve=>setTimeout(resolve,100));
+          if(fileChooserIntercepted)
+            throw Error("CURSOR_NATIVE_PICKER_INTERCEPTED_USE_FILE_INPUT_TOOL");
         }
         dispatched=true;
       }finally{
-        await chrome.debugger.detach(target).catch(()=>{});
+        if(attached)await chrome.debugger.detach(target).catch(()=>{});
+        if(click)chrome.debugger.onEvent.removeListener(onEvent);
       }
       return {pageId:tabId,uid:args.uid,x:zone.x,y:zone.y,
         ...(click?{clicked:dispatched,websitePersisted:false}:{moved:dispatched}),
