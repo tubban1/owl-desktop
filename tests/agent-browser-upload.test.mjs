@@ -6,6 +6,7 @@ import {createAgentUploadBroker} from "../connection-host/agent-upload-broker.mj
 import {createNativeChromeBridge} from "../connection-host/native-user-chrome-bridge.mjs";
 import {createNativeAgentExecutor} from "../chrome-agent-native/agent-executor.mjs";
 import {discoverFileInputs,verifyFileInput,readFileInputSelection} from "../chrome-agent-native/file-inputs.mjs";
+import {detectPageReceipt} from "../chrome-agent-native/download-workflow.mjs";
 
 const OWNER="owl-test-session-1", SITE="https://example.com";
 const fixtures=async(fn)=>{
@@ -98,7 +99,7 @@ describe("secure local upload staging",()=>{
   });
  });
 });
-function fakeExtension() {
+function fakeExtension({emptyInputAfterUpload=false}={}) {
   const owned={};
   const calls=[];
   const storage={...owned};
@@ -115,7 +116,9 @@ function fakeExtension() {
       if(func===discoverFileInputs)return [{result:{origin:SITE,url:SITE+"/upload",inputs:[
         {uid:"owl-file-0",hidden:true,accept:".png",multiple:false,disabled:false}]}}];
       if(func===verifyFileInput)return [{result:{valid:true}}];
-      if(func===readFileInputSelection)return [{result:{selectedCount:1,fileNames:[currentFile.name]}}];
+      if(func===readFileInputSelection)return [{result:emptyInputAfterUpload?null:
+        {selectedCount:1,fileNames:[currentFile.name]}}];
+      if(func===detectPageReceipt)return [{result:{observed:true,origin:SITE}}];
       return [{result:{}}];
     }},
     debugger:{
@@ -132,6 +135,23 @@ function fakeExtension() {
   return {chrome,storage:chrome.storage.session,calls};
 }
 describe("Agent-owned browser upload",()=>{
+ it("recognizes filename UI receipt when an upload widget clears the file input",async()=>{
+   await fixtures(async({file,broker})=>{
+     const extension=fakeExtension({emptyInputAfterUpload:true});
+     const executor=createNativeAgentExecutor(extension.chrome,extension.storage);
+     await executor.run({owner:OWNER,op:"open",args:{url:SITE+"/upload"}});
+     const req={status:()=>({connected:true}),
+       request:(owner,op,args)=>executor.run({owner,op,args})};
+     const bridge=createNativeChromeBridge({broker:req,uploadBroker:broker});
+     const prepared=await bridge.prepareFile(OWNER,file);
+     const result=await bridge.uploadFile(OWNER,{pageId:77,inputUid:"owl-file-0",
+       fileTickets:[prepared.file_ticket]});
+     expect(result.state).toBe("ui_observed");
+     expect(result.website_upload_verified).toBe(false);
+     expect((await bridge.uploadStatus(OWNER,result.upload_id)).state).toBe("ui_observed");
+     expect(extension.calls.some(c=>c.name==="DOM.setFileInputFiles")).toBe(true);
+   });
+ });
  it("handles hidden standard input with temporary debugger attach, no foreground or native dialog",async()=>{
   const x=fakeExtension();
   const agent=createNativeAgentExecutor(x.chrome,x.storage);
