@@ -96,6 +96,7 @@ export function executeFormAction(mode,args={}){
       cvText.includes("Liang_Rao_Axpo_GenAI_Product_Manager_CV.pdf"),
     requiredMissing:[...new Set(incomplete)],salary:annualSalary?.value||null,
     notice:available?.value||null,referralValue:referred?.value||null,
+    referralLabel:referred?labeled(referred):null,
     consentChecked:consent?.checked===true,optionalRetention:retention?.checked===true,
     cvAttached:cvText.includes("Liang_Rao_Axpo_GenAI_Product_Manager_CV.pdf"),
     siteConfirmed:false};

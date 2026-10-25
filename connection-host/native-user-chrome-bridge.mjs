@@ -79,6 +79,50 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     }
     return req(owner,"form_set",{uid,change});
   }
+  // Compatibility with the already-published browser_agent_fill/click tools:
+  // route explicitly user-approved forms through the exact same guarded
+  // Native Messaging workflow while new MCP tool discovery propagates.
+  async function compatibleFill(owner,uid,value){
+    const snap=await req(owner,"snapshot");
+    const control=snap.snapshot?.controls?.find(x=>x.uid===uid);
+    if(!control)throw Error("FORM_CONTROL_NOT_IN_LATEST_SNAPSHOT");
+    if(["radio","checkbox","number"].includes(control.type)){
+      const info=await req(owner,"form_controls");
+      const row=info.controls?.find(x=>x.uid===uid);
+      if(!row)throw Error("FORM_CONTROL_NOT_IN_LATEST_SNAPSHOT");
+      let change;
+      if(row.type==="number")change={value:String(value)};
+      else if(row.type==="checkbox"){
+        if(value!=="true"&&value!=="false")throw Error("FORM_BOOLEAN_REQUIRED");
+        change={checked:value==="true"};
+      }else{
+        const requested=String(value).trim().toLowerCase();
+        if(!["no","yes"].includes(requested)||
+           row.label.trim().toLowerCase()!==requested)
+          throw Error("FORM_RADIO_LABEL_MISMATCH");
+        if(requested!=="no")throw Error("FORM_REFERRAL_APPROVAL_MISSING");
+        change={checked:true,expectedValue:row.value};
+      }
+      return formSetApproved(owner,uid,change);
+    }
+    return req(owner,"fill",{uid,value});
+  }
+  async function compatibleClick(owner,uid){
+    const snap=await req(owner,"snapshot");
+    const control=snap.snapshot?.controls?.find(x=>x.uid===uid);
+    if(control?.tag==="input"&&control.type==="submit"){
+      const grant=approvedGrantFor(snap.snapshot.url);
+      if(grant.requiredConsent!==true||grant.optionalRetention!==false)
+        throw Error("FORM_SUBMISSION_REQUIRES_SCOPED_USER_GRANT");
+      const review=await req(owner,"form_review",{pageUrl:snap.snapshot.url,submitUid:uid});
+      // Caller cannot change the values by passing tool arguments: use
+      // exactly the values confirmed in the local, user-owned grant.
+      return submitReviewed(owner,{pageUrl:snap.snapshot.url,submitUid:uid,
+        salary:grant.salary,notice:grant.notice,
+        referralValue:review.referralValue});
+    }
+    return req(owner,"click",{uid});
+  }
   const usedGrants=new Set();
   async function submitReviewed(owner,{pageUrl,submitUid,salary,notice,referralValue}){
     if(typeof pageUrl!=="string"||typeof salary!=="string"||
@@ -90,7 +134,7 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     try{grant=JSON.parse(submissionGrantReader("OWL_AGENT_FORM_SUBMISSION_GRANT")||"null");}
     catch{throw Error("FORM_SUBMISSION_GRANT_INVALID");}
     if(grant?.pageUrl!==pageUrl || grant.salary!==salary ||
-       grant.notice!==notice||grant.referralValue!==referralValue||
+       grant.notice!==notice||
        grant.optionalRetention!==false||grant.requiredConsent!==true||
        grant.approvedByUser!==true||
        !Number.isFinite(Date.parse(grant.expiresAt)) ||
@@ -104,8 +148,11 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     const grantKey=JSON.stringify([owner,pageUrl,grant.salary,grant.notice,grant.referralValue]);
     if(usedGrants.has(grantKey))throw Error("FORM_SUBMISSION_GRANT_ALREADY_USED");
     const review=await req(owner,"form_review",{pageUrl,submitUid});
+    const referralMatches=review.referralValue===referralValue &&
+      (grant.referralValue===referralValue ||
+       (grant.referralValue==="no"&&String(review.referralLabel||"").trim().toLowerCase()==="no"));
     if(!review.ready||review.salary!==salary||review.notice!==notice ||
-       review.referralValue!==referralValue||!review.consentChecked ||
+       !referralMatches||!review.consentChecked ||
        review.optionalRetention||!review.cvAttached)
       throw Error("FORM_SUBMISSION_PREVIEW_MISMATCH");
     usedGrants.add(grantKey); // fail closed: no automatic retry
@@ -118,7 +165,7 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     tabs:owner=>req(owner,"tabs"),
     use:(owner,pageId)=>req(owner,"use",{pageId}),
     snapshot:owner=>req(owner,"snapshot"),
-    fill:(owner,uid,value)=>req(owner,"fill",{uid,value}),
+    fill:compatibleFill,
     formControls:owner=>req(owner,"form_controls"),
     formSet:formSetApproved,
     formReview:(owner,pageUrl,submitUid)=>req(owner,"form_review",{pageUrl,submitUid}),
@@ -128,7 +175,7 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     pasteText:(owner,uid,text)=>req(owner,"paste_text",{uid,text}),
     dragDrop:(owner,sourceUid,targetUid)=>req(owner,"drag_drop",{sourceUid,targetUid}),
     p2Capabilities:owner=>req(owner,"p2_capabilities"),
-    click:(owner,uid)=>req(owner,"click",{uid}),
+    click:compatibleClick,
     cursorMove:(owner,uid)=>req(owner,"cursor_move",{uid}),
     cursorClick:(owner,uid)=>req(owner,"cursor_click",{uid}),
     cursorHide:owner=>req(owner,"cursor_hide"),

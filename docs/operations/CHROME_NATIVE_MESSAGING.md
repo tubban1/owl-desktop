@@ -44,3 +44,7 @@ Default **browser_agent_*** tools now control background tabs created by OWL in 
 - Calling \`requestSubmit\` respects HTML validation and site submit handlers. A successful dispatch is **NOT** proof that the external server accepted the application; inspect the confirmation page or employer message.
 - User-controlled OS configuration must be provisioned by trusted UI/user action outside Agent-authored web content. Review exact terms and do not grant optional personal-data retention without user consent.
 - The browser extension and Connection Host must be restarted/reloaded to activate new tool handlers, while keeping unrelated Chrome tabs intact.
+
+### Compatibility with existing MCP clients
+
+While tool discovery is updating, existing `browser_agent_fill` can set an observed No/Yes radio, number or checkbox through the same Host grant checks; `browser_agent_click` on a submit input routes to the same reviewed one-use grant instead of disabling the generic safe-click rule. Ordinary links/fields retain their previous behavior. These compatibility actions require the updated Connection Host AND refreshed Chrome extension.
