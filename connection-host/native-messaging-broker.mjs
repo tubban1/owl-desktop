@@ -20,6 +20,11 @@ export async function startNativeMessagingBroker({
   if(!configPath)throw new Error("NATIVE_HOST_CONFIG_PATH_REQUIRED");
   const outstanding=new Map(),queue=[];
   let lastConnectedAt=0, closed=false;
+  // Safe transport-only counters: no URLs, owners, arguments or credentials.
+  // Distinguish a healthy polling Native Host from a Chrome extension that
+  // never responds to commands. Reset when the broker restarts.
+  const counts={dispatched:0,accepted:0,failed:0,timedOut:0};
+  let lastDispatchedAt=0,lastResultAt=0;
   async function request(owner,op,args={}) {
     if(closed)throw new Error("NATIVE_HOST_SHUTDOWN");
     if(!owner||typeof owner!=="string"||owner.length>240)throw new Error("NATIVE_OWNER_REQUIRED");
@@ -28,6 +33,7 @@ export async function startNativeMessagingBroker({
     const id=randomUUID();
     return await new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{
+        counts.timedOut++;
         outstanding.delete(id);
         const n=queue.findIndex(x=>x.id===id);if(n>=0)queue.splice(n,1);
         reject(new Error("NATIVE_EXTENSION_ACTION_TIMEOUT"));
@@ -57,7 +63,9 @@ export async function startNativeMessagingBroker({
       catch{json(res,400,{error:"INVALID_JSON"});return;}
       if(req.url==="/v1/native/poll"){
         lastConnectedAt=Date.now();
-        json(res,200,{request:queue.shift()||null});
+        const next=queue.shift()||null;
+        if(next){counts.dispatched++;lastDispatchedAt=Date.now();}
+        json(res,200,{request:next});
         return;
       }
       if(req.url==="/v1/native/result"){
@@ -65,9 +73,14 @@ export async function startNativeMessagingBroker({
         if(!pending){json(res,404,{error:"UNKNOWN_REQUEST"});return;}
         outstanding.delete(data.id);
         clearTimeout(pending.timer);
-        if(data.ok===true && data.result && JSON.stringify(data.result).length<=MAX_BODY)
+        lastResultAt=Date.now();
+        if(data.ok===true && data.result && JSON.stringify(data.result).length<=MAX_BODY){
+          counts.accepted++;
           pending.resolve(data.result);
-        else pending.reject(new Error(String(data.error||"NATIVE_EXTENSION_FAILED").slice(0,400)));
+        }else{
+          counts.failed++;
+          pending.reject(new Error(String(data.error||"NATIVE_EXTENSION_FAILED").slice(0,400)));
+        }
         json(res,200,{accepted:true});return;
       }
       json(res,404,{error:"NOT_FOUND"});
@@ -86,7 +99,16 @@ export async function startNativeMessagingBroker({
   fs.renameSync(tmp,configPath);
   return {
     port:actualPort,configPath,request,
-    status(){return {connected:Date.now()-lastConnectedAt<8000,transport:"chrome-native-messaging",waiting:queue.length,host:"127.0.0.1"};},
+    status(){return {
+      connected:Date.now()-lastConnectedAt<8000,
+      transport:"chrome-native-messaging",
+      waiting:queue.length,
+      inFlight:outstanding.size,
+      host:"127.0.0.1",
+      diagnostics:{...counts,lastPollAgeMs:lastConnectedAt?Date.now()-lastConnectedAt:null,
+        lastDispatchedAgeMs:lastDispatchedAt?Date.now()-lastDispatchedAt:null,
+        lastResultAgeMs:lastResultAt?Date.now()-lastResultAt:null},
+    };},
     async close(){
       closed=true;
       for(const p of outstanding.values()){clearTimeout(p.timer);p.reject(new Error("NATIVE_HOST_SHUTDOWN"));}

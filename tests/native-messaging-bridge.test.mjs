@@ -38,6 +38,7 @@ describe("Chrome native messaging transport",()=>{
    expect(await pending).toMatchObject({pageId:42,background:true});
    expect((await post("/v1/native/result",{id,ok:true,result:{}})).status).toBe(404);
    expect(bridge.status().connected).toBe(true);
+   expect(bridge.status().diagnostics).toMatchObject({dispatched:1,accepted:1,failed:0,timedOut:0});
    await expect(broker.request("","open",{})).rejects.toThrow("NATIVE_OWNER_REQUIRED");
   }finally{await broker?.close();expect(await fs.stat(config).catch(()=>null)).toBeNull();await fs.rm(dir,{recursive:true,force:true});}
  });
