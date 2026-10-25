@@ -29,13 +29,16 @@ export function explainCurrentActivity(input: {
   const mapped = tool ? TOOL_ACTIONS[tool] : undefined;
   const waiting = stream?.status === "waiting";
   const attention = stream?.status === "attention" || stream?.status === "disconnected";
+  const waitingProgress = waiting && stream?.currentAction?.includes("Legacy progress reminder");
   const title = attention ? "This workstream needs attention"
+    : waitingProgress ? "Progress reminder — not blocked"
     : ongoing ? (mapped?.action ?? "Waiting for a tool response")
     : waiting ? "Waiting for the next step"
     : stream?.currentAction && stream.status === "working" ? stream.currentAction
     : "No tool call is currently running";
   const explanation = attention
     ? "The current workstream reports an attention or connection problem. Inspect the event log before retrying."
+    : waitingProgress ? "The legacy progress checkpoint is informational. Resume the original workstream; do not treat it as lost connectivity or approve unrelated actions."
     : ongoing ? (mapped?.reason ?? "A request is in progress. Open the interaction log below for its exact operation.")
     : waiting ? "The previous action has finished or paused. OWL is waiting for the planner, Runtime or user to continue."
     : "The graph shows the most recently observed activity, not proof that a command is still executing.";
@@ -52,7 +55,8 @@ export function explainCurrentActivity(input: {
     attention,
     waiting,
     lastUpdatedAt: Number.isFinite(lastUpdate) ? new Date(lastUpdate).toISOString() : null,
-    note: prolonged ? "This call has lasted over a minute. It may be a long-running task or a wait; open its output to check progress." :
+    note: waitingProgress ? "Continue this workstream normally; the historical progress reminder does not require resetting another session." :
+      prolonged ? "This call has lasted over a minute. It may be a long-running task or a wait; open its output to check progress." :
       !ongoing && silentMs !== null && silentMs > 120_000 ? "No new workstream update for over two minutes; this is not necessarily a failure." : null,
   };
 }

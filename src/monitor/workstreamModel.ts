@@ -304,7 +304,8 @@ function streamStatus(
   pendingProgressBoundary: boolean,
 ): MonitorWorkstream["status"] {
   const liveTasks = tasks.filter(projectedTaskIsLive);
-  if (pendingProgressBoundary) return "attention";
+  // A legacy progress boundary is a workstream pause, not a runtime failure.
+  if (pendingProgressBoundary) return "waiting";
   if (
     liveTasks.some((task) =>
       ["failed", "blocked", "needs_review"].includes(task.status),
@@ -599,7 +600,7 @@ export function buildWorkstreamBoard({
         "Waiting";
       if (pendingBoundary && !activeTask) {
         currentExecutor = "Agent / user";
-        currentAction = "Progress acknowledgement required to continue";
+        currentAction = "Legacy progress reminder (non-blocking); continue the workstream";
       } else if (activeTask && ACTIVE_TASK_STATES.has(activeTask.status)) {
         currentExecutor = "OWL Runtime";
         currentAction = activeTask.current ?? activeTask.label;

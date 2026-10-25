@@ -630,8 +630,8 @@ describe("buildWorkstreamBoard", () => {
     expect(owner.workstream.status).toBe("active");
     owner.workstream.progressBoundary={pending:true};
     const blocked=buildWorkstreamBoard({snapshot:input,agentRequests:[],now:Date.parse("2026-10-02T00:08:31Z")});
-    expect(blocked.streams[0]?.status).toBe("attention");
-    expect(blocked.streams[0]?.currentAction).toContain("acknowledgement");
+    expect(blocked.streams[0]?.status).toBe("waiting");
+    expect(blocked.streams[0]?.currentAction).toContain("non-blocking");
     expect(owner.workstream.progressBoundary.pending).toBe(true);
     // Explicit waiting on a user survives long dormancy and a disconnected transport.
     owner.workstream.progressBoundary = null;
