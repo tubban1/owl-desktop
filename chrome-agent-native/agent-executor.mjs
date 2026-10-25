@@ -12,6 +12,7 @@ import {pastePlainText,dragDropWithinPage} from "./p2-interactions.mjs";
 import {locateAgentFileDropZone,checkAgentFileDropZone} from "./file-drop-zone.mjs";
 import {prepareAgentRichEditor,checkAgentRichEditor} from "./rich-editor.mjs";
 import {locateVirtualCursorTarget,showVirtualCursor,hideVirtualCursor} from "./virtual-cursor.mjs";
+import {executeFormAction} from "./form-controls.mjs";
 
 // An explicit Agent open(url) can reuse an already-open INACTIVE tab with
 // the exact same URL (including path, query and fragment). Adoption grants
@@ -196,6 +197,36 @@ export function createNativeAgentExecutor(chrome,storage){
       // Only the trusted local Host consumes localPath; never return this
       // operation as an Agent-facing MCP tool.
       return downloads.state(owner,args.downloadId,{includePath:true});
+    }
+    if(op==="form_controls"){
+      const origin=urlOrigin(tab.url);
+      if(!origin)throw Error("FORM_ORIGIN_INVALID");
+      return {pageId:tabId,...await inject(tabId,executeFormAction,["inspect",{origin}])};
+    }
+    if(op==="form_set"){
+      const origin=urlOrigin(tab.url);
+      if(!origin||typeof args.uid!=="string"||!/^owl-agent-\\d{1,3}$/.test(args.uid))
+        throw Error("FORM_FIELD_INVALID");
+      const response=await inject(tabId,executeFormAction,["set",{uid:args.uid,origin,change:args.change}]);
+      if(response?.error)throw Error(response.error);
+      return {pageId:tabId,...response};
+    }
+    if(op==="form_review"){
+      if(typeof args.pageUrl!=="string"||args.pageUrl!==tab.url||
+         !/^owl-agent-\\d{1,3}$/.test(args.submitUid||""))
+        throw Error("FORM_REVIEW_PAGE_OR_CONTROL_MISMATCH");
+      return {pageId:tabId,...await inject(tabId,executeFormAction,
+        ["review",{origin:urlOrigin(tab.url),pageUrl:args.pageUrl,submitUid:args.submitUid}])};
+    }
+    if(op==="form_submit"){
+      if(typeof args.pageUrl!=="string"||args.pageUrl!==tab.url||
+         !/^owl-agent-\\d{1,3}$/.test(args.submitUid||""))
+        throw Error("FORM_SUBMIT_PAGE_OR_CONTROL_MISMATCH");
+      const response=await inject(tabId,executeFormAction,["submit",{origin:urlOrigin(tab.url),
+        pageUrl:args.pageUrl,submitUid:args.submitUid,salary:args.salary,
+        referralValue:args.referralValue,notice:args.notice}]);
+      if(response?.error)throw Error(response.error);
+      return {pageId:tabId,...response};
     }
     if(op==="receipt_check"){
       if(typeof args.expectedText!=="string"||args.expectedText.length<3||

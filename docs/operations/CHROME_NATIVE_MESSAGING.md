@@ -32,3 +32,15 @@ Default **browser_agent_*** tools now control background tabs created by OWL in 
 - A tab that the Agent selected and owns may be operated after the user brings it to the **foreground**. Safe virtual-cursor clicks no longer require tab.active=false. They do not activate/focus tabs or move the shared OS pointer. Sensitive actions remain subject to the same restrictions in either state.
 - An already-open user tab adopted by exact URL is **released, not closed**, on browser_agent_close_tab. A new Agent-created tab is closed. Navigating an adopted tab to a different origin blocks subsequent Agent actions until release.
 - Reload the installed Chrome extension after updating extension source. Unit tests are not an assertion of production acceptance.
+
+
+## Scoped browser form submission (2026-10-25)
+
+- \`browser_agent_form_controls\` inspects non-credential fields, including checkbox/radio labels and values.
+- \`browser_agent_form_set\` selects a previously observed radio, checkbox or number field. Radio selection requires an exact \`expectedValue\`. This step does not submit.
+- \`browser_agent_form_review\` checks the exact current application URL, required data, consent, optional retention and uploaded CV in the existing page.
+- \`browser_agent_form_submit\` **requires a separately user-approved, single-use local OS grant** named \`OWL_AGENT_FORM_SUBMISSION_GRANT\`, readable by the trusted Connection Host. Grant JSON must contain \`pageUrl\`, \`salary\`, \`notice\`, \`referralValue\`, \`requiredConsent:true\`, \`optionalRetention:false\`, \`approvedByUser:true\`, and an \`expiresAt\` no more than one hour in the future. The first attempt consumes the grant in process, even if it fails. No automatic retries.
+- The initial implementation deliberately supports only \`https://careers.axpo.com/jobs/*\`. No generic website submission capability or arbitrary credential/financial consent. Expand only with a separately reviewed, origin-scoped policy.
+- Calling \`requestSubmit\` respects HTML validation and site submit handlers. A successful dispatch is **NOT** proof that the external server accepted the application; inspect the confirmation page or employer message.
+- User-controlled OS configuration must be provisioned by trusted UI/user action outside Agent-authored web content. Review exact terms and do not grant optional personal-data retention without user consent.
+- The browser extension and Connection Host must be restarted/reloaded to activate new tool handlers, while keeping unrelated Chrome tabs intact.

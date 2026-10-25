@@ -1,4 +1,5 @@
-export function createNativeChromeBridge({broker,uploadBroker}) {
+import {currentUploadScope} from "./agent-upload-policy.mjs";
+export function createNativeChromeBridge({broker,uploadBroker,submissionGrantReader=currentUploadScope}) {
   if(!broker?.request||!broker?.status)throw Error("NATIVE_BROKER_REQUIRED");
   const req=(owner,op,args)=>broker.request(owner,op,args);
   const upload=uploadBroker;
@@ -49,12 +50,79 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     const target=await fileInputs(owner);
     return upload.prepare({owner,filePath:artifact.localPath,origin:target.origin});
   }
+  const approvedGrantFor=(pageUrl)=>{
+    let grant=null;
+    try{grant=JSON.parse(submissionGrantReader("OWL_AGENT_FORM_SUBMISSION_GRANT")||"null");}
+    catch{throw Error("FORM_SUBMISSION_GRANT_INVALID");}
+    if(grant?.pageUrl!==pageUrl||grant.approvedByUser!==true||
+       !Number.isFinite(Date.parse(grant.expiresAt))||
+       Date.parse(grant.expiresAt)<=Date.now()||
+       Date.parse(grant.expiresAt)>Date.now()+60*60*1000)
+      throw Error("FORM_LEGAL_CONSENT_REQUIRES_USER_GRANT");
+    return grant;
+  };
+  async function formSetApproved(owner,uid,change){
+    const info=await req(owner,"form_controls");
+    const row=info.controls?.find(x=>x.uid===uid);
+    if(!row)throw Error("FORM_CONTROL_NOT_IN_LATEST_SNAPSHOT");
+    if(row.type==="checkbox"&&/consent|privacy|agree|retention|policy/i.test(row.name+" "+row.label)){
+      const grant=approvedGrantFor(info.pageUrl);
+      if(/future_jobs|retain|retention/i.test(row.name+" "+row.label)){
+        if(change.checked!==false||grant.optionalRetention!==false)
+          throw Error("FORM_OPTIONAL_RETENTION_NOT_APPROVED");
+      }else if(change.checked!==true||grant.requiredConsent!==true)
+        throw Error("FORM_LEGAL_CONSENT_REQUIRES_USER_GRANT");
+    }
+    if(row.type==="number"&&row.name==="candidate[answers_attributes][2][number]"){
+      const grant=approvedGrantFor(info.pageUrl);
+      if(String(change.value)!==grant.salary)throw Error("FORM_SALARY_NOT_APPROVED");
+    }
+    return req(owner,"form_set",{uid,change});
+  }
+  const usedGrants=new Set();
+  async function submitReviewed(owner,{pageUrl,submitUid,salary,notice,referralValue}){
+    if(typeof pageUrl!=="string"||typeof salary!=="string"||
+       typeof notice!=="string"||typeof referralValue!=="string")
+      throw Error("FORM_SUBMIT_ARGUMENTS_INVALID");
+    // A narrowly scoped, independently configurable OS-user approval is
+    // required. Agent tools cannot create grants; use explicit local settings.
+    let grant=null;
+    try{grant=JSON.parse(submissionGrantReader("OWL_AGENT_FORM_SUBMISSION_GRANT")||"null");}
+    catch{throw Error("FORM_SUBMISSION_GRANT_INVALID");}
+    if(grant?.pageUrl!==pageUrl || grant.salary!==salary ||
+       grant.notice!==notice||grant.referralValue!==referralValue||
+       grant.optionalRetention!==false||grant.requiredConsent!==true||
+       grant.approvedByUser!==true||
+       !Number.isFinite(Date.parse(grant.expiresAt)) ||
+       Date.parse(grant.expiresAt)<=Date.now() ||
+       Date.parse(grant.expiresAt)>Date.now()+60*60*1000)
+      throw Error("FORM_SUBMISSION_REQUIRES_SCOPED_USER_GRANT");
+    if(!pageUrl.startsWith("https://") ||
+       new URL(pageUrl).hostname!== "careers.axpo.com" ||
+       !new URL(pageUrl).pathname.startsWith("/jobs/"))
+      throw Error("FORM_SUBMISSION_TARGET_NOT_ALLOWLISTED");
+    const grantKey=JSON.stringify([owner,pageUrl,grant.salary,grant.notice,grant.referralValue]);
+    if(usedGrants.has(grantKey))throw Error("FORM_SUBMISSION_GRANT_ALREADY_USED");
+    const review=await req(owner,"form_review",{pageUrl,submitUid});
+    if(!review.ready||review.salary!==salary||review.notice!==notice ||
+       review.referralValue!==referralValue||!review.consentChecked ||
+       review.optionalRetention||!review.cvAttached)
+      throw Error("FORM_SUBMISSION_PREVIEW_MISMATCH");
+    usedGrants.add(grantKey); // fail closed: no automatic retry
+    const dispatched=await req(owner,"form_submit",{pageUrl,submitUid,salary,notice,referralValue});
+    return {...dispatched,submittedToSiteNotVerified:true,
+      grantConsumed:true,detailsReviewed:true};
+  }
   return {
     open:(owner,url)=>req(owner,"open",{url}),
     tabs:owner=>req(owner,"tabs"),
     use:(owner,pageId)=>req(owner,"use",{pageId}),
     snapshot:owner=>req(owner,"snapshot"),
     fill:(owner,uid,value)=>req(owner,"fill",{uid,value}),
+    formControls:owner=>req(owner,"form_controls"),
+    formSet:formSetApproved,
+    formReview:(owner,pageUrl,submitUid)=>req(owner,"form_review",{pageUrl,submitUid}),
+    submitReviewed,
     editText:(owner,uid,value)=>req(owner,"edit_text",{uid,value}),
     richEditorInsert:(owner,uid,value)=>req(owner,"rich_editor_insert",{uid,value}),
     pasteText:(owner,uid,text)=>req(owner,"paste_text",{uid,text}),
