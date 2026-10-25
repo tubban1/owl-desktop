@@ -16,6 +16,7 @@ import { buildWorkstreamBoard } from "./monitor/workstreamModel";
 import { DevicesPage } from "./devices/DevicesPage";
 import owlLogo from "../assets/owl-logo-ui.png";
 import { StatisticsPanel } from "./statistics/StatisticsPanel";
+import { deviceCopy } from "./deviceCopy";
 import { RuntimePermissionCenter } from "./permissions/RuntimePermissionCenter";
 import type { UsageStatisticsSnapshot } from "./statistics/statisticsModel";
 import {
@@ -189,6 +190,7 @@ export default function App() {
   },[settings?.youtubeOauthClientId]);
   const refreshInFlight = useRef<Promise<void> | null>(null);
 
+  const platformCopy = deviceCopy(env?.platform);
   const online = snapshot?.mode === "live";
   const runtimeAccess = snapshot?.runtimeAccess ?? null;
   const accessView = executionAccessView(online, runtimeAccess, snapshot?.runtimeAccessError);
@@ -272,7 +274,7 @@ export default function App() {
         label: customTunnel ? "Connect Tunnel" : "Cloud connection",
         title: "Local execution is ready",
         description: customTunnel
-          ? "Start or recover your custom OpenAI Tunnel so ChatGPT can reach this Mac."
+          ? "Start or recover your custom OpenAI Tunnel so ChatGPT can reach this device."
           : "Recover the durable OWL Cloud MCP path. Tunnel is not required for the managed production path.",
       };
     }
@@ -1145,7 +1147,7 @@ export default function App() {
         >
           <span className="device-dot" />
           <span>
-            <strong>This Mac</strong>
+            <strong>{platformCopy.label}</strong>
             <small>{env ? env.platform + " · " + env.arch : "Loading…"}</small>
           </span>
         </button>
@@ -1159,7 +1161,7 @@ export default function App() {
 
     <main className="main">
       <header className="topbar">
-        <div className="crumb">OWL LAB · THIS MAC</div>
+        <div className="crumb">OWL LAB · {platformCopy.label.toUpperCase()}</div>
         <div className="top-actions">{notice && <span className="notice">{notice}</span>}<span className={"readiness-pill " + (readinessReady ? "ready" : "attention")}>{readinessReady ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{productReadiness.label}</span><button className="icon-button" onClick={() => void refresh()} disabled={busy} title="Refresh OWL LAB status"><RefreshCw size={16} className={busy ? "spin" : ""} /></button></div>
       </header>
 
@@ -1246,7 +1248,7 @@ export default function App() {
             <MetricCard label="Approvals" value={pendingRuntimeApprovals.length} caption="Need your decision" icon={ShieldCheck} />
             <MetricCard label="Device access" value={runtimeAccess?.state ?? "—"} caption={snapshot?.runtimeAccessError ? "Access probe failed" : runtimeAccess?.grant?.signatureVerified ? "Cloud verified" : "Runtime gate"} icon={Laptop} />
           </div>
-          <StatisticsPanel stats={usageStats} />
+          <StatisticsPanel stats={usageStats} deviceLocation={platformCopy.location} />
           <div className="two-col">
             <section className="panel"><div className="panel-heading"><div><span className="eyebrow">SYSTEM HEALTH</span><h3>Connections</h3></div></div>
               <div className="component-list">
@@ -1265,7 +1267,7 @@ export default function App() {
 
         {page === "statistics" && <>
           <SectionHeader title="Statistics" description="Understand when OWL works, which tools it uses, and where errors or delays occur." action={<button className="secondary" onClick={() => void window.owlDesktop.statistics().then(setUsageStats)}>Refresh statistics</button>} />
-          <StatisticsPanel stats={usageStats} />
+          <StatisticsPanel stats={usageStats} deviceLocation={platformCopy.location} />
         </>}
 
         {page === "monitor" && <MonitorPage
@@ -1278,6 +1280,7 @@ export default function App() {
         />}
 
         {page === "devices" && <DevicesPage
+          currentDeviceLabel={platformCopy.label}
           accountReady={cloudAccount?.status === "ready"}
           currentDeviceId={cloudAccount?.deviceId ?? snapshot?.cloud.deviceId ?? null}
           onRotateCurrentDeviceCredential={async () => {
@@ -1957,7 +1960,7 @@ export default function App() {
             <div className="setting-row"><div><strong>OWL MCP</strong><span>Run the ChatGPT/MCP compatibility adapter with the Desktop lifecycle.</span></div><Toggle checked={settings.mcpEnabled} onChange={(v) => saveSettings({ mcpEnabled: v })} /></div>
             <div className="setting-row"><div><strong>MCP port</strong><span>Loopback port used by OWL MCP and OWL Tunnel.</span></div><input className="setting-input" type="number" min="1024" max="65535" value={settings.mcpPort} onChange={(e) => setSettings({ ...settings, mcpPort: Number(e.target.value) })} onBlur={() => saveSettings({ mcpPort: settings.mcpPort })} /></div>
             <div className="setting-row"><div><strong>Remote connection</strong><span>OWL Cloud Durable MCP remains the production correctness path. Managed Tunnel is an optional OWL-provided acceleration path; Custom Tunnel remains advanced/self-managed.</span></div><select className="setting-input" value={settings.connectivityMode} onChange={(e) => void saveSettings({ connectivityMode: e.target.value as Settings["connectivityMode"] })}><option value="cloud_durable">OWL Cloud · Durable (recommended)</option><option value="managed_tunnel">OWL Managed Tunnel</option><option value="custom_tunnel">Custom OpenAI Tunnel · Advanced</option></select></div>
-            {settings.connectivityMode === "managed_tunnel" && <div className="contract-note compact-note"><ShieldCheck size={17} /><div><strong>No OpenAI API key is stored on this Mac.</strong><p>OWL Cloud provisions the Tunnel for this device and keeps the OpenAI Admin/Runtime credentials server-side. This Mac authenticates only with its existing OWL device credential.</p></div></div>}
+            {settings.connectivityMode === "managed_tunnel" && <div className="contract-note compact-note"><ShieldCheck size={17} /><div><strong>No OpenAI API key is stored on this device.</strong><p>OWL Cloud provisions the Tunnel for this device and keeps the OpenAI Admin/Runtime credentials server-side. This device authenticates only with its existing OWL device credential.</p></div></div>}
             {settings.connectivityMode === "custom_tunnel" && <>
               <div className="setting-row"><div><strong>Custom Tunnel</strong><span>Run your own OpenAI Secure MCP Tunnel to this Desktop's local MCP endpoint.</span></div><Toggle checked={settings.tunnelEnabled} onChange={(v) => saveSettings({ tunnelEnabled: v })} /></div>
               <div className="setting-row"><div><strong>Tunnel auto-start</strong><span>Start the custom tunnel after Desktop and MCP are ready.</span></div><Toggle checked={settings.tunnelAutoStart} onChange={(v) => saveSettings({ tunnelAutoStart: v })} /></div>

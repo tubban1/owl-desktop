@@ -277,7 +277,7 @@ export function deriveWorkState({
     const nextAction = plannerCheckpoint.nextActions?.[0] ?? null;
     return {
       state: "waiting",
-      label: "Waiting",
+      label: "Saved checkpoint",
       title: plannerCheckpoint.goal,
       detail:
         plannerCheckpoint.summary ??
@@ -285,7 +285,7 @@ export function deriveWorkState({
           ? `Saved planner checkpoint at “${plannerCheckpoint.phase}”.`
           : "A planner recovery point is saved for this work."),
       signal: plannerTransportMissing
-        ? "Waiting for ChatGPT to reconnect — recovery point saved"
+        ? "No task is running — resume from ChatGPT when ready"
         : nextAction
           ? `Ready to resume — next: ${nextAction}`
           : "Planner checkpoint active — ready to resume",

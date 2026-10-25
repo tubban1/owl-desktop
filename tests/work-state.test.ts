@@ -95,10 +95,10 @@ describe("deriveWorkState", () => {
     });
     expect(state).toMatchObject({
       state: "waiting",
-      label: "Waiting",
+      label: "Saved checkpoint",
       title: "Finish stream-loss recovery",
       detail: "Implementation is saved and verification remains.",
-      signal: "Waiting for ChatGPT to reconnect — recovery point saved",
+      signal: "No task is running — resume from ChatGPT when ready",
     });
   });
 

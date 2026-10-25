@@ -95,11 +95,13 @@ function Capability({
 export function DevicesPage({
   accountReady,
   currentDeviceId,
+  currentDeviceLabel,
   onRotateCurrentDeviceCredential,
   onRevokeCurrentDevice,
 }: {
   accountReady: boolean;
   currentDeviceId: string | null;
+  currentDeviceLabel: string;
   onRotateCurrentDeviceCredential: () => Promise<void>;
   onRevokeCurrentDevice: () => Promise<void>;
 }) {
@@ -173,7 +175,7 @@ export function DevicesPage({
 
   const revokeCurrentDevice = async () => {
     const confirmed = window.confirm(
-      "Revoke this Mac from OWL LAB? Cloud Durable MCP and the local Tunnel process will stop, Runtime execution access will be revoked, and this device must enroll again. Your own Custom Tunnel API key will not be deleted.",
+      `Revoke ${currentDeviceLabel} from OWL LAB? Cloud Durable MCP and the local Tunnel process will stop, Runtime execution access will be revoked, and this device must enroll again. Your own Custom Tunnel API key will not be deleted.`,
     );
     if (!confirmed) return;
 
@@ -320,7 +322,7 @@ export function DevicesPage({
                     </span>
                   </div>
                   {isCurrent && (
-                    <span className="current-device-pill">This Mac</span>
+                    <span className="current-device-pill">{currentDeviceLabel}</span>
                   )}
                 </button>
               );
@@ -377,7 +379,7 @@ export function DevicesPage({
                   <div className="device-title-row">
                     <h2>{selected.displayName}</h2>
                     {selected.deviceId === currentDeviceId && (
-                      <span className="current-device-pill">This Mac</span>
+                      <span className="current-device-pill">{currentDeviceLabel}</span>
                     )}
                   </div>
                   <p>
@@ -554,7 +556,7 @@ export function DevicesPage({
                 <ShieldCheck size={15} />
                 <p>
                   Sign out keeps this device enrolled. Revoke is different: it
-                  stops OWL Cloud remote access for this Mac and requires a new
+                  stops OWL Cloud remote access for this device and requires a new
                   enrollment. A user-managed Custom Tunnel key is preserved.
                 </p>
               </div>

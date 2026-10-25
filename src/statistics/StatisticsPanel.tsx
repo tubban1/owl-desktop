@@ -11,7 +11,7 @@ const friendlyTool = (tool: string) => ({
   read_file: "Read a file", edit_file: "Edit a file",
 }[tool] ?? tool.replaceAll("_"," "));
 
-export function StatisticsPanel({ stats }: { stats: UsageStatisticsSnapshot | null }) {
+export function StatisticsPanel({ stats, deviceLocation }: { stats: UsageStatisticsSnapshot | null; deviceLocation: string }) {
   const [range, setRange] = useState<StatisticsRange>(7);
   const [day, setDay] = useState("");
   const model = useMemo(() => summarizeUsage(stats, range), [stats, range]);
@@ -25,7 +25,7 @@ export function StatisticsPanel({ stats }: { stats: UsageStatisticsSnapshot | nu
   return <section className="usage-statistics panel" aria-label="OWL usage statistics">
     <div className="panel-heading stats-heading">
       <div><span className="eyebrow">USAGE STATISTICS</span><h3>How you use OWL LAB</h3>
-        <p>Daily activity and tool usage recorded on this Mac {stats?.since ? "since " + new Date(stats.since).toLocaleDateString() : ""}. Historical activity before tracking began is not included.</p>
+        <p>Daily activity and tool usage recorded on {deviceLocation} {stats?.since ? "since " + new Date(stats.since).toLocaleDateString() : ""}. Historical activity before tracking began is not included.</p>
       </div>
       <div className="stats-range" role="group" aria-label="Statistics time range">
         {([7,30,90,"all"] as StatisticsRange[]).map((value) => <button key={value} className={range === value ? "active" : ""} onClick={() => {setRange(value);setDay("");}} aria-pressed={range === value}>{value === "all" ? "All recorded" : value + " days"}</button>)}
