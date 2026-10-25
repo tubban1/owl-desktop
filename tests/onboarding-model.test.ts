@@ -16,6 +16,7 @@ describe("onboarding model", () => {
       completedCount: 1,
       totalCount: 4,
     });
+    expect(model.steps[1].detail).toBe("Sign in and enroll this device.");
     expect(model.steps.map((step) => step.state)).toEqual([
       "complete",
       "current",

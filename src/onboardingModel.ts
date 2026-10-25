@@ -31,7 +31,7 @@ export function buildOnboardingModel(input: {
     {
       id: "account" as const,
       label: "OWL LAB account",
-      detail: "Sign in and enroll this Mac.",
+      detail: "Sign in and enroll this device.",
       complete: input.accountReady,
     },
     {

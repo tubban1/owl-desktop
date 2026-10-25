@@ -218,7 +218,9 @@ export default function App() {
         state: "LOCAL_RECOVERY",
         label: "Runtime recovery",
         title: "Local Runtime needs attention",
-        description: snapshot?.error ?? "OWL Runtime is not reachable.",
+        description: env?.platform === "win32" && env.isPackaged === false
+          ? "Windows development build: the local Runtime is not running or not reachable at 127.0.0.1:8788. Start the separately installed OWL Runtime and select Refresh status. This development build cannot install or repair Windows Runtime automatically."
+          : snapshot?.error ?? "OWL Runtime is not reachable.",
       };
     }
     if (cloudAccount?.status !== "ready") {
@@ -282,6 +284,8 @@ export default function App() {
     executionReady,
     accessView,
     snapshot?.runtimeAccessError?.code,
+    env?.platform,
+    env?.isPackaged,
   ]);
 
   const readinessReady = productReadiness.state === "READY";
@@ -480,9 +484,13 @@ export default function App() {
     });
   };
 
+  const windowsDevRuntimeUnavailable =
+    env?.platform === "win32" &&
+    env.isPackaged === false &&
+    productReadiness.state === "LOCAL_RECOVERY";
   const readinessActionLabel =
     productReadiness.state === "LOCAL_RECOVERY"
-      ? "Repair Runtime"
+      ? windowsDevRuntimeUnavailable ? "Check Runtime" : "Repair Runtime"
       : productReadiness.state === "SETUP_REQUIRED"
         ? "Sign in"
         : productReadiness.state === "AUTHORIZATION_CHECKING"
@@ -540,6 +548,10 @@ export default function App() {
     }
     try {
       if (productReadiness.state === "LOCAL_RECOVERY") {
+        if (windowsDevRuntimeUnavailable) {
+          await refresh();
+          return;
+        }
         await window.owlDesktop.hostRestart();
       } else if (productReadiness.state === "SETUP_REQUIRED") {
         await window.owlDesktop.cloudLogin();
@@ -910,7 +922,7 @@ export default function App() {
         <div className="onboarding-loading">
           <img className="brand-logo" src={owlLogo} alt="OWL LAB logo" />
           <strong>Preparing OWL LAB…</strong>
-          <span>Checking this Mac and your saved setup.</span>
+          <span>Checking this device and your saved setup.</span>
         </div>
       </div>
     );
@@ -921,7 +933,7 @@ export default function App() {
     const onboardingActionLabel = readinessReady
       ? "Enter OWL LAB"
       : onboardingPreparingRuntime
-        ? "Preparing this Mac…"
+        ? "Preparing this device…"
         : readinessActionLabel;
     const onboardingStatusTitle = onboardingPreparingRuntime
       ? "Preparing the local Runtime"
@@ -948,12 +960,16 @@ export default function App() {
               <h1>
                 {readinessReady
                   ? "Your OWL is ready"
-                  : "Set up OWL LAB on this Mac"}
+                  : env.platform === "win32"
+                    ? "Set up OWL LAB on this Windows PC"
+                    : env.platform === "darwin"
+                      ? "Set up OWL LAB on this Mac"
+                      : "Set up OWL LAB on this computer"}
               </h1>
               <p>
                 OWL LAB prepares the local Runtime, verifies your account and
                 execution access, then connects ChatGPT. No Terminal, ports,
-                Tunnel IDs or API keys are required for normal setup.
+                Tunnel IDs or API keys are required for supported packaged installations.
               </p>
             </div>
 
