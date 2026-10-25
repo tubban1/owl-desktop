@@ -118,6 +118,24 @@ afterEach(() => {
 });
 
 describe("CloudBridgeService", () => {
+  it("reports unsupported graph actions without exposing private arguments", async () => {
+    const error = new Error('Unknown routed action "runtime.info" in step "info". Call router_catalog for supported actions.');
+    error.code = "Error";
+    error.runtimeResponded = true;
+    const runtimeClient = { createTask: vi.fn(async () => { throw error; }) };
+    const setup = createService({ runtimeClient });
+    await setup.service.processCommand(command({
+      commandId: "cmd_invalid_action",
+      payload: { label: "Bad action", steps: [{ id: "info", action: "runtime.info" }] },
+    }));
+    expect(setup.client.rejectCommand).toHaveBeenCalledWith(
+      "cmd_invalid_action",
+      "RUNTIME_REJECTED:UNSUPPORTED_ROUTED_ACTION",
+    );
+    expect(setup.store.getCommand("cmd_invalid_action").status).toBe("rejected");
+    expect(runtimeClient.createTask).toHaveBeenCalledTimes(1);
+  });
+
   it("maps runtime.task.create once and replays only the Cloud accept on redelivery", async () => {
     const setup = createService();
     const input = command();

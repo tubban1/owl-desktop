@@ -17,6 +17,16 @@ function errorCode(error) {
   return boundedString(error?.code || error?.name || "ERROR", 80);
 }
 
+// Classify known graph validation failures without sending private arguments.
+function runtimeRejectionCode(error) {
+  const code = errorCode(error);
+  if (code === "Error" &&
+      /^Unknown routed action "[^"\r\n]{1,120}" in step "[^"\r\n]{1,64}"\./.test(String(error?.message ?? ""))) {
+    return "UNSUPPORTED_ROUTED_ACTION";
+  }
+  return code;
+}
+
 function errorFingerprint(error) {
   return createHash("sha256")
     .update(`${errorCode(error)}:${error?.name ?? "Error"}`)
@@ -661,7 +671,7 @@ export class CloudBridgeService {
         if (error?.runtimeResponded === true) {
           this.store.markRejected(
             commandId,
-            `RUNTIME_REJECTED:${errorCode(error)}`,
+            `RUNTIME_REJECTED:${runtimeRejectionCode(error)}`,
           );
           this.queueTelemetry({
             eventType: "desktop.cloud.command.rejected",
@@ -675,7 +685,7 @@ export class CloudBridgeService {
           }, `telemetry:rejected:${commandId}`);
           await this.client.rejectCommand(
             commandId,
-            `RUNTIME_REJECTED:${errorCode(error)}`,
+            `RUNTIME_REJECTED:${runtimeRejectionCode(error)}`,
           );
           this.noteContact();
           return;
