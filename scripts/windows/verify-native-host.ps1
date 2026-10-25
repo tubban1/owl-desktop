@@ -19,7 +19,7 @@ if($manifest.allowed_origins.Count -ne 1 -or $manifest.allowed_origins[0] -ne "c
 if(-not (Test-Path -LiteralPath $info.binary)){throw 'NATIVE_LAUNCHER_MISSING'}
 $settings=New-Object System.Diagnostics.ProcessStartInfo
 $settings.FileName=$info.binary
-$settings.Arguments="chrome-extension://$id/"
+$settings.Arguments="chrome-extension://$id/ --parent-window=0"
 $settings.UseShellExecute=$false
 $settings.RedirectStandardInput=$true
 $settings.RedirectStandardOutput=$true
@@ -46,8 +46,29 @@ $bad.RedirectStandardOutput=$true
 $q=[Diagnostics.Process]::Start($bad)
 if(-not $q.WaitForExit(7000)){try{$q.Kill()}catch{};throw 'INVALID_ORIGIN_LAUNCH_HUNG'}
 if($q.ExitCode -ne 12 -or $q.StandardOutput.BaseStream.ReadByte() -ne -1){throw 'INVALID_ORIGIN_NOT_BLOCKED'}
+# The second argument is allowed ONLY when it is the decimal Chrome parent
+# handle. Foreign switches and malformed values must fail closed.
+foreach($argument in @(
+  "chrome-extension://$id/ --parent-window=not-a-number",
+  "chrome-extension://$id/ --unknown=0",
+  "chrome-extension://$id/ --parent-window=0 --surprise",
+  "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/ --parent-window=0"
+)) {
+  $badSettings=New-Object Diagnostics.ProcessStartInfo
+  $badSettings.FileName=$info.binary
+  $badSettings.Arguments=$argument
+  $badSettings.UseShellExecute=$false
+  $badSettings.CreateNoWindow=$true
+  $badSettings.RedirectStandardOutput=$true
+  $invalid=[Diagnostics.Process]::Start($badSettings)
+  if(-not $invalid.WaitForExit(7000)){try{$invalid.Kill()}catch{};throw 'INVALID_NATIVE_ARGS_HUNG'}
+  if($invalid.ExitCode -ne 12 -or $invalid.StandardOutput.BaseStream.ReadByte() -ne -1){
+    throw 'INVALID_NATIVE_ARGS_NOT_REJECTED'
+  }
+}
 [pscustomobject]@{
   ok=$true;windowsNativeExe=$true;binaryFrameCorrect=$true;
-  rejectsForeignOrigin=$true;didNotTouchChromeRegistry=$true;
+  rejectsForeignOrigin=$true;acceptsWindowsParentWindow=$true;
+  rejectsMalformedParentWindow=$true;didNotTouchChromeRegistry=$true;
   launcherExit=$p.ExitCode
 }|ConvertTo-Json -Compress

@@ -29,7 +29,17 @@ internal static class Program {
   public static int Main(string[] args) {
     string id="__OWL_EXTENSION_ID__";
     string origin="chrome-extension://" + id + "/";
-    if(args.Length!=1 || !String.Equals(args[0],origin,StringComparison.Ordinal)) return 12;
+    // Chrome on Windows supplies the origin AND an optional native window handle.
+    // Service workers supply --parent-window=0. Reject unknown extra arguments,
+    // but do not reject valid Chrome invocations (previously the host always exited).
+    if(args.Length<1 || args.Length>2 ||
+       !String.Equals(args[0],origin,StringComparison.Ordinal)) return 12;
+    if(args.Length==2) {
+      const string prefix="--parent-window=";
+      ulong handle;
+      if(!args[1].StartsWith(prefix,StringComparison.Ordinal) ||
+         !ulong.TryParse(args[1].Substring(prefix.Length),out handle)) return 12;
+    }
     string node=Utf8("__OWL_NODE_B64__");
     string script=Utf8("__OWL_SCRIPT_B64__");
     string broker=Utf8("__OWL_BROKER_B64__");
