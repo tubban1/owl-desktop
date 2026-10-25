@@ -18,6 +18,10 @@ async function main(){
   const base=path.resolve(process.env.APPDATA||"");
   if(dataRoot!==path.join(base,"OWL LAB","desktop"))
     throw Error("DESKTOP_DATA_ROOT_NOT_EXPECTED");
+  // The encrypted secret is bound to Electron's profile key on Windows.
+  // Set userData BEFORE app.whenReady() so this bootstrap uses the exact
+  // same OS encryption profile as the real OWL Desktop process.
+  app.setPath("userData",dataRoot);
   const raw=fs.readFileSync(tokenPath,"utf8").trim();
   if(!/^[A-Za-z0-9_-]{40,80}$/.test(raw))throw Error("TOKEN_FORMAT_INVALID");
   await app.whenReady();
