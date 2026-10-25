@@ -23,7 +23,7 @@ export async function startNativeMessagingBroker({
   // Safe transport-only counters: no URLs, owners, arguments or credentials.
   // Distinguish a healthy polling Native Host from a Chrome extension that
   // never responds to commands. Reset when the broker restarts.
-  const counts={dispatched:0,accepted:0,failed:0,timedOut:0};
+  const counts={dispatched:0,acknowledged:0,accepted:0,failed:0,timedOut:0};
   let lastDispatchedAt=0,lastResultAt=0;
   async function request(owner,op,args={}) {
     if(closed)throw new Error("NATIVE_HOST_SHUTDOWN");
@@ -66,6 +66,13 @@ export async function startNativeMessagingBroker({
         const next=queue.shift()||null;
         if(next){counts.dispatched++;lastDispatchedAt=Date.now();}
         json(res,200,{request:next});
+        return;
+      }
+      if(req.url==="/v1/native/ack"){
+        const pending=outstanding.get(data?.id);
+        if(!pending){json(res,404,{error:"UNKNOWN_REQUEST"});return;}
+        if(!pending.acked){pending.acked=true;counts.acknowledged++;}
+        json(res,200,{accepted:true});
         return;
       }
       if(req.url==="/v1/native/result"){

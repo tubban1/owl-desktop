@@ -11,6 +11,10 @@ function connect(){
     port=p;
     p.onMessage.addListener(message=>{
       if(message?.type==="command"&&typeof message.id==="string"){
+        // Immediate transport receipt, before Chrome API / page operations.
+        // The host records only receipt counts, never tab URLs or input data.
+        try{p.postMessage({type:"command_received",id:message.id});}
+        catch{}
         serial=serial.then(async()=>{
           try{
             const result=await executor.run(message);

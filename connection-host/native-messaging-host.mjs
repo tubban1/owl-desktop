@@ -45,6 +45,9 @@ async function main(){
   let alive=true;
   const send=msg=>process.stdout.write(frame(msg));
   process.stdin.on("data",decoder(msg=>{
+    if(msg?.type==="command_received"&&typeof msg.id==="string"){
+      void req("/v1/native/ack",{id:msg.id}).catch(()=>{});
+    }
     if(msg?.type==="result"&&typeof msg.id==="string"){
       const pending=messages.get(msg.id);
       if(pending){messages.delete(msg.id);pending(msg);}
