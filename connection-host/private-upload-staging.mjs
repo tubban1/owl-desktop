@@ -31,18 +31,19 @@ export async function secureUploadStagingRoot(root){
     // staging root, or if protection failed. No parsing localized icacls text.
     const verify=[
       "$ErrorActionPreference='Stop'",
-      "$acl=Get-Acl -LiteralPath $args[0]",
+      "$acl=Get-Acl -LiteralPath $env:OWL_P3_ACL_ROOT",
       "if(-not $acl.AreAccessRulesProtected){exit 21}",
-      "$trusted=@($args[1], 'S-1-5-18', 'S-1-5-32-544')",
+      "$trusted=@($env:OWL_P3_ACL_OWNER, 'S-1-5-18', 'S-1-5-32-544')",
       "foreach($ace in $acl.Access){",
       "try{$sid=$ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value}",
       "catch{exit 22}",
       "if($sid -notin $trusted){exit 23}",
       "}",
       "exit 0"
-    ].join(";");
-    execFileSync("powershell.exe",["-NoProfile","-NonInteractive","-Command",verify,root,owner],
-      {timeout:15000,windowsHide:true,maxBuffer:65536});
+    ].join("\n");
+    execFileSync("powershell.exe",["-NoProfile","-NonInteractive","-Command",verify],
+      {timeout:15000,windowsHide:true,maxBuffer:65536,
+        env:{...process.env,OWL_P3_ACL_ROOT:root,OWL_P3_ACL_OWNER:owner}});
   }catch{
     throw Error("UPLOAD_STAGING_ROOT_NOT_PRIVATE");
   }
