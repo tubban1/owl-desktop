@@ -61,6 +61,9 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     dragDrop:(owner,sourceUid,targetUid)=>req(owner,"drag_drop",{sourceUid,targetUid}),
     p2Capabilities:owner=>req(owner,"p2_capabilities"),
     click:(owner,uid)=>req(owner,"click",{uid}),
+    cursorMove:(owner,uid)=>req(owner,"cursor_move",{uid}),
+    cursorClick:(owner,uid)=>req(owner,"cursor_click",{uid}),
+    cursorHide:owner=>req(owner,"cursor_hide"),
     screenshot:owner=>req(owner,"screenshot"),
     focusForLogin:owner=>req(owner,"focus_login"),
     closeTab:(owner,pageId)=>req(owner,"close_tab",{pageId}),
@@ -78,7 +81,8 @@ export function createNativeChromeBridge({broker,uploadBroker}) {
     releaseFiles:(owner,tickets)=>upload.release({owner,ticketIds:tickets}),
     capabilities:()=>({transport:"chrome-native-messaging",
       fileUpload:upload?.capabilities()??{uploadFile:false},
-      standardInput:true,hiddenInput:true,downloads:true,downloadToUpload:true,uiReceiptCheck:true,plainTextPaste:true,textDragDrop:true,fileDragDrop:true,fileDragDropBackend:"chrome_debugger_cdp",osClipboard:false,nativePicker:false}),
+      standardInput:true,hiddenInput:true,downloads:true,downloadToUpload:true,uiReceiptCheck:true,plainTextPaste:true,textDragDrop:true,fileDragDrop:true,fileDragDropBackend:"chrome_debugger_cdp",osClipboard:false,nativePicker:false,tabLocalVirtualCursor:true,
+      systemPointerShared:false,trustedTabMouseEvents:true,nativeDialogRequiresHuman:true}),
     status:()=>broker.status(),
     close:async()=>{} // broker/upload lifecycle belongs to Connection Host
   };

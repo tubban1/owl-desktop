@@ -55,10 +55,19 @@ try{
     <div id="drag-item" draggable="true" aria-label="Draft card">Card</div>
     <div id="dropzone" data-dropzone="true" aria-label="Board slot">Empty</div>
     <div id="no-drop" data-dropzone="true" aria-label="Inert slot">Empty</div>
+    <button type="button" aria-label="Expand details" id="safe-click">Expand details</button>
+    <button type="button" aria-label="Delete account" id="danger-click">Delete account</button>
+    <button type="button" aria-label="Upload file" id="picker-trigger">Upload file</button>
+    <button type="submit" aria-label="Proceed" id="submit-trigger">Proceed</button>
+    <p id="cursor-click-receipt">not clicked</p>
     <div id="file-drop" data-dropzone="true" aria-label="File drop target" style="height:80px;width:280px;border:1px solid gray">DROP FILE HERE</div>
     <form id="form"><input id="upload" type="file" name="attachment" style="display:none" accept=".txt">
     <span id="receipt">awaiting file</span></form><div contenteditable="true" aria-label="Simple note">original</div><div class="ProseMirror" contenteditable="true" aria-label="Rich editor">framework</div>
     <script>
+      document.querySelector("#safe-click").addEventListener("click",e=>{
+        document.querySelector("#cursor-click-receipt").textContent=
+          e.isTrusted?"TRUSTED TAB CLICK":"UNTRUSTED CLICK";
+      });
       document.querySelector(".ProseMirror").addEventListener("input",e=>{
         e.currentTarget.dataset.modelText=e.currentTarget.textContent;
         e.currentTarget.dataset.trustedInput=String(e.isTrusted);
@@ -224,6 +233,54 @@ try{
   const observed=await call(owner,"receipt_check",{expectedText:"UPLOAD VERIFIED BY SERVER"});
   assert.equal(observed.state,"ui_observed");
   assert.equal(observed.websiteUploadVerified,false,"UI receipt never claims independent proof");
+  const cursorSnapshot=await call(owner,"snapshot");
+  const cursorUid=label=>cursorSnapshot.snapshot.controls.find(x=>x.label===label)?.uid;
+  assert.ok(cursorUid("Expand details")&&cursorUid("Delete account")&&cursorUid("Upload file"));
+  const moved=await call(owner,"cursor_move",{uid:cursorUid("Expand details")});
+  assert.equal(moved.moved,true);
+  assert.equal(moved.osPointerMoved,false);
+  assert.equal(moved.foregroundUnchanged,true);
+  assert.equal(await targetPage.locator('[data-owl-lab-agent-cursor-host="true"]').count(),1);
+  for(const label of ["Delete account","Upload file","Proceed"]){
+    let blocked=false;
+    try{await call(owner,"cursor_click",{uid:cursorUid(label)});}
+    catch(e){blocked=/CURSOR_ACTION_REQUIRES_HUMAN/.test(e.message);}
+    assert.equal(blocked,true,"consequential click must be human-owned: "+label);
+  }
+  let foreignCursorBlocked=false;
+  try{await call("other-owner","cursor_click",{uid:cursorUid("Expand details")});}
+  catch(e){foreignCursorBlocked=/AGENT_TAB_NOT_OWNED/.test(e.message);}
+  assert.equal(foreignCursorBlocked,true);
+  const clicked=await call(owner,"cursor_click",{uid:cursorUid("Expand details")});
+  assert.equal(clicked.clicked,true);
+  assert.equal(clicked.websitePersisted,false);
+  assert.equal(clicked.osPointerMoved,false);
+  assert.equal(await targetPage.locator("#cursor-click-receipt").textContent(),"TRUSTED TAB CLICK");
+  assert.equal((await apiPage.evaluate(()=>chrome.tabs.query({active:true,currentWindow:true})))[0].url,source+"/human");
+  // Agent must yield immediately when the human foregrounds their Agent-created tab.
+  await targetPage.bringToFront();
+  let foregroundDenied=false;
+  try{await call(owner,"cursor_click",{uid:cursorUid("Expand details")});}
+  catch(e){foregroundDenied=/AGENT_TAB_FOREGROUND_NEEDS_HUMAN/.test(e.message);}
+  assert.equal(foregroundDenied,true,"human-foreground Agent tab cannot be auto-clicked");
+  await human.bringToFront();
+  // An overlapping element appearing after the snapshot must invalidate clicks.
+  await targetPage.evaluate(()=>{
+    const r=document.querySelector("#safe-click").getBoundingClientRect();
+    const overlay=document.createElement("div");
+    overlay.id="owl-test-occluder";
+    Object.assign(overlay.style,{position:"fixed",left:r.left+"px",top:r.top+"px",
+      width:r.width+"px",height:r.height+"px",zIndex:"99999",background:"#999"});
+    document.documentElement.append(overlay);
+  });
+  let occludedDenied=false;
+  try{await call(owner,"cursor_click",{uid:cursorUid("Expand details")});}
+  catch(e){occludedDenied=/CURSOR_TARGET_OCCLUDED/.test(e.message);}
+  assert.equal(occludedDenied,true,"covered controls cannot receive blind clicks");
+  await targetPage.evaluate(()=>document.querySelector("#owl-test-occluder").remove());
+  const hidden=await call(owner,"cursor_hide");
+  assert.equal(hidden.visible,false);
+  assert.equal(await targetPage.locator('[data-owl-lab-agent-cursor-host="true"]').count(),0);
   const fileDropSnapshot=await call(owner,"snapshot");
   const dropUid=fileDropSnapshot.snapshot.controls.find(x=>x.label==="File drop target")?.uid;
   assert.ok(dropUid,"file drop target must exist in Agent snapshot");
@@ -251,7 +308,7 @@ try{
   assert.equal((await call(owner,"tabs")).tabs.length,0);
   console.log(JSON.stringify({ok:true,isolatedChromium:true,nativeMV3:true,ownedAgentTabs:true,
     actualChromeDownload:true,downloadIdempotent:true,ownerIsolation:true,hiddenFileSelection:true,
-    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2TrustedFrameworkInsert:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,p2TextPaste:true,p2DragDrop:true,p2DeniedSensitiveAndInert:true,p2FileDropWithTicket:true,p2FileDropServerReceipt:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
+    crossOriginDownloadUpload:true,p2PlainTextEdit:true,p2FrameworkRefusal:true,p2TrustedFrameworkInsert:true,p3VirtualCursor:true,p3TrustedTabClick:true,p3SensitiveClickDenied:true,p3ForegroundYield:true,p3OcclusionGuard:true,p3SystemPointerUnchanged:true,p2OpenShadowFillAndEdit:true,p2ClosedShadowExcluded:true,p2CrossOriginFrameExcluded:true,p2TextPaste:true,p2DragDrop:true,p2DeniedSensitiveAndInert:true,p2FileDropWithTicket:true,p2FileDropServerReceipt:true,actualServerReceipt:true,uiReceiptNotServerProof:true,
     humanForegroundPreserved:true,privateArtifactsNotExposedToMCP:true}));
 }finally{
   await browser?.close().catch(()=>{});

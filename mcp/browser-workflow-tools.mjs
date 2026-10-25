@@ -1,6 +1,20 @@
 // Register P1 browser workflow tools with the same session owner checks as
 // existing OWL browser_agent_* tools. Do not expose the private download path.
 export function registerBrowserWorkflowTools({tool,server,z,trustedUserChrome}) {
+  tool(server,"browser_agent_cursor_move",
+    "Show and move an OWL Agent-only visual cursor to one observed UID in the Agent-owned inactive Chrome tab. Sends tab-scoped pointer movement, never controls the OS pointer, foreground tab or user Chrome tabs.",
+    {uid:z.string().min(1).max(100)},
+    {title:"Move Agent's Tab Cursor",readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async({uid})=>{const{bridge,owner}=trustedUserChrome();return bridge.cursorMove(owner,uid);});
+  tool(server,"browser_agent_cursor_click",
+    "Click a previously observed safe link or benign button using Chrome trusted mouse events inside the Agent-owned background tab. Other tabs and the human's OS pointer/focus remain untouched. Submits/payment/security/file pickers need a human; a dispatched click never guarantees site persistence.",
+    {uid:z.string().min(1).max(100)},
+    {title:"Click With Agent's Tab Cursor",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({uid})=>{const{bridge,owner}=trustedUserChrome();return bridge.cursorClick(owner,uid);});
+  tool(server,"browser_agent_cursor_hide",
+    "Remove OWL Agent's local cursor overlay from its own selected browser tab. Does not touch user pointer or session.",
+    {},{title:"Hide Agent's Tab Cursor",readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>{const{bridge,owner}=trustedUserChrome();return bridge.cursorHide(owner);});
   tool(server,"browser_agent_p2_capabilities",
     "Read P2 DOM capability counts only in this Agent-owned tab; cross-origin frames and OS rights are not granted.",
     {},{title:"Inspect Agent Page Capabilities",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},

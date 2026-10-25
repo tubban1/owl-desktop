@@ -4,6 +4,7 @@ import {inspectP2Capabilities} from "./p2-capabilities.mjs";
 import {pastePlainText,dragDropWithinPage} from "./p2-interactions.mjs";
 import {locateAgentFileDropZone,checkAgentFileDropZone} from "./file-drop-zone.mjs";
 import {prepareAgentRichEditor,checkAgentRichEditor} from "./rich-editor.mjs";
+import {locateVirtualCursorTarget,showVirtualCursor,hideVirtualCursor} from "./virtual-cursor.mjs";
 
 // Only tabs created through this executor can be accessed by an OWL Agent.
 // The store is chrome.storage.session: survives service-worker suspension,
@@ -254,6 +255,56 @@ export function createNativeAgentExecutor(chrome,storage){
         websiteUploadVerified:false,systemPointerMoved:false,foregroundUnchanged:true,
         state:observed?.domChanged?"ui_observed":"dispatched_unconfirmed"};
     }
+    if(op==="cursor_move"||op==="cursor_click"){
+      if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid))
+        throw Error("CURSOR_UID_INVALID");
+      // A personal Chrome foreground tab is not an autonomous target,
+      // even when the Agent originally created it: hand it to its human.
+      if(tab.active)throw Error("AGENT_TAB_FOREGROUND_NEEDS_HUMAN");
+      const origin=urlOrigin(tab.url);
+      if(!origin)throw Error("CURSOR_UNSAFE_ORIGIN");
+      const click=op==="cursor_click";
+      const zone=await inject(tabId,locateVirtualCursorTarget,
+        [args.uid,origin,click?"click":"move"]);
+      if(zone?.error)throw Error(zone.error);
+      if(!zone?.valid)throw Error("CURSOR_TARGET_NOT_AVAILABLE");
+      // Overlay is page-local and pointer-events:none. It is not the
+      // actual OS cursor; browser input goes to this tab only.
+      const target={tabId};
+      await chrome.debugger.attach(target,"1.3");
+      let dispatched=false;
+      try{
+        const latest=await chrome.tabs.get(tabId);
+        if(latest.active||urlOrigin(latest.url)!==origin)
+          throw Error("CURSOR_PAGE_OR_FOCUS_CHANGED");
+        await inject(tabId,showVirtualCursor,[zone.x,zone.y,click?"click":"move"]);
+        await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+          type:"mouseMoved",x:zone.x,y:zone.y});
+        if(click){
+          // Re-check immediately before the state-changing event.
+          const repeat=await inject(tabId,locateVirtualCursorTarget,[args.uid,origin,"click"]);
+          if(repeat?.error||!repeat?.valid||
+             Math.abs(repeat.x-zone.x)>3||Math.abs(repeat.y-zone.y)>3)
+            throw Error(repeat?.error||"CURSOR_TARGET_MOVED");
+          await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+            type:"mousePressed",x:zone.x,y:zone.y,button:"left",clickCount:1});
+          await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+            type:"mouseReleased",x:zone.x,y:zone.y,button:"left",clickCount:1});
+        }
+        dispatched=true;
+      }finally{
+        await chrome.debugger.detach(target).catch(()=>{});
+      }
+      return {pageId:tabId,uid:args.uid,x:zone.x,y:zone.y,
+        ...(click?{clicked:dispatched,websitePersisted:false}:{moved:dispatched}),
+        cursorVisible:true,tabLocal:true,foregroundUnchanged:true,
+        osPointerMoved:false,systemMouseUsed:false,
+        inputMethod:"tab_scoped_chrome_debugger"};
+    }
+    if(op==="cursor_hide"){
+      const result=await inject(tabId,hideVirtualCursor);
+      return {pageId:tabId,...result,foregroundUnchanged:true,tabLocal:true};
+    }
     if(op==="snapshot"){
       const result=await inject(tabId,inspect);
       return {pageId:tabId,snapshot:result};
@@ -292,8 +343,10 @@ export function createNativeAgentExecutor(chrome,storage){
     }
     if(op==="click"){
       if(typeof args.uid!=="string"||args.uid.length>100)throw Error("CLICK_ARGUMENT_INVALID");
+      // Compatibility: legacy safe-link behavior remains available; the
+      // explicit cursor_click API is recommended for trusted real mouse events.
       const r=await inject(tabId,operate,[args.uid,null,"click"]);
-      return {pageId:tabId,...r};
+      return {pageId:tabId,...r,osPointerMoved:false,method:"dom_click_legacy"};
     }
     if(op==="screenshot"){
       const target={tabId};
