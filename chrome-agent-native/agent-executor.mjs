@@ -205,7 +205,7 @@ export function createNativeAgentExecutor(chrome,storage){
     }
     if(op==="form_set"){
       const origin=urlOrigin(tab.url);
-      if(!origin||typeof args.uid!=="string"||!/^owl-agent-\\d{1,3}$/.test(args.uid))
+      if(!origin||typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid))
         throw Error("FORM_FIELD_INVALID");
       const response=await inject(tabId,executeFormAction,["set",{uid:args.uid,origin,change:args.change}]);
       if(response?.error)throw Error(response.error);
@@ -213,14 +213,14 @@ export function createNativeAgentExecutor(chrome,storage){
     }
     if(op==="form_review"){
       if(typeof args.pageUrl!=="string"||args.pageUrl!==tab.url||
-         !/^owl-agent-\\d{1,3}$/.test(args.submitUid||""))
+         !/^owl-agent-\d{1,3}$/.test(args.submitUid||""))
         throw Error("FORM_REVIEW_PAGE_OR_CONTROL_MISMATCH");
       return {pageId:tabId,...await inject(tabId,executeFormAction,
         ["review",{origin:urlOrigin(tab.url),pageUrl:args.pageUrl,submitUid:args.submitUid}])};
     }
     if(op==="form_submit"){
       if(typeof args.pageUrl!=="string"||args.pageUrl!==tab.url||
-         !/^owl-agent-\\d{1,3}$/.test(args.submitUid||""))
+         !/^owl-agent-\d{1,3}$/.test(args.submitUid||""))
         throw Error("FORM_SUBMIT_PAGE_OR_CONTROL_MISMATCH");
       const response=await inject(tabId,executeFormAction,["submit",{origin:urlOrigin(tab.url),
         pageUrl:args.pageUrl,submitUid:args.submitUid,salary:args.salary,
