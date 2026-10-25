@@ -107,8 +107,9 @@ function fakeExtension({emptyInputAfterUpload=false}={}) {
   const chrome={
     storage:{session:{get:async k=>({[k]:storage[k]}),set:async x=>Object.assign(storage,x)}},
     tabs:{
-      create:async()=>({id:77,url:SITE+"/upload",windowId:1}),
-      get:async(id)=>({id,url:SITE+"/upload",windowId:1}),
+      create:async()=>({id:77,url:SITE+"/upload",active:false,windowId:1}),
+      query:async()=>[],
+      get:async(id)=>({id,url:SITE+"/upload",active:false,windowId:1}),
       remove:async()=>{}
     },
     scripting:{executeScript:async({func,args})=>{

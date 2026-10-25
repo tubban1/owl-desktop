@@ -1968,7 +1968,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
   }
   tool(
     server,"browser_agent_open",
-    "DEFAULT BROWSER MODE: Open a background tab inside the user's ALREADY RUNNING, normally signed-in Google Chrome (not a separate headless browser). Reuses Chrome login state. Does not use Chrome Companion or pairing codes; The OWL LAB Native Messaging extension requires a one-time Chrome install/site permission, but no 9222 remote debugging or per-session pairing. Do not disturb unrelated personal tabs. If the extension is missing, direct the user to install OWL Agent Browser and its native host. For human CAPTCHA or login use browser_agent_focus_login.",
+    "DEFAULT BROWSER MODE: Use the user's existing signed-in Chrome via Native Messaging (no headless or TCP/9222). Reuse an existing inactive tab only when its complete URL matches the requested URL exactly; otherwise open a new background tab. Never take over unrelated or foreign-Agent tabs. Routine controls work in foreground and background after Session selection; sensitive/destructive actions remain human-gated. Reused human tabs are released, not closed. For CAPTCHA/SSO use browser_agent_focus_login.",
     {url:z.string().url(),wait_until:z.enum(["load","domcontentloaded","networkidle"]).optional(),headless:z.boolean().optional()},
     {title:"Open Background Tab in My Chrome",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
     async({url,headless})=>{
@@ -1979,7 +1979,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
   );
   tool(
     server,"browser_agent_tabs",
-    "List only Chrome tabs created by this OWL Agent Session; existing human/other-Agent tabs are never exposed.",
+    "List tabs owned by this OWL Agent Session, including exact-URL matching inactive tabs explicitly adopted through browser_agent_open. Other Sessions' tabs remain private.",
     {},{title:"My Agent Chrome Tabs",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     async()=>{const{bridge,owner}=trustedUserChrome();return bridge.tabs(owner);}
   );
@@ -2005,7 +2005,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
   );
   tool(
     server,"browser_agent_click",
-    "Default trusted OWL Agent virtual-cursor click in the Agent-owned background Chrome tab. Never moves the system mouse or activates a human tab; dangerous actions, file dialogs and covered controls are refused.",
+    "Trusted OWL Agent virtual-cursor click on the selected Session tab in foreground or background. Never moves system mouse or changes tab focus; destructive actions, native file dialogs and covered controls are refused.",
     {uid:z.string().min(1).max(180)},
     {title:"Click My Chrome Tab",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async({uid})=>{const{bridge,owner}=trustedUserChrome();return bridge.click(owner,uid);}

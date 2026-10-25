@@ -155,8 +155,9 @@ describe("OWL MCP compatibility surface", () => {
     const browserOpen = listed.tools.find((tool) => tool.name === "browser_open");
     expect(browserOpen?.description).toContain("OPTIONAL isolated managed browser");
     const agentOpen = listed.tools.find(tool => tool.name === "browser_agent_open");
-    expect(agentOpen?.description).toContain("ALREADY RUNNING");
-    expect(agentOpen?.description).toContain("normally signed-in Google Chrome");
+    expect(agentOpen?.description).toContain("existing signed-in Chrome");
+    expect(agentOpen?.description).toContain("Reuse an existing inactive tab");
+    expect(agentOpen?.description).toContain("foreground and background");
     expect(browserOpen?.description).toContain("DEFAULT user Chrome");
     expect(browserOpen?.description).toContain("Never switch global headless mode");
     const useTab = listed.tools.find((tool) => tool.name === "browser_use_tab");

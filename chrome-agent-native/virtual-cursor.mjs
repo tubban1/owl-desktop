@@ -17,7 +17,7 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
   if(!el)return {error:"AGENT_SNAPSHOT_STALE"};
   const style=getComputedStyle(el);
   let r=el.getBoundingClientRect();
-  // Scroll only this owned background tab to the observed target. Never
+  // Scroll only this selected Session tab to the observed target. Never
   // scroll a human tab or click a consequential control as a fallback.
   if(r.width>=4 && r.height>=4 &&
      (r.bottom<=0||r.right<=0||r.left>=innerWidth||r.top>=innerHeight)){

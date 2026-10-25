@@ -25,3 +25,10 @@ Default **browser_agent_*** tools now control background tabs created by OWL in 
 ## Tests
 
 `npx vitest run tests/native-messaging-bridge.test.mjs` tests message framing, private bearer authentication, strict owner and tab validation, screenshots, lifecycle and isolation. It does **not** replace acceptance testing with an installed extension in your actual Chrome. Do not claim production readiness before that acceptance has been completed.
+
+## Tab reuse and foreground actions (2026-10-25)
+
+- browser_agent_open(url) reuses an existing **inactive**, non-pinned, non-incognito tab only if its **complete URL matches**, including path, query and fragment. It does not take over tabs owned by another Agent Session. Otherwise it creates a new background tab. Reopening an already-owned target reuses that Session tab.
+- A tab that the Agent selected and owns may be operated after the user brings it to the **foreground**. Safe virtual-cursor clicks no longer require tab.active=false. They do not activate/focus tabs or move the shared OS pointer. Sensitive actions remain subject to the same restrictions in either state.
+- An already-open user tab adopted by exact URL is **released, not closed**, on browser_agent_close_tab. A new Agent-created tab is closed. Navigating an adopted tab to a different origin blocks subsequent Agent actions until release.
+- Reload the installed Chrome extension after updating extension source. Unit tests are not an assertion of production acceptance.
