@@ -10,6 +10,7 @@ import { assessConnectivityRecovery } from "./services/connectivity-recovery-res
 import { DesktopStore } from "./store.mjs";
 import { UsageStatisticsStore } from "./services/usage-statistics-store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
+import { startWindowsDevRuntime, stopWindowsDevRuntime } from "./services/windows-dev-runtime.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
 import { LocalRuntimeBootstrap } from "./services/local-runtime-bootstrap.mjs";
@@ -3184,10 +3185,19 @@ if (packagedConnectivityHostSoakOnly) {
     }
   });
 
+  app.on("before-quit",stopWindowsDevRuntime);
   app.whenReady().then(async () => {
     usageStatistics = new UsageStatisticsStore({ file: path.join(app.getPath("userData"), "usage-statistics-v1.json") });
     for (const entry of [...activity].reverse()) usageStatistics.ingest(entry);
     store = new DesktopStore();
+    // Windows development only. Production uses the signed Runtime Host
+    // lifecycle and never starts a runtime from a developer path.
+    if (!app.isPackaged) {
+      await startWindowsDevRuntime({
+        store,
+        baseUrl: store.getSettings().runtimeBaseUrl
+      });
+    }
     if (app.isPackaged) {
       const token = connectivityHostControlToken({ create: true });
       setExternalConnectionHost({

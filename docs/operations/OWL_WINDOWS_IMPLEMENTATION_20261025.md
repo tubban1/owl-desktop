@@ -21,3 +21,16 @@
 3. Windows Explorer native file picker and GUI automation require the actual Windows Helper and human takeover/resume testing. Isolated Chromium tests only cover browser-level control.
 4. Fix remaining Windows full-suite failures, add Windows CI, and validate Cloud account/device enrollment and durable MCP.
 5. Preserve the old Windows Computer MCP until Windows OWL LAB passes all gates.
+
+
+## Explicit Windows development Runtime startup (authorization remains enforced)
+
+For developer checkouts only, OWL_WIN_DEV_MANAGE_RUNTIME=true opts the normal Electron Desktop main process into supervising a pinned local Node Runtime. OWL_WIN_DEV_RUNTIME_ROOT points to an already-built pinned Runtime directory; OWL_WIN_DEV_RUNTIME_PUBLIC_KEY points to the trusted Cloud public lease verification key. There is no private key in the client, and there must be no port 8788 listener when startup begins. Desktop obtains the existing local API credential from its same-process encrypted store, never writes a plaintext copy, and launches the Runtime with OWL_RUNTIME_ACCESS_MODE=enforced and all mutating/GUI permissions off. Shutdown terminates only its own child. This fallback cannot run from a packaged OWL Desktop release.
+
+Test evidence on 2026-10-25: Windows Cloud returned canRun=true and a signed runtime Lease; manually launched Runtime rejected it with RUNTIME_ACCESS_LEASE_KEY_MISSING. With the Mac-tested public Cloud verification key configured in the new Windows Desktop-owned Runtime, the persisted Runtime state became READY, reason AUTHORIZED_CLOUD_SIGNED_LEASE, and signatureVerified=true. It is not equivalent to a signed Windows Helper/Runtime Host/OTA installer or Cloud MCP remote acceptance.
+
+### Starting after a developer machine reboot
+
+From Windows with a pinned Runtime build and the approved Cloud public lease verifier already present, run npm run dev:windows in the isolated owl-desktop checkout. The Windows PowerShell launcher fails clearly if either component is missing. Unlike a manual node server start, this uses the same Electron Desktop encrypted store, so the API credential is never exported to a shell script or saved as plaintext.
+
+The Runtime child is supervised only for this Desktop development process; closing Desktop terminates its owned child. The Cloud lease continues to be verified by the genuine public signing key and the Runtime remains in enforced mode. Do not treat this as a durable Cloud tunnel / Windows OS Helper production install.
