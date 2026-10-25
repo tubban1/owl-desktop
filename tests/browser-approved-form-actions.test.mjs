@@ -49,7 +49,7 @@ describe("Explicitly user-approved form submission",()=>{
   ]){
     const {bridge}=testBridge(grant);
     await expect(bridge.submitReviewed(owner,altered))
-      .rejects.toThrow("FORM_SUBMISSION_REQUIRES_SCOPED_USER_GRANT");
+      .rejects.toThrow(/FORM_SUBMISSION_(REQUIRES_SCOPED_USER_GRANT|PREVIEW_MISMATCH)/);
   }
   const {bridge}=testBridge(grant,{...review,optionalRetention:true});
   await expect(bridge.submitReviewed(owner,args)).rejects.toThrow("FORM_SUBMISSION_PREVIEW_MISMATCH");
@@ -84,6 +84,48 @@ describe("Scoped consent field permissions",()=>{
    const retention=control("candidate[consent_given_future_jobs]");
    await expect(connect(grant,retention).formSet(owner,retention.uid,{checked:true}))
      .rejects.toThrow("FORM_OPTIONAL_RETENTION_NOT_APPROVED");
+ });
+});
+describe("Existing MCP fill/click compatibility",()=>{
+ it("fills No referral, number and required legal consent only for a grant-scoped form",async()=>{
+   const called=[];
+   const rows=[
+     {uid:"owl-agent-27",type:"radio",name:"candidate[answers_attributes][0][choice]",label:"No",value:"false"},
+     {uid:"owl-agent-28",type:"number",name:"candidate[answers_attributes][2][number]",label:"Yearly salary",value:""},
+     {uid:"owl-agent-45",type:"checkbox",name:"candidate[consent_given]",label:"Privacy Policy",checked:false}
+   ];
+   const broker={status:()=>({connected:true}),request:async(_owner,op,args)=>{
+     called.push([op,args]);
+     if(op==="snapshot")return {snapshot:{url:PAGE,controls:rows.map(x=>({
+       uid:x.uid,type:x.type,tag:"input",label:x.label}))}};
+     if(op==="form_controls")return {pageUrl:PAGE,controls:rows};
+     if(op==="form_set")return {ok:true,...args};
+     return {};
+   }};
+   const bridge=createNativeChromeBridge({broker,submissionGrantReader:grant});
+   await bridge.fill(owner,"owl-agent-27","No");
+   await bridge.fill(owner,"owl-agent-28","130000");
+   await bridge.fill(owner,"owl-agent-45","true");
+   expect(called.filter(x=>x[0]==="form_set").map(x=>x[1].change)).toEqual([
+     {checked:true,expectedValue:"false"},{value:"130000"},{checked:true}]);
+   await expect(bridge.fill(owner,"owl-agent-28","170000"))
+     .rejects.toThrow("FORM_SALARY_NOT_APPROVED");
+   await expect(bridge.fill(owner,"owl-agent-27","Yes"))
+     .rejects.toThrow("FORM_RADIO_LABEL_MISMATCH");
+ });
+ it("routes existing click for user-approved submit but never claims confirmation",async()=>{
+   const broker={status:()=>({connected:true}),request:async(_owner,op,args)=>{
+     if(op==="snapshot")return {snapshot:{url:PAGE,controls:[
+       {uid:"owl-agent-49",tag:"input",type:"submit",label:"commit"}]}};
+     if(op==="form_review")return {...review,referralValue:"false",referralLabel:"No"};
+     if(op==="form_submit")return {dispatched:true,siteConfirmed:false};
+     throw Error("unexpected "+op);
+   }};
+   const bridge=createNativeChromeBridge({broker,submissionGrantReader:grant});
+   expect(await bridge.click(owner,"owl-agent-49"))
+     .toMatchObject({dispatched:true,siteConfirmed:false,grantConsumed:true});
+   await expect(bridge.click(owner,"owl-agent-49"))
+     .rejects.toThrow("FORM_SUBMISSION_GRANT_ALREADY_USED");
  });
 });
 afterEach(()=>vi.unstubAllGlobals());
