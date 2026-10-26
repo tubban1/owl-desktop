@@ -133,3 +133,69 @@ Background Host will remove this user-visible coupling.
 service identity, secure service credentials, independent Runtime/MCP/Tunnel,
 authenticated Desktop attach, and real locked/logoff/reboot acceptance. The
 user-session guardian cannot run through actual sign-out or hibernation.
+
+
+## Phase 2 core implementation: staged SCM host (2026-10-26)
+
+The SCM-compatible source implementation is now in:
+
+- \`scripts/windows/OwlBackgroundHostService.cs\` — a Windows
+  \`ServiceBase\` wrapper. It launches an independent Node supervisor as a
+  service child, assigns it to a Windows Job Object configured with
+  \`KILL_ON_JOB_CLOSE\`, and returns failure to SCM if the worker exits
+  unexpectedly. The service itself never touches a Chrome/Desktop session.
+- \`scripts/windows/background-host-supervisor.mjs\` — validates non-secret
+  configuration and a fresh service credential set, refuses any owned-port
+  conflict, and starts strictly scoped processes in Runtime → MCP → official
+  Tunnel order. It supervises their health with bounded restarts and
+  idempotent ownership; it never adopts/terminates a foreign PID.
+- \`scripts/windows/install-background-host.ps1\` — an **administrator-only**
+  opt-in staging/provision/install/revoke workflow with a read-only Check
+  mode. It never changes existing DEV/Desktop or Guardian in Check/Build/Stage
+  mode. It refuses service installation while any of 8788/8790/18081 are
+  already bound or while the user-session Guardian is running.
+
+### Security boundary
+
+Only dedicated service credentials are accepted. \`OwlBackgroundHostService\`
+reads three independently provisioned values through administrator-controlled
+standard input, encrypts them using **DPAPI LocalMachine**, and protects the
+ciphertext with NTFS ACLs limited to LocalService, SYSTEM and Administrators.
+No plaintext credentials are written to the repository or command line.
+Do **not** pass the interactive user's Electron safeStorage token or Windows
+DPAPI CurrentUser blob directly to this service; the service account cannot
+decrypt that user's blob. Service credentials must be separately authorized
+and rotated/revoked through an approved flow.
+
+Stage the Runtime, MCP app (including runtime dependencies), official Tunnel
+binary, trust public key and durable state under the protected
+\`%ProgramData%\\OWL LAB\\BackgroundHost\` tree. The installer will refuse
+execution from a user's profile directory and Node independently checks that
+component paths remain inside this protected root. Only the service's state
+directory receives LocalService write permission. Service runtime tools start
+with \`ALLOW_WRITE/SHELL/DELETE/GIT_PUSH/GUI/BROWSER/ROLLBACK=false\`; GUI and
+Chrome Native Messaging remain in the interactive user's process.
+
+### Not yet installed or accepted
+
+The actual Windows machine is not running this SCM Host yet. The connected
+Windows user \`i95i\` does not have an elevated administrator token. The
+currently running user Guardian, DEV Runtime/MCP and direct Tunnel must
+continue serving ChatGPT until a coordinated, administrator-approved cutover.
+Do not run a service installer silently and do not stop the existing tunnel.
+The new service requires protected service-specific credential provisioning
+and fully staged production code under ProgramData before installation.
+
+The initial SCM service has no authenticated Desktop ↔ Host attachment
+channel yet, and does not offer user-session Chrome, file picker, clipboard or
+mouse actions. This requires a separately tested authenticated local IPC
+bridge. Real sign-out and reboot-before-login acceptance are also pending;
+only then may \`persistentAfterSignOut\` change from \`NOT_VERIFIED\`.
+
+Verification gates: Windows non-admin C# compilation, PowerShell syntax and
+read-only Check; Node configuration/least privilege and supervision unit tests;
+full Mac and Windows regression. Further physical acceptance must include
+SCM Start/Stop/Crash, service credential rotation, OS sign-out, system reboot
+without interactive login, stale/foreign port conflicts, offline/online
+reconnect and zero duplicate task execution. Preserve the legacy Computer
+MCP tunnel throughout.
