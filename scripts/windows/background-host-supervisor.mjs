@@ -226,7 +226,12 @@ if(direct){
       process.stdout.write("BACKGROUND_CONFIG_VALID\n");
     }else await runBackgroundHost(c,{signal:controller.signal});
   }catch(error){
-    log("startup_failed");
+    // --check-config is a non-secret diagnostic. Expose only known internal
+    // config failure codes, never a raw OS/JSON exception, path or credential.
+    const diagnostic=process.argv.includes("--check-config")&&
+      /^BACKGROUND_[A-Z0-9_]+$/.test(error?.message||"")
+      ?error.message:"host";
+    log("startup_failed",diagnostic);
     process.exitCode=1;
   }
 }

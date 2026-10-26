@@ -165,6 +165,23 @@ describe("Windows non-interactive Background Host service contract",()=>{
   expect(installer).toContain("return 'Restricted'");
   expect(installer).toContain("Assert-Admin");
  });
+ it("passes the protected non-secret config path into the scoped Node validation environment",async()=>{
+  const installer=await readFile(new URL("../scripts/windows/install-background-host.ps1",import.meta.url),"utf8");
+  const validation=installer.slice(
+    installer.indexOf("function Assert-Staged {"),
+    installer.indexOf("function Restrict-Folder {"));
+  expect(validation).toContain("[Environment]::SetEnvironmentVariable('OWL_BACKGROUND_CONFIG_PATH',$cfg,'Process')");
+  expect(validation).toContain("[Environment]::GetEnvironmentVariable('OWL_BACKGROUND_CONFIG_PATH','Process')");
+  expect(validation).toContain("[Environment]::SetEnvironmentVariable('OWL_BACKGROUND_CONFIG_PATH',$previousConfigPath,'Process')");
+  expect(validation).toContain("--check-config");
+  expect(validation).toContain("finally {");
+  expect(validation).toContain("$validationExit=$LASTEXITCODE");
+  expect(validation).not.toContain("Start-Service");
+  const supervisor=await readFile(new URL("../scripts/windows/background-host-supervisor.mjs",import.meta.url),"utf8");
+  expect(supervisor).toContain("process.env.OWL_BACKGROUND_CONFIG_PATH");
+  expect(supervisor).toContain("BACKGROUND_CONFIG_PATH_REQUIRED");
+  expect(supervisor).toContain('log("startup_failed",diagnostic)');
+ });
  it("requires administrator provisioning and hardcoded Windows SCM isolation",async()=>{
   const csharp=await readFile(new URL("../scripts/windows/OwlBackgroundHostService.cs",import.meta.url),"utf8");
   const script=await readFile(new URL("../scripts/windows/install-background-host.ps1",import.meta.url),"utf8");
