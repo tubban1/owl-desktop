@@ -105,7 +105,11 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
       }
       return formSetApproved(owner,uid,change);
     }
-    return req(owner,"fill",{uid,value});
+    const result=await req(owner,"fill",{uid,value});
+    // A previous extension returned only {pageId} when an unsupported
+    // custom field could not be filled. Never reinterpret this as success.
+    if(result?.filled!==true)throw Error("BROWSER_FILL_NOT_CONFIRMED");
+    return {...result,domVerified:result.domVerified===true,websitePersisted:false};
   }
   async function compatibleClick(owner,uid){
     const snap=await req(owner,"snapshot");
