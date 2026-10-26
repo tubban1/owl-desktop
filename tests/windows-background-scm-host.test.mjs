@@ -182,6 +182,26 @@ describe("Windows non-interactive Background Host service contract",()=>{
   expect(supervisor).toContain("BACKGROUND_CONFIG_PATH_REQUIRED");
   expect(supervisor).toContain('log("startup_failed",diagnostic)');
  });
+ it("supports local operator Cloud credential enrollment without remotely unlocking DPAPI",async()=>{
+  const installer=await readFile(new URL("../scripts/windows/install-background-host.ps1",import.meta.url),"utf8");
+  expect(installer).toContain("'ProvisionCloudApproved'");
+  const action=installer.slice(installer.indexOf("if($Mode -eq 'ProvisionCloudApproved'){"),
+    installer.indexOf("if($Mode -eq 'Install'){"));
+  for(const term of ["Assert-Staged","Secure-Prompt","RandomNumberGenerator",
+    "GetBytes($randomA)","GetBytes($randomB)","DataProtectionScope]::LocalMachine",
+    "BACKGROUND_PROVISION_CREDENTIAL_ALREADY_PRESENT","BACKGROUND_PROVISION_TUNNEL_IDENTITY_INVALID",
+    "icacls.exe $tmp","Move-Item -LiteralPath $tmp -Destination $secrets",
+    "BACKGROUND_SERVICE_CREDENTIALS_PROVISIONED_BY_LOCAL_OPERATOR",
+    "BACKGROUND_EXISTING_DEV_TUNNEL_UNCHANGED"])
+      expect(action).toContain(term);
+  for(const forbidden of ["ProtectedData]::Unprotect","DataProtectionScope]::CurrentUser",
+    "ReadAllBytes($legacyKey)","Start-Service","Stop-Service","sc.exe create",
+    "Stop-ScheduledTask","Remove-Item -LiteralPath $legacyKey"])
+      expect(action).not.toContain(forbidden);
+  expect(action).not.toContain("Console.WriteLine($tunnelKey)");
+  expect(action).not.toContain("Write-Output $tunnelKey");
+  expect(action).toContain("if(-not $completed -and (Test-Path -LiteralPath $tmp -PathType Leaf))");
+ });
  it("requires administrator provisioning and hardcoded Windows SCM isolation",async()=>{
   const csharp=await readFile(new URL("../scripts/windows/OwlBackgroundHostService.cs",import.meta.url),"utf8");
   const script=await readFile(new URL("../scripts/windows/install-background-host.ps1",import.meta.url),"utf8");
