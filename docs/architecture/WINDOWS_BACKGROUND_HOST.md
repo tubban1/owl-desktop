@@ -199,3 +199,17 @@ SCM Start/Stop/Crash, service credential rotation, OS sign-out, system reboot
 without interactive login, stale/foreign port conflicts, offline/online
 reconnect and zero duplicate task execution. Preserve the legacy Computer
 MCP tunnel throughout.
+
+
+### Service MCP ↔ official Tunnel authorization
+
+The standalone service's MCP uses its own \`OWL_MCP_API_TOKEN\`, and
+\`mcp/http-server.mjs\` requires \`Authorization: Bearer <token>\` for
+MCP and health calls. The official Tunnel *must* pass that token when
+connecting locally. We use the Tunnel CLI's \`--mcp.extra-headers\` and
+\`--mcp.discovery-extra-headers\` with a reference to a service-process
+environment variable, **not a plaintext argument**. Both the MCP and
+Tunnel receive only the scoped credentials they require. This is validated
+against the installed official Tunnel's help surface, but requires a real
+staged service round-trip acceptance before any cutover. Without this,
+the Tunnel will see local MCP 401 even while the service is running.

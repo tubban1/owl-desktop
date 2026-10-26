@@ -101,9 +101,16 @@ export function processSpecification(component,config,serviceEnv){
     args:["run","--control-plane.api-key","env:CONTROL_PLANE_API_KEY",
       "--control-plane.tunnel-id",config.tunnelId,
       "--mcp.server-url","http://127.0.0.1:8790/mcp",
+      // MCP requires a service-specific Bearer token. The official Tunnel
+      // supports env:-backed per-origin headers; never put the token on argv.
+      // Discovery needs the same authorization because /health and OAuth
+      // metadata endpoints may enforce OWL_MCP_API_TOKEN.
+      "--mcp.extra-headers","Authorization: env:OWL_BACKGROUND_MCP_AUTH_HEADER",
+      "--mcp.discovery-extra-headers","Authorization: env:OWL_BACKGROUND_MCP_AUTH_HEADER",
       "--health.listen-addr","127.0.0.1:18081","--log.level","warn"],
     cwd:path.win32.dirname(config.tunnelExe),
-    env:{...base,CONTROL_PLANE_API_KEY:serviceEnv.OWL_BACKGROUND_TUNNEL_KEY}
+    env:{...base,CONTROL_PLANE_API_KEY:serviceEnv.OWL_BACKGROUND_TUNNEL_KEY,
+      OWL_BACKGROUND_MCP_AUTH_HEADER:"Bearer "+serviceEnv.OWL_BACKGROUND_MCP_TOKEN}
   };
   throw Error("BACKGROUND_COMPONENT_UNKNOWN");
 }

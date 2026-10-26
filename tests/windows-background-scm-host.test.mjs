@@ -67,6 +67,11 @@ describe("Windows non-interactive Background Host service contract",()=>{
   expect(mcp.env).not.toHaveProperty("CONTROL_PLANE_API_KEY");
   const tunnel=processSpecification("tunnel",config,env);
   expect(tunnel.args).toContain("http://127.0.0.1:8790/mcp");
+  expect(tunnel.args).toContain("--mcp.extra-headers");
+  expect(tunnel.args).toContain("--mcp.discovery-extra-headers");
+  expect(tunnel.args.filter(v=>v==="Authorization: env:OWL_BACKGROUND_MCP_AUTH_HEADER")).toHaveLength(2);
+  expect(tunnel.env.OWL_BACKGROUND_MCP_AUTH_HEADER).toBe("Bearer "+env.OWL_BACKGROUND_MCP_TOKEN);
+  expect(tunnel.args.join(" ")).not.toContain(env.OWL_BACKGROUND_MCP_TOKEN);
   expect(tunnel.args.join(" ")).not.toContain(env.OWL_BACKGROUND_TUNNEL_KEY);
   expect(tunnel.env.CONTROL_PLANE_API_KEY).toBe(env.OWL_BACKGROUND_TUNNEL_KEY);
   expect(tunnel.env).not.toHaveProperty("OWL_RUNTIME_API_TOKEN");
