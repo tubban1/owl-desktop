@@ -26,8 +26,18 @@ function Assert-Staged {
  foreach($p in @($exe,$cfg,$worker,(Join-Path $root 'node.exe'))){
    if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw 'BACKGROUND_COMPONENT_NOT_STAGED'}
  }
- & (Join-Path $root 'node.exe') $worker --check-config
- if($LASTEXITCODE -ne 0){throw 'BACKGROUND_CONFIG_INVALID'}
+ # Supervisor reads the non-secret JSON path from its process environment.
+ # Keep this scoped to this check; do not permanently mutate the admin shell
+ # or inherit credentials from the interactive Desktop.
+ $previousConfigPath=[Environment]::GetEnvironmentVariable('OWL_BACKGROUND_CONFIG_PATH','Process')
+ try {
+   [Environment]::SetEnvironmentVariable('OWL_BACKGROUND_CONFIG_PATH',$cfg,'Process')
+   & (Join-Path $root 'node.exe') $worker --check-config
+   $validationExit=$LASTEXITCODE
+ } finally {
+   [Environment]::SetEnvironmentVariable('OWL_BACKGROUND_CONFIG_PATH',$previousConfigPath,'Process')
+ }
+ if($validationExit -ne 0){throw 'BACKGROUND_CONFIG_INVALID'}
 }
 function Restrict-Folder {
  & icacls.exe $root '/inheritance:r' '/grant:r' '*S-1-5-19:(OI)(CI)RX' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' | Out-Null
