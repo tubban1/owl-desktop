@@ -111,6 +111,21 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     if(result?.filled!==true)throw Error("BROWSER_FILL_NOT_CONFIRMED");
     return {...result,domVerified:result.domVerified===true,websitePersisted:false};
   }
+  async function compatibleRichEditorInsert(owner,uid,value){
+    try{return await req(owner,"rich_editor_insert",{uid,value});}
+    catch(error){
+      // Some modern controls look like rich editors but render a nested
+      // ordinary input on focus. The native rich-editor adapter explicitly
+      // rejects these. Reuse the verified, credential-safe text adapter
+      // instead of reporting an unhelpful EDITOR_NOT_EDITABLE error.
+      if(!["EDITOR_NOT_EDITABLE","EDITOR_NOT_FRAMEWORK_MANAGED"].includes(
+         String(error?.message||"")))throw error;
+      const filled=await compatibleFill(owner,uid,value);
+      if(filled?.domVerified!==true)throw Error("EDITOR_FALLBACK_DOM_NOT_VERIFIED");
+      return {...filled,edited:true,compatibilityFallback:"trusted_text",
+        websitePersisted:false};
+    }
+  }
   async function compatibleClick(owner,uid){
     const snap=await req(owner,"snapshot");
     const control=snap.snapshot?.controls?.find(x=>x.uid===uid);
@@ -216,12 +231,13 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     use:(owner,pageId)=>req(owner,"use",{pageId}),
     snapshot:owner=>req(owner,"snapshot"),
     fill:compatibleFill,
+    inspectTextControl:(owner,uid)=>req(owner,"text_control_inspect",{uid}),
     formControls:owner=>req(owner,"form_controls"),
     formSet:formSetApproved,
     formReview:(owner,pageUrl,submitUid)=>req(owner,"form_review",{pageUrl,submitUid}),
     submitReviewed,
     editText:(owner,uid,value)=>req(owner,"edit_text",{uid,value}),
-    richEditorInsert:(owner,uid,value)=>req(owner,"rich_editor_insert",{uid,value}),
+    richEditorInsert:compatibleRichEditorInsert,
     pasteText:(owner,uid,text)=>req(owner,"paste_text",{uid,text}),
     dragDrop:(owner,sourceUid,targetUid)=>req(owner,"drag_drop",{sourceUid,targetUid}),
     p2Capabilities:owner=>req(owner,"p2_capabilities"),
