@@ -49,3 +49,44 @@ particularly \`native-messaging-host.mjs\` with its importable shebang.
 Before replacing a running checkout, always perform \`node --check\` of the
 native host and renderer production build. A failed check must **not**
 stop the existing Desktop.
+
+
+## Independent Windows OWL MCP workspace permissions (DEV)
+
+The managed Windows DEV Runtime previously forced all write/Git/shell flags off.
+Users who explicitly authorize agent maintenance of their **DEV workspace**
+can opt in on that Windows account by setting the per-user environment variable
+\`OWL_WIN_DEV_WORKSPACE_ACCESS=true\`. After a controlled restart of the OWL
+Desktop DEV process, the Runtime inherits the flag. The launcher does **not**
+automatically enable this setting for new users, and signed packaged builds do
+not use the Windows DEV Runtime bridge.
+
+With opt-in, \`ALLOW_WRITE=true\` and \`ALLOW_GIT_PUSH=true\` allow native OWL
+Git pull/add/commit/push and file writes under \`ALLOWED_DIRECTORIES\` (the
+Windows \`mcp-workspace\` root). The user keeps their existing Git credentials.
+The Runtime does not grant admin rights, arbitrary roots, browser access or
+desktop input. \`ALLOW_DELETE=false\`, \`ALLOW_ROLLBACK=false\` and
+\`ALLOW_SHELL=false\` remain the defaults even in this profile.
+
+Unlike raw shell, the OWL Action Router's \`shell.exec\`, \`shell.start\`,
+\`shell.input\`, \`shell.kill\`, \`fs.delete\` and \`tx.rollback\` are eligible for
+**one-use, short-lived, signed user-approved scoped capability** with
+\`OWL_APPROVAL_MODE=enforce\`, \`OWL_HUMAN_APPROVAL_ENFORCE=1\` and
+\`OWL_SCOPED_CAPABILITIES=1\`. Shell must remain Ask while Delete is Ask, since
+arbitrary shell could otherwise delete files. Do not set \`ALLOW_SHELL=true\`
+globally. New approval UX in Desktop must provide a verified signed proof; if
+unavailable, these consequential actions correctly remain blocked.
+
+To opt in on **the authorized Windows account only**, from the user's trusted
+local admin/development session:
+
+\`\`\`powershell
+[Environment]::SetEnvironmentVariable('OWL_WIN_DEV_WORKSPACE_ACCESS','true','User')
+\`\`\`
+
+Then restart the managed Windows OWL Desktop DEV process (without stopping its
+separately owned tunnel or the legacy Computer MCP). To revoke, set that
+variable to \`false\` and restart DEV. This setting affects only the Windows
+DEV Runtime, not the Mac or any production Runtime. Inspect \`provider.status\`
+through \`owl mcp win\` after restart: filesystem.write=true, git.push=true,
+shell.enabled=false (Ask via signed scoped action), delete=false.

@@ -2,6 +2,29 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
+// Per-device, explicit local opt-in. Source code alone must never grant remote
+// developers shell or filesystem access. The launcher inherits this setting
+// from the Windows user's environment; packaged releases do not use this bridge.
+export function windowsDevWorkspacePermissions(env=process.env){
+  const enabled=env.OWL_WIN_DEV_WORKSPACE_ACCESS==="true";
+  return {
+    ALLOW_WRITE:enabled?"true":"false",
+    // Raw MCP shell tools cannot enforce a "Delete=Ask" rule. Route shell
+    // through OWL's signed, one-use Action approval/Scoped Capability path.
+    ALLOW_SHELL:"false",
+    ALLOW_GIT_PUSH:enabled?"true":"false",
+    ALLOW_DELETE:"false",
+    ALLOW_ROLLBACK:"false",
+    ...(enabled ? {
+      OWL_APPROVAL_MODE:"enforce",
+      OWL_HUMAN_APPROVAL_ENFORCE:"1",
+      OWL_SCOPED_CAPABILITIES:"1",
+      OWL_SCOPED_ACTION_ALLOWLIST:"shell.exec,shell.start,shell.input,shell.kill,fs.delete,tx.rollback",
+      OWL_APPROVAL_ACTIONS:"fs.delete,tx.rollback,shell.exec,shell.start,shell.input,shell.kill",
+    } : {})
+  };
+}
+
 // Opt-in Windows *development* Runtime bridge. Production must use the signed
 // Runtime Host supervisor; this bridge never grants computer permissions.
 let ownedChild=null;
@@ -55,13 +78,9 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
     PORT:"8788",
     OWL_STATE_ROOT:path.join(path.dirname(canonicalRoot),"owl-runtime-win-state"),
     ALLOWED_DIRECTORIES:path.dirname(canonicalRoot),
-    ALLOW_WRITE:"false",
-    ALLOW_DELETE:"false",
-    ALLOW_SHELL:"false",
+    ...windowsDevWorkspacePermissions(),
     ALLOW_GUI:readOnlyUi ? "true" : "false",
-    ALLOW_BROWSER:"false",
-    ALLOW_GIT_PUSH:"false",
-    ALLOW_ROLLBACK:"false"
+    ALLOW_BROWSER:"false"
   };
   const child=spawn("node.exe",[entry],{
     cwd:canonicalRoot,env,windowsHide:true,shell:false,

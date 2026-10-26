@@ -16,6 +16,13 @@ if(-not (Test-Path -LiteralPath (Join-Path $project "node_modules/electron/dist/
 }
 $env:OWL_LAB_WINDOWS_SMOKE="1"
 $env:OWL_WIN_DEV_MANAGE_RUNTIME="true"
+# Access to the DEV Git workspace is an explicit Windows-user opt-in.
+# DO NOT enable it for production packages or other users automatically.
+# See docs/operations/WINDOWS_DEV_DIRECT_MCP.md.
+if ($env:OWL_WIN_DEV_WORKSPACE_ACCESS -eq "true") {
+  Write-Output "[OWL] Windows DEV workspace Git/write enabled; shell and delete require approval."
+}
+
 # Reuse the Mac native browser bridge on Windows DEV; the actual extension
 # must connect via the registered host before it can control a Chrome tab.
 $env:OWL_WIN_DEV_NATIVE_BROWSER="true"
