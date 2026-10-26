@@ -27,8 +27,49 @@ const urlOrigin=url=>{
 };
 export function createNativeAgentExecutor(chrome,storage){
   const downloads=createAgentDownloadWorkflow(chrome,storage);
-  const read=async()=>({owned:(await storage.get("owlNativeOwned")).owlNativeOwned||{},
-    selected:(await storage.get("owlNativeSelected")).owlNativeSelected||{}});
+  const instanceId=globalThis.crypto?.randomUUID?.()||
+    ("agent-worker-"+Date.now()+"-"+Math.random().toString(36).slice(2));
+  const persistent=chrome.storage?.local;
+  const reloadStateKey="owlNativeReloadCheckpoint";
+  let restored=false;
+  async function restoreAfterReload(){
+    if(restored)return;
+    restored=true;
+    if(!persistent)return;
+    const checkpoint=(await persistent.get(reloadStateKey))[reloadStateKey];
+    if(!checkpoint)return;
+    // One-use, bounded checkpoint. Never leave ownership grants in durable
+    // local storage after restoration, and never trust unrelated stale tabs.
+    await persistent.remove(reloadStateKey);
+    if(!checkpoint||checkpoint.version!==1||
+       !Number.isFinite(checkpoint.expiresAt)||checkpoint.expiresAt<Date.now()||
+       checkpoint.expiresAt>Date.now()+120_000||
+       !checkpoint.owned||typeof checkpoint.owned!=="object")return;
+    const active=(await storage.get("owlNativeOwned")).owlNativeOwned;
+    if(active&&Object.keys(active).length)return;
+    const owned={},selected={};
+    for(const [key,binding] of Object.entries(checkpoint.owned).slice(0,120)){
+      const id=Number(key);
+      if(!Number.isSafeInteger(id)||id<0||!binding||
+         typeof binding.owner!=="string"||binding.owner.length<2||
+         binding.owner.length>240)continue;
+      try{
+        const tab=await chrome.tabs.get(id);
+        if(binding.adopted&&urlOrigin(tab.url)!==binding.origin)continue;
+        if(!urlOrigin(tab.url)||tab.incognito)continue;
+        owned[id]=binding;
+      }catch{}
+    }
+    for(const [owner,id] of Object.entries(checkpoint.selected||{})){
+      if(owned[id]?.owner===owner)selected[owner]=id;
+    }
+    await storage.set({owlNativeOwned:owned,owlNativeSelected:selected});
+  }
+  const read=async()=>{
+    await restoreAfterReload();
+    return {owned:(await storage.get("owlNativeOwned")).owlNativeOwned||{},
+      selected:(await storage.get("owlNativeSelected")).owlNativeSelected||{}};
+  };
   const save=async s=>storage.set({owlNativeOwned:s.owned,owlNativeSelected:s.selected});
   async function current(owner,args={},requireSelected=true){
     const state=await read();
@@ -130,6 +171,36 @@ export function createNativeAgentExecutor(chrome,storage){
   }
   async function run({owner,op,args={}}){
     if(typeof owner!=="string"||owner.length<2||owner.length>240)throw Error("NATIVE_OWNER_INVALID");
+    if(op==="extension_info"){
+      await restoreAfterReload();
+      return {
+      instanceId,version:chrome.runtime?.getManifest?.().version||"unknown",
+      selfReloadProtocol:1,source:"owl-native-chrome",canSelfReload:true};
+    }
+    if(op==="extension_prepare_reload"){
+      if(!persistent)throw Error("EXTENSION_PERSISTENT_CHECKPOINT_UNAVAILABLE");
+      if(typeof args?.expectedVersion!=="string"||args.expectedVersion.length>32||
+         !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(args.expectedVersion))
+        throw Error("EXTENSION_EXPECTED_VERSION_INVALID");
+      const currentVersion=chrome.runtime?.getManifest?.().version||"unknown";
+      const rateKey="owlNativeExtensionReloadAt";
+      const last=(await persistent.get(rateKey))[rateKey];
+      if(typeof last==="number"&&last>Date.now()-20_000&&last<=Date.now())
+        throw Error("EXTENSION_RELOAD_RATE_LIMITED");
+      const state=await read();
+      // Explicit version pin prevents silently installing unintended or
+      // partially copied extension code. The new worker will prove version.
+      await persistent.set({
+        [rateKey]:Date.now(),
+        [reloadStateKey]:{
+          version:1,expiresAt:Date.now()+90_000,
+          owned:state.owned,selected:state.selected
+        }
+      });
+      return {reloadPrepared:true,previousInstanceId:instanceId,
+        currentVersion,expectedVersion:args.expectedVersion,
+        ownerTabsPreserved:Object.keys(state.owned).length};
+    }
     if(op==="open"){
       const url=args.url;
       if(typeof url!=="string"||url.length>2048||!urlOrigin(url))throw Error("NATIVE_URL_INVALID");
