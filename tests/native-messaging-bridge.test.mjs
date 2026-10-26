@@ -21,7 +21,10 @@ describe("Chrome native messaging transport",()=>{
   try{
    broker=await startNativeMessagingBroker({port:0,configPath:config,deadlineMs:4000});
    const {port,token}=JSON.parse(await fs.readFile(config,"utf8"));
-   expect((await fs.stat(config)).mode&0o077).toBe(0);
+   // On Windows, Node mode bits do not reflect the NTFS owner-only ACL.
+   // The native-host installer enforces that ACL separately.
+   if(process.platform!=="win32")
+    expect((await fs.stat(config)).mode&0o077).toBe(0);
    const url="http://127.0.0.1:"+port;
    const post=async(p,body={},auth=token)=>{
     const r=await fetch(url+p,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+auth},body:JSON.stringify(body)});

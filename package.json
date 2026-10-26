@@ -53,7 +53,8 @@
     "verify:local-bootstrap-live": "node scripts/verify-local-bootstrap-live.mjs",
     "prepare:runtime-node": "node scripts/prepare-runtime-node-component.mjs",
     "dev:full:status": "node scripts/dev-full-control.mjs status",
-    "dev:full:stop": "node scripts/dev-full-control.mjs stop"
+    "dev:full:stop": "node scripts/dev-full-control.mjs stop",
+    "verify:windows:dev": "node scripts/windows/verify-dev-qa.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
@@ -99,9 +100,18 @@
       "package.json"
     ],
     "extraResources": [
-      {"from":"chrome-agent-native","to":"chrome-agent-native"},
-      {"from":"connection-host/native-messaging-host.mjs","to":"native-messaging/native-messaging-host.mjs"},
-      {"from":"scripts/install-chrome-native-host.mjs","to":"native-messaging/install-chrome-native-host.mjs"},
+      {
+        "from": "chrome-agent-native",
+        "to": "chrome-agent-native"
+      },
+      {
+        "from": "connection-host/native-messaging-host.mjs",
+        "to": "native-messaging/native-messaging-host.mjs"
+      },
+      {
+        "from": "scripts/install-chrome-native-host.mjs",
+        "to": "native-messaging/install-chrome-native-host.mjs"
+      },
       {
         "from": "vendor/owl-runtime",
         "to": "owl-runtime"

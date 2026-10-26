@@ -1,0 +1,3 @@
+# Keep ESM entrypoints LF on Windows. CRLF shebangs are not parsed correctly
+# by the Vitest/Vite transform when native-message hosts are imported in tests.
+*.mjs text eol=lf
