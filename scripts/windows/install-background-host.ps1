@@ -2,11 +2,11 @@
 # This script never installs/restarts anything in Check or Build mode.
 [CmdletBinding()]
 param(
- [ValidateSet('Check','Build','Stage','Provision','Install','Uninstall')]
+ [ValidateSet('Check','Build','Prepare','Stage','Provision','Install','Uninstall')]
  [string]$Mode='Check',
  [string]$RuntimeRoot,[string]$McpRoot,[string]$TunnelExe,
  [string]$PublicKeyFile,[string]$AllowedDirectories,[string]$StateRoot,
- [string]$TunnelId,[switch]$Rotate,[switch]$PurgeCredentials
+ [string]$TunnelId,[string]$DevRepo,[string]$RuntimeRepo,[string]$TunnelDirectory,[string]$PublicKeySource,[switch]$Rotate,[switch]$PurgeCredentials
 )
 $ErrorActionPreference='Stop'
 $name='OwlLabBackgroundHost'
@@ -46,10 +46,18 @@ function Secure-Prompt([string]$message) {
 }
 if($Mode -eq 'Check'){
  $svc=Get-CimInstance Win32_Service -Filter "Name='$name'" -ErrorAction SilentlyContinue
+ # Users are intentionally denied traversal of the protected ProgramData
+ # directory. Check remains read-only and returns 'Restricted' rather than
+ # throwing a misleading access-denied error on non-admin MCP connections.
+ function FileAccess([string]$file){
+   try { return [bool](Test-Path -LiteralPath $file -PathType Leaf -ErrorAction Stop) }
+   catch [System.UnauthorizedAccessException] { return 'Restricted' }
+   catch { return 'Restricted' }
+ }
  [pscustomobject]@{
    service=if($svc){$svc.State}else{'NotInstalled'}
-   staged=[bool](Test-Path -LiteralPath $exe)
-   credentialsPresent=[bool](Test-Path -LiteralPath $secrets)
+   staged=(FileAccess $exe)
+   credentialsPresent=(FileAccess $secrets)
    signOutSurvival='NOT_VERIFIED'
  }|ConvertTo-Json -Compress
  exit 0
@@ -64,6 +72,107 @@ if($Mode -eq 'Build'){
  & $csc /nologo /target:exe /platform:anycpu "/out:$exe" /r:System.ServiceProcess.dll /r:System.Security.dll $source
  if($LASTEXITCODE -ne 0){throw 'BACKGROUND_COMPILE_FAILED'}
  Write-Output 'BACKGROUND_SERVICE_BINARY_BUILT'
+ exit 0
+}
+if($Mode -eq 'Prepare'){
+ # Source-tree snapshot only. Explicit administrator action; NEVER registers,
+ # starts or stops a service or accesses Electron CurrentUser credentials.
+ # The source repo must be a clean main checkout, matching the remote ref.
+ if(-not(Test-Path -LiteralPath $exe -PathType Leaf)){throw 'BACKGROUND_BUILD_FIRST'}
+ foreach($k in @('DevRepo','RuntimeRepo','TunnelDirectory','PublicKeySource')){
+   if(-not(Get-Variable $k -ValueOnly -ErrorAction SilentlyContinue)){throw ('BACKGROUND_PREPARE_MISSING_'+$k)}
+ }
+ $dev=(Resolve-Path -LiteralPath $DevRepo -ErrorAction Stop).ProviderPath
+ $runtime=(Resolve-Path -LiteralPath $RuntimeRepo -ErrorAction Stop).ProviderPath
+ $tunnel=(Resolve-Path -LiteralPath $TunnelDirectory -ErrorAction Stop).ProviderPath
+ $public=(Resolve-Path -LiteralPath $PublicKeySource -ErrorAction Stop).ProviderPath
+ foreach($p in @($dev,$runtime,$tunnel,$public)){
+   if($p.StartsWith(($root+[IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)){
+     throw 'BACKGROUND_PREPARE_SOURCE_INSIDE_DEST'
+   }
+ }
+ $head=(& git -C $dev rev-parse HEAD).Trim()
+ if($LASTEXITCODE -ne 0 -or $head -notmatch '^[a-f0-9]{40}$'){throw 'BACKGROUND_DEV_GIT_HEAD_INVALID'}
+ $main=(& git -C $dev rev-parse origin/main).Trim()
+ if($LASTEXITCODE -ne 0 -or $head -ne $main){throw 'BACKGROUND_DEV_NOT_ON_REMOTE_MAIN'}
+ $dirty=@(& git -C $dev status --porcelain=v1 --untracked-files=normal)
+ if($LASTEXITCODE -ne 0 -or $dirty.Count -gt 0){throw 'BACKGROUND_DEV_GIT_NOT_CLEAN'}
+ if(-not(Test-Path -LiteralPath (Join-Path $runtime 'dist\server.js') -PathType Leaf) -or
+    -not(Test-Path -LiteralPath (Join-Path $runtime 'node_modules') -PathType Container)){
+   throw 'BACKGROUND_RUNTIME_BUILD_OR_DEPENDENCIES_MISSING'
+ }
+ if(-not(Test-Path -LiteralPath (Join-Path $dev 'node_modules') -PathType Container)){
+   throw 'BACKGROUND_MCP_DEPENDENCIES_MISSING'
+ }
+ foreach($p in @((Join-Path $tunnel 'tunnel-client.exe'),(Join-Path $tunnel 'cloudflared.exe'),$public)){
+   if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw 'BACKGROUND_TUNNEL_OR_TRUST_MISSING'}
+ }
+ # Block junctions and symlinks in untrusted source dependency trees:
+ # a recursive copy must never follow a reparse point out of the checkout.
+ foreach($srcRoot in @((Join-Path $dev 'node_modules'),(Join-Path $runtime 'node_modules'),(Join-Path $runtime 'dist'))){
+   $links=@(Get-ChildItem -LiteralPath $srcRoot -Recurse -Force -Attributes ReparsePoint -ErrorAction Stop | Select-Object -First 1)
+   if($links.Count){throw 'BACKGROUND_PREPARE_REPARSE_SOURCE_REFUSED'}
+ }
+ $paths=@{
+   mcp=(Join-Path $root 'mcp-app'); runtime=(Join-Path $root 'runtime')
+   tunnel=(Join-Path $root 'tunnel'); trust=(Join-Path $root 'trust')
+   state=(Join-Path $root 'state'); workspace=(Join-Path $root 'workspace')
+ }
+ foreach($key in $paths.Keys){
+   if(Test-Path -LiteralPath $paths[$key]){throw ('BACKGROUND_PREPARE_DEST_ALREADY_EXISTS_'+$key)}
+ }
+ $created=@()
+ try {
+ foreach($key in $paths.Keys){
+   New-Item -ItemType Directory -Path $paths[$key] -ErrorAction Stop|Out-Null
+   $created+=($paths[$key])
+ }
+ # Only Git-tracked files are copied from the DEV repo. Untracked secrets,
+ # .env, personal Chrome profiles, temp files and .git metadata are omitted.
+ $tracked=@(& git -C $dev ls-files --cached --full-name)
+ if($LASTEXITCODE -ne 0 -or $tracked.Count -lt 40){throw 'BACKGROUND_GIT_FILE_LIST_INVALID'}
+ foreach($rel in $tracked){
+   if($rel -match '(^|/)\.\.(?:/|$)' -or [IO.Path]::IsPathRooted($rel)){throw 'BACKGROUND_UNSAFE_TRACKED_PATH'}
+   $file=Join-Path $dev ($rel.Replace('/',[IO.Path]::DirectorySeparatorChar))
+   if(-not(Test-Path -LiteralPath $file -PathType Leaf)){throw 'BACKGROUND_GIT_TRACKED_FILE_MISSING'}
+   if((Get-Item -LiteralPath $file -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){
+     throw 'BACKGROUND_PREPARE_REPARSE_TRACKED_FILE_REFUSED'
+   }
+   $target=Join-Path $paths.mcp ($rel.Replace('/',[IO.Path]::DirectorySeparatorChar))
+   $dir=Split-Path -Parent $target
+   if(-not(Test-Path -LiteralPath $dir)){New-Item -ItemType Directory -Force -Path $dir|Out-Null}
+   Copy-Item -LiteralPath $file -Destination $target -ErrorAction Stop
+ }
+ Copy-Item -LiteralPath (Join-Path $dev 'node_modules') -Destination (Join-Path $paths.mcp 'node_modules') -Recurse -Force
+ Copy-Item -LiteralPath (Join-Path $runtime 'dist') -Destination (Join-Path $paths.runtime 'dist') -Recurse -Force
+ Copy-Item -LiteralPath (Join-Path $runtime 'node_modules') -Destination (Join-Path $paths.runtime 'node_modules') -Recurse -Force
+ foreach($f in @('package.json','package-lock.json')){
+   $source=Join-Path $runtime $f
+   if(Test-Path -LiteralPath $source -PathType Leaf){Copy-Item -LiteralPath $source -Destination (Join-Path $paths.runtime $f)}
+ }
+ foreach($f in @('tunnel-client.exe','cloudflared.exe','cloudflared-manifest.json')){
+   $source=Join-Path $tunnel $f
+   if(Test-Path -LiteralPath $source -PathType Leaf){Copy-Item -LiteralPath $source -Destination (Join-Path $paths.tunnel $f)}
+ }
+ Copy-Item -LiteralPath $public -Destination (Join-Path $paths.trust 'runtime-lease-public.pem')
+ Restrict-Folder
+ # Service may mutate ONLY its private state subtree, not source, config,
+ # binaries or other user workspaces.
+ & icacls.exe $paths.state '/inheritance:r' '/grant:r' '*S-1-5-19:(OI)(CI)M' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F'|Out-Null
+ if($LASTEXITCODE -ne 0){throw 'BACKGROUND_STATE_ACL_FAILED'}
+ $marker=[ordered]@{gitSha=$head;preparedAt=(Get-Date).ToUniversalTime().ToString('o');scope='protected-offline-stage';serviceInstalled=$false}
+ [IO.File]::WriteAllText((Join-Path $root 'prepare-marker.json'),($marker|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+ Write-Output 'BACKGROUND_PREPARED_OFFLINE_NO_SERVICE_CHANGE'
+ }catch{
+   # Roll back ONLY the six directories created in this invocation.
+   # Never delete the preexisting service binary, credentials or DEV files.
+   foreach($createdPath in $created){
+     if($createdPath.StartsWith(($root+[IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)){
+       Remove-Item -LiteralPath $createdPath -Recurse -Force -ErrorAction SilentlyContinue
+     }
+   }
+   throw
+ }
  exit 0
 }
 if($Mode -eq 'Stage'){
@@ -92,7 +201,7 @@ if($Mode -eq 'Stage'){
  if(Get-Service -Name $name -ErrorAction SilentlyContinue){throw 'BACKGROUND_SERVICE_ALREADY_REGISTERED'}
  $node=(Get-Command node.exe -ErrorAction Stop).Source
  Copy-Item -LiteralPath $node -Destination (Join-Path $root 'node.exe') -Force
- Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'background-host-supervisor.mjs') -Destination $worker -Force
+ Copy-Item -LiteralPath (Join-Path $root 'mcp-app\scripts\windows\background-host-supervisor.mjs') -Destination $worker -Force
  $c=[ordered]@{
    nodeExe=(Join-Path $root 'node.exe')
    runtimeEntry=(Join-Path $RuntimeRoot 'dist\server.js')

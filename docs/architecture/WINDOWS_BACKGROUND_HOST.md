@@ -213,3 +213,30 @@ Tunnel receive only the scoped credentials they require. This is validated
 against the installed official Tunnel's help surface, but requires a real
 staged service round-trip acceptance before any cutover. Without this,
 the Tunnel will see local MCP 401 even while the service is running.
+
+
+### Offline protected staging (before service installation)
+
+The explicit administrator-only Prepare action now stages a clean
+origin/main Windows DEV checkout plus pinned Runtime build into the restricted
+ProgramData/OWL LAB/BackgroundHost tree. It copies ONLY Git-tracked Desktop
+files, the installed dependency trees, Runtime compiled artifacts, official
+Tunnel and cloudflared binaries, and the public trust key. Source symlinks
+and junctions are rejected; .env, .git, untracked files, Chrome profiles and
+user DPAPI ciphertext are not collected.
+
+If the copy fails, only directories made in that invocation are removed.
+Existing service binaries, current Desktop files, Guardian and both tunnels
+remain untouched. All code is LocalService read-only, while only the isolated
+state directory is writable by the service account. Stage subsequently
+prepares non-secret configuration from the protected staged paths.
+
+The read-only Check mode returns staged=Restricted when the calling Windows
+user is blocked by the correct NTFS ACL instead of raising an access-denied
+exception. This field is not proof of service installation.
+
+Prepare/Stage/Provision/Install must be individually authorized by the
+Windows administrator. There is no automatic credential migration from
+Electron safeStorage. Protect the service account's distinct Runtime/MCP
+and Cloud Tunnel keys; complete Cloud enrollment, authenticated Desktop
+reattachment, and sign-out/reboot validation before disabling user Guardian.

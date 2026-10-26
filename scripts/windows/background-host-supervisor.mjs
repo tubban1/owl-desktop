@@ -125,13 +125,15 @@ export async function isLocalPortInUse(port){
   });
 }
 
-export async function componentHealthy(name,{fetcher=fetch}={}){
+export async function componentHealthy(name,{fetcher=fetch,serviceEnv={}}={}){
   const url=name==="runtime"?"http://127.0.0.1:8788/health":
     name==="mcp"?"http://127.0.0.1:8790/health":
     name==="tunnel"?"http://127.0.0.1:18081/health?details=true":null;
   if(!url)throw Error("BACKGROUND_COMPONENT_UNKNOWN");
   try{
-    const r=await fetcher(url,{signal:AbortSignal.timeout(2000)});
+    const headers=name==="mcp"
+      ?{Authorization:"Bearer "+serviceEnv.OWL_BACKGROUND_MCP_TOKEN}:{};
+    const r=await fetcher(url,{headers,signal:AbortSignal.timeout(2000)});
     if(!r.ok)return false;
     const data=await r.json();
     if(name==="runtime")return data.ok===true&&data.service==="owl-runtime";
@@ -185,7 +187,7 @@ export async function runBackgroundHost(config,{serviceEnv=process.env,
           children.delete(name);state[name]=false;log("child_exited",name);
         }
         if(children.has(name)){
-          const healthy=await probe(name);
+          const healthy=await probe(name,{serviceEnv});
           state[name]=healthy;
           unhealthy.set(name,healthy?0:(unhealthy.get(name)||0)+1);
           if(healthy)failures.set(name,0);
