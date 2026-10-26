@@ -38,7 +38,8 @@ describe('OWL Mail account safety',()=>{
    expect(connected).not.toHaveProperty('password');
    expect(JSON.stringify(service.accounts())).not.toContain('very-secret');
    expect(fs.readFileSync(path.join(f.root,'accounts.json'),'utf8')).not.toContain('very-secret');
-   expect((fs.statSync(path.join(f.root,'accounts.json')).mode & 0o777)).toBe(0o600);
+   // Windows uses user-profile ACLs, not POSIX chmod bits.
+   if(process.platform!=='win32')expect((fs.statSync(path.join(f.root,'accounts.json')).mode & 0o777)).toBe(0o600);
    expect((await service.list({accountId:connected.id}))[0].uid).toBe(44);
    expect(f.protocol.list).toHaveBeenCalledWith(expect.objectContaining({address:'user@yahoo.com'}),'very-secret-123',expect.any(Object));
   }finally{f.close();}
