@@ -128,6 +128,7 @@ describe("OWL MCP compatibility surface", () => {
       "browser_agent_tabs",
       "browser_agent_snapshot",
       "browser_agent_fill",
+      "browser_agent_text_control_inspect",
       "browser_agent_click",
       "browser_agent_screenshot",
       "browser_agent_focus_login",

@@ -2013,6 +2013,13 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     async()=>{const{bridge,owner}=trustedUserChrome();return bridge.snapshot(owner);}
   );
   tool(
+    server,"browser_agent_text_control_inspect",
+    "Read only the structure of an Agent-owned Chrome field from the latest snapshot. Returns tag, ARIA role, nested input/editor counts and open-shadow-root count; never returns input values, page HTML, passwords or cookies. Use when a custom Google Ads-style widget is not editable.",
+    {uid:z.string().regex(/^owl-agent-\d{1,3}$/)},
+    {title:"Inspect My Chrome Text Field",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async({uid})=>{const {bridge,owner}=trustedUserChrome();return bridge.inspectTextControl(owner,uid);}
+  );
+  tool(
     server,"browser_agent_fill",
     "Fill a non-credential field from the most recent Agent tab accessibility snapshot. Passwords/OTP/CVV stay human-only. Does not submit.",
     {uid:z.string().min(1).max(180),value:z.string().max(4000)},

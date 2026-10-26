@@ -23,3 +23,32 @@ The pre-reload Native Messaging command result is an ACK that reload was **sched
 v1 is a **self-reload and recovery protocol**, not an unattended signed updater, Chrome Web Store extension rollout or automatic Git merge. Existing trusted file-copy and SHA checks can be used before invoking it; an autonomous updater should separately validate authentic release manifests, hashes, signatures, staged files and rollback, and should never trigger a reload halfway through a user-authorized write action.
 
 Chrome extension registration is bound to its existing unpacked directory and Chrome extension ID; the protocol does not modify either. Mac and Windows use the same extension code. For the current Windows machine, the unpacked extension is under `owl-desktop-win-p3/chrome-agent-native`, which is distinct from the fresh Git checkout.
+
+
+## Complex text input feedback loop
+
+If a Google Ads-style custom textbox reports TEXT_TARGET_NOT_EDITABLE,
+EDITOR_NOT_EDITABLE, or TEXT_TARGET_AMBIGUOUS, **do not infer missing OS
+keyboard permission**. Windows nativeInput=false governs OS-level UI controls,
+while the selected Chrome tab supports trusted Chromium input via the
+extension's debugger permission. Use browser_agent_snapshot from the same
+Agent owner, not another Agent's tab.
+
+The generic trusted input adapter now detects a **single unambiguous editable
+descendant of a snapshotted composite wrapper**, including open Shadow DOM,
+even when the outer wrapper has no ARIA role. If a semantic textbox/combobox
+has no editable child yet, it may activate *only* that snapshotted, visible,
+non-destructive text widget with tab-scoped trusted mouse input, then check
+again for an editable child before typing. An ambiguous or unchanged widget
+fails closed. It never tries random DOM containers or websites' Save actions.
+
+browser_agent_text_control_inspect({uid}) reports only structural details:
+tag, role, editable-descendant count and open-shadow-root count; it does not
+return typed values, page HTML, cookies, credentials or personal page text.
+This is for the Agent session that owns the tab. It can help identify
+unhandled custom elements without weakening cross-session isolation.
+
+One successful fill only means DOM text matched. Chips might still need a
+distinct Add action, and campaigns must be saved and independently read back.
+An inaccessible closed shadow root or cross-origin iframe is not silently
+handled, and Windows desktop.nativeInput permissions remain unchanged.

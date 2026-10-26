@@ -27,17 +27,38 @@ export function prepareTrustedTextField(uid,expectedOrigin){
   const leaf=el.tagName?.toLowerCase();
   const editable=el.isContentEditable===true;
   if(!["input","textarea"].includes(leaf)&&!editable){
-    if(el.getAttribute("role")!=="textbox"&&el.getAttribute("role")!=="combobox")
-      return {error:"TEXT_TARGET_NOT_EDITABLE"};
-    const findEditable=(root,depth=0)=>{
-      if(depth>8)return null;
-      const found=root.querySelector("input,textarea,[contenteditable]");if(found)return found;
-      for(const host of root.querySelectorAll("*"))if(host.shadowRoot){
-        const nested=findEditable(host.shadowRoot,depth+1);if(nested)return nested;
+    // Google Ads-style component shells often have no ARIA role on the outer
+    // visual wrapper. Resolve only ONE writable descendant: never guess.
+    const found=[],seen=new Set();
+    const gather=(root,depth=0)=>{
+      if(depth>8)return;
+      for(const child of root.querySelectorAll("*")){
+        if(!seen.has(child) &&
+          (["input","textarea"].includes(child.tagName?.toLowerCase())||
+            child.isContentEditable===true)){
+          found.push(child);seen.add(child);
+        }
+        if(child.shadowRoot)gather(child.shadowRoot,depth+1);
       }
-      return null;
     };
-    el=findEditable(wrapper)||el;
+    gather(wrapper);
+    const eligible=found.filter(child=>visible(child));
+    if(eligible.length>1)return {error:"TEXT_TARGET_AMBIGUOUS",count:eligible.length};
+    if(eligible.length===1)el=eligible[0];
+    else {
+      const role=wrapper.getAttribute("role")||"";
+      const semantic=["textbox","combobox","searchbox"].includes(role)||
+        wrapper.hasAttribute("aria-autocomplete")||
+        wrapper.hasAttribute("data-placeholder");
+      if(semantic && visible(wrapper) &&
+         !wrapper.hasAttribute("onclick") &&
+         wrapper.getAttribute("aria-disabled")!=="true" &&
+         wrapper.getAttribute("aria-readonly")!=="true" &&
+         ["div","span","label"].includes(leaf))
+        return {activationRequired:true,uid,role};
+      return {error:"TEXT_TARGET_NOT_EDITABLE",
+        tag:leaf,role,descendantInputCount:found.length};
+    }
   }
   const tag=el.tagName?.toLowerCase();
   const type=(el.getAttribute("type")||"text").toLowerCase();
@@ -72,7 +93,9 @@ export function prepareTrustedTextField(uid,expectedOrigin){
       if(!selection.rangeCount)return {error:"TEXT_SELECTION_UNCONFIRMED"};
     }
   }catch{return {error:"TEXT_SELECTION_UNSUPPORTED"};}
-  return {ready:true,uid,origin:expectedOrigin,kind:native?"native":"contenteditable"};
+  el.setAttribute("data-owl-agent-target-input",uid);
+  return {ready:true,uid,origin:expectedOrigin,kind:native?"native":"contenteditable",
+    nested:el!==wrapper};
 }
 
 export function checkTrustedTextField(uid,expectedOrigin,expectedValue){
@@ -88,23 +111,94 @@ export function checkTrustedTextField(uid,expectedOrigin,expectedValue){
   };
   const wrapper=seek(document);
   if(!wrapper)return {error:"TEXT_CONTROL_REPLACED_BY_APP",domVerified:false};
-  let el=wrapper;
-  const tag=el.tagName?.toLowerCase();
-  if(!["input","textarea"].includes(tag)&&!el.isContentEditable){
-    const seekEditable=(root,depth=0)=>{
-      if(depth>8)return null;
-      const hit=root.querySelector("input,textarea,[contenteditable]");if(hit)return hit;
-      for(const host of root.querySelectorAll("*"))if(host.shadowRoot){
-        const nested=seekEditable(host.shadowRoot,depth+1);if(nested)return nested;
-      }
-      return null;
-    };
-    el=seekEditable(el)||el;
-  }
+  const marked='[data-owl-agent-target-input="'+CSS.escape(uid)+'"]';
+  const matched=[];
+  const seekEditable=(root,depth=0)=>{
+    if(depth>8)return;
+    for(const child of root.querySelectorAll("*")){
+      if(child.matches?.(marked))matched.push(child);
+      if(child.shadowRoot)seekEditable(child.shadowRoot,depth+1);
+    }
+  };
+  if(wrapper.matches?.(marked))matched.push(wrapper);
+  seekEditable(wrapper);
+  if(matched.length!==1)return {error:"TEXT_TARGET_REPLACED_OR_AMBIGUOUS",
+    domVerified:false,count:matched.length};
+  const el=matched[0];
   const isNative=["input","textarea"].includes(el.tagName?.toLowerCase());
   if(!isNative&&!el.isContentEditable)return {error:"TEXT_CONTROL_REPLACED_BY_APP",domVerified:false};
   const actual=isNative?el.value:el.textContent;
   return {domVerified:actual===expectedValue,
     observedLength:typeof actual==="string"?actual.length:0,
     websitePersisted:false,uid};
+}
+
+// Mouse activation is restricted to an explicitly snapshotted semantic text
+// shell, not arbitrary buttons. The Chrome debugger dispatches real input
+// without using a Windows/macOS system mouse or changing foreground tabs.
+export function locateTrustedTextActivation(uid,expectedOrigin){
+  if(location.origin!==expectedOrigin)return {error:"TEXT_ORIGIN_CHANGED"};
+  if(!/^owl-agent-\d{1,3}$/.test(uid||""))return {error:"TEXT_UID_INVALID"};
+  const marker='[data-owl-agent-control="'+CSS.escape(uid)+'"]';
+  const locate=(root,depth=0)=>{
+    if(depth>8)return null;
+    const match=root.querySelector(marker);if(match)return match;
+    for(const el of root.querySelectorAll("*"))if(el.shadowRoot){
+      const result=locate(el.shadowRoot,depth+1);if(result)return result;
+    }
+    return null;
+  };
+  const el=locate(document);
+  if(!el)return {error:"AGENT_SNAPSHOT_STALE"};
+  const role=el.getAttribute("role")||"";
+  if(!["textbox","combobox","searchbox"].includes(role) &&
+     !el.hasAttribute("aria-autocomplete")&&!el.hasAttribute("data-placeholder"))
+    return {error:"TEXT_ACTIVATION_NOT_SEMANTIC"};
+  if(!["div","span","label"].includes(el.tagName?.toLowerCase())||
+     el.hasAttribute("onclick")||el.getAttribute("aria-disabled")==="true"||
+     el.getAttribute("aria-readonly")==="true")
+    return {error:"TEXT_ACTIVATION_DISALLOWED"};
+  const style=getComputedStyle(el),r=el.getBoundingClientRect();
+  if(style.display==="none"||style.visibility==="hidden"||
+     style.pointerEvents==="none"||r.width<4||r.height<4||
+     r.bottom<=0||r.right<=0||r.top>=innerHeight||r.left>=innerWidth)
+    return {error:"TEXT_ACTIVATION_NOT_VISIBLE"};
+  const x=Math.round((Math.max(0,r.left)+Math.min(r.right,innerWidth-1))/2);
+  const y=Math.round((Math.max(0,r.top)+Math.min(r.bottom,innerHeight-1))/2);
+  const hit=document.elementFromPoint(x,y);
+  if(hit!==el&&!el.contains(hit)&&el.getRootNode()?.host!==hit)
+    return {error:"TEXT_ACTIVATION_OCCLUDED"};
+  return {valid:true,x,y,uid,origin:expectedOrigin};
+}
+
+// No field values, HTML, text or credentials are exposed in diagnostics.
+export function inspectTrustedTextControl(uid,expectedOrigin){
+  if(location.origin!==expectedOrigin)return {error:"TEXT_ORIGIN_CHANGED"};
+  if(!/^owl-agent-\d{1,3}$/.test(uid||""))return {error:"TEXT_UID_INVALID"};
+  const marker='[data-owl-agent-control="'+CSS.escape(uid)+'"]';
+  const find=(root,depth=0)=>{
+    if(depth>8)return null;
+    const hit=root.querySelector(marker);if(hit)return hit;
+    for(const el of root.querySelectorAll("*"))if(el.shadowRoot){
+      const nested=find(el.shadowRoot,depth+1);if(nested)return nested;
+    }
+    return null;
+  };
+  const el=find(document);if(!el)return {error:"AGENT_SNAPSHOT_STALE"};
+  let inputs=0,rich=0,shadow=0;
+  const scan=(root,depth=0)=>{
+    if(depth>8)return;
+    for(const child of root.querySelectorAll("*")){
+      if(["input","textarea"].includes(child.tagName?.toLowerCase()))inputs++;
+      if(child.isContentEditable===true)rich++;
+      if(child.shadowRoot){shadow++;scan(child.shadowRoot,depth+1)}
+    }
+  };
+  scan(el);
+  return {uid,tag:el.tagName?.toLowerCase(),role:el.getAttribute("role")||"",
+    contentEditable:!!el.isContentEditable,
+    ariaAutocomplete:el.hasAttribute("aria-autocomplete"),
+    dataPlaceholder:el.hasAttribute("data-placeholder"),
+    nativeInputs:inputs,richEditors:rich,openShadowRoots:shadow,
+    topFrameOnly:true,diagnosticOnly:true,websitePersisted:false};
 }

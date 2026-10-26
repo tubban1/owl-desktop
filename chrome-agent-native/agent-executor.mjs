@@ -13,7 +13,8 @@ import {locateAgentFileDropZone,checkAgentFileDropZone} from "./file-drop-zone.m
 import {prepareAgentRichEditor,checkAgentRichEditor} from "./rich-editor.mjs";
 import {locateVirtualCursorTarget,showVirtualCursor,hideVirtualCursor} from "./virtual-cursor.mjs";
 import {executeFormAction} from "./form-controls.mjs";
-import {prepareTrustedTextField,checkTrustedTextField} from "./trusted-text-field.mjs";
+import {prepareTrustedTextField,checkTrustedTextField,
+  locateTrustedTextActivation,inspectTrustedTextControl} from "./trusted-text-field.mjs";
 
 // An explicit Agent open(url) can reuse an already-open INACTIVE tab with
 // the exact same URL (including path, query and fragment). Adoption grants
@@ -104,7 +105,7 @@ export function createNativeAgentExecutor(chrome,storage){
     const collect=(root,depth)=>{
       if(depth>8 || nodes.length>=120)return;
       for(const el of root.querySelectorAll("*")){
-        if(el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone]") &&
+        if(el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone]") &&
            visible(el))nodes.push({el,shadowDepth:depth});
         if(nodes.length>=120)break;
         if(el.shadowRoot)collect(el.shadowRoot,depth+1);
@@ -486,6 +487,15 @@ export function createNativeAgentExecutor(chrome,storage){
       const result=await inject(tabId,inspect);
       return {pageId:tabId,snapshot:result};
     }
+    if(op==="text_control_inspect"){
+      if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid))
+        throw Error("TEXT_UID_INVALID");
+      const origin=urlOrigin(tab.url);
+      if(!origin)throw Error("TEXT_ORIGIN_INVALID");
+      const result=await inject(tabId,inspectTrustedTextControl,[args.uid,origin]);
+      if(result?.error)throw Error(result.error);
+      return {pageId:tabId,...result};
+    }
     if(op==="fill"){
       if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid)||
          typeof args.value!=="string"||args.value.length>4000)
@@ -496,16 +506,31 @@ export function createNativeAgentExecutor(chrome,storage){
       // role=textbox, role=combobox-with-input, contenteditable, open shadow
       // roots. Frameworks must receive their browser events; DOM.value setter
       // alone can appear to work while Google Ads/React state stays unchanged.
-      const prepared=await inject(tabId,prepareTrustedTextField,[args.uid,origin]);
+      let prepared=await inject(tabId,prepareTrustedTextField,[args.uid,origin]);
       if(prepared?.error)throw Error(prepared.error);
-      if(!prepared?.ready)throw Error("TEXT_FIELD_NOT_READY");
+      if(!prepared?.ready&&!prepared?.activationRequired)
+        throw Error("TEXT_FIELD_NOT_READY");
       const target={tabId};
-      let attached=false;
+      let attached=false,activated=false;
       try{
         await chrome.debugger.attach(target,"1.3");
         attached=true;
         const latest=await chrome.tabs.get(tabId);
         if(urlOrigin(latest.url)!==origin)throw Error("TEXT_ORIGIN_CHANGED");
+        if(prepared.activationRequired){
+          const point=await inject(tabId,locateTrustedTextActivation,[args.uid,origin]);
+          if(point?.error||!point?.valid)throw Error(point?.error||"TEXT_ACTIVATION_UNSAFE");
+          await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+            type:"mouseMoved",x:point.x,y:point.y});
+          await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+            type:"mousePressed",x:point.x,y:point.y,button:"left",clickCount:1});
+          await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+            type:"mouseReleased",x:point.x,y:point.y,button:"left",clickCount:1});
+          activated=true;
+          prepared=await inject(tabId,prepareTrustedTextField,[args.uid,origin]);
+          if(prepared?.error)throw Error(prepared.error);
+          if(!prepared?.ready)throw Error("TEXT_ACTIVATION_DID_NOT_REVEAL_EDITABLE");
+        }
         // Extension-scoped Chromium input; does NOT move OS cursor, bring tab
         // to foreground, access the clipboard or require the 9222 port.
         if(args.value.length){
@@ -526,7 +551,7 @@ export function createNativeAgentExecutor(chrome,storage){
       if(!checked?.domVerified)throw Error("TEXT_DOM_UPDATE_NOT_CONFIRMED");
       return {pageId:tabId,uid:args.uid,filled:true,length:args.value.length,
         domVerified:true,websitePersisted:false,
-        inputMethod:"tab_scoped_chromium_trusted_text",
+        inputMethod:"tab_scoped_chromium_trusted_text",activatedWidget:activated,
         foregroundUnchanged:true,systemKeyboardUsed:false};
     }
     if(op==="edit_text"){
