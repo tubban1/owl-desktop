@@ -10,14 +10,16 @@ afterEach(async () => {
   while (closers.length) await closers.pop()?.();
 });
 
-async function startFakeRuntime() {
-  const server = http.createServer(async (_req, res) => {
+async function startFakeRuntime(accessState = null) {
+  const server = http.createServer(async (req, res) => {
+    let body="";for await(const chunk of req)body+=chunk;
+    const method=JSON.parse(body||"{}").method;
     res.statusCode = 200;
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify({
       ok: true,
       apiVersion: "0.1",
-      result: { apiVersion: "0.1", runtimeVersion: "test-runtime" },
+      result: method === "access.get" ? {mode:"enforced",state:accessState||"LOCKED"} : { apiVersion: "0.1", runtimeVersion: "test-runtime" },
     }));
   });
   await new Promise((resolve, reject) => {
@@ -46,6 +48,7 @@ describe("OWL MCP compatibility surface", () => {
 
     const required = [
       "runtime_info",
+      "mail_accounts","mail_list","mail_search","mail_read","mail_create_draft","mail_send_draft",
       "provider_status",
       "primitive_call",
       "primitive_catalog",
@@ -170,5 +173,34 @@ describe("OWL MCP compatibility surface", () => {
       workstreamProgress?.inputSchema?.properties ?? {};
     expect(progressProperties).toHaveProperty("progress_boundary_id");
     expect(progressProperties).toHaveProperty("user_visible_progress");
+  });
+});
+
+
+describe("OWL Mail MCP invocation",()=>{
+  it("lists accounts through authorized desktop bridge but never exposes app credentials",async()=>{
+    const runtimeBaseUrl=await startFakeRuntime('READY');
+    const mailService={accounts:async()=>[{id:'ef08d47b-a456-4cbc-9e7a-1433cdfcc7d0',provider:'yahoo',address:'user@yahoo.com'}]};
+    const mcp=await startOwlMcpHttpServer({port:0,runtimeBaseUrl,mailService});
+    closers.push(()=>mcp.close());
+    const client=new Client({name:'mail-test',version:'0.1.0'});
+    const transport=new StreamableHTTPClientTransport(new URL(mcp.url),{requestInit:{headers:{'x-owl-owner-id':'mail-test-owner'}}});
+    await client.connect(transport);closers.push(()=>transport.close().catch(()=>{}));
+    const reply=await client.callTool({name:'mail_accounts',arguments:{}});
+    expect(reply.isError).toBeFalsy();
+    const content=reply.content[0].text;
+    expect(content).toContain('user@yahoo.com');expect(content).not.toMatch(/password|credential|secret/);
+  });
+  it("does not expose account data while Runtime is LOCKED",async()=>{
+    const runtimeBaseUrl=await startFakeRuntime('LOCKED');
+    let lookedUp=false;
+    const mcp=await startOwlMcpHttpServer({port:0,runtimeBaseUrl,mailService:{accounts:async()=>{lookedUp=true;return []}}});
+    closers.push(()=>mcp.close());
+    const client=new Client({name:'mail-lock-test',version:'0.1.0'});
+    const transport=new StreamableHTTPClientTransport(new URL(mcp.url),{requestInit:{headers:{'x-owl-owner-id':'mail-lock-test-owner'}}});
+    await client.connect(transport);closers.push(()=>transport.close().catch(()=>{}));
+    const reply=await client.callTool({name:'mail_accounts',arguments:{}});
+    expect(reply.isError).toBe(true);expect(reply.content[0].text).toContain('MAIL_RUNTIME_AUTHORIZATION_REQUIRED');
+    expect(lookedUp).toBe(false);
   });
 });

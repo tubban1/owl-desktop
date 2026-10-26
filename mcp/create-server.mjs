@@ -984,7 +984,7 @@ function tool(server, name, description, schema, annotations, handler) {
   );
 }
 
-export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,userChromeBridge=null}={}) {
+export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,userChromeBridge=null,mailService=null}={}) {
   const server = new McpServer(
     {
       name: "owl-mcp",
@@ -2047,6 +2047,39 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
         salary,notice,referralValue:referral_value});
     }
   );
+  // Mail stays on this user's Desktop. No provider passwords are transported
+  // through MCP, Runtime logs or Cloud. Writes require local UI consent.
+  const mailbox=()=>currentMcpRequestContext().mailService||mailService;
+  const mailCall=async(method,args)=>{
+    const access=await runtimeClient().runtimeAccess();
+    if(access?.state!=="READY")throw Object.assign(new Error("MAIL_RUNTIME_AUTHORIZATION_REQUIRED: Reauthorize OWL Runtime before accessing mailbox data."),{code:"MAIL_RUNTIME_AUTHORIZATION_REQUIRED"});
+    const service=mailbox();
+    if(!service)throw Object.assign(new Error("Mail requires a running OWL Desktop"),{code:"MAIL_SERVICE_UNAVAILABLE"});
+    return service[method](args);
+  };
+  tool(server,"mail_accounts","List mail accounts explicitly connected on this OWL device. Credentials are never returned.",
+    {},{title:"Mail Accounts",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>mailCall("accounts"));
+  tool(server,"mail_list","List recent messages by IMAP from a connected Yahoo or Tencent Exmail account.",
+    {accountId:z.string().uuid(),mailbox:z.string().min(1).max(100).default("INBOX"),limit:z.number().int().min(1).max(50).default(20)},
+    {title:"List Mail",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async(args)=>mailCall("list",args));
+  tool(server,"mail_search","Search messages in an authorized mailbox using from, subject and/or since filters.",
+    {accountId:z.string().uuid(),mailbox:z.string().min(1).max(100).default("INBOX"),from:z.string().max(180).optional(),subject:z.string().max(180).optional(),since:z.string().max(40).optional(),limit:z.number().int().min(1).max(50).default(20)},
+    {title:"Search Mail",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async(args)=>mailCall("search",args));
+  tool(server,"mail_read","Read a message text and attachment metadata, not executable HTML or attachment bytes.",
+    {accountId:z.string().uuid(),mailbox:z.string().min(1).max(100).default("INBOX"),uid:z.number().int().positive()},
+    {title:"Read Mail",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async(args)=>mailCall("read",args));
+  tool(server,"mail_create_draft","Store a draft encrypted on OWL Desktop. Never sends a message.",
+    {accountId:z.string().uuid(),to:z.array(z.string().email()).min(1).max(20),cc:z.array(z.string().email()).max(20).default([]),subject:z.string().max(300),text:z.string().max(200000)},
+    {title:"Save Mail Draft",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    async(args)=>mailCall("createDraft",args));
+  tool(server,"mail_send_draft","Request sending a previously saved draft. The OS user must approve a native confirmation showing recipients and preview; MCP cannot self-approve.",
+    {draftId:z.string().uuid()},
+    {title:"Send User-Approved Mail",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async(args)=>mailCall("sendDraft",args));
   registerBrowserWorkflowTools({tool,server,z,trustedUserChrome});
   tool(
     server,"browser_agent_capabilities",

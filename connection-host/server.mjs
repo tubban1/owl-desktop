@@ -125,6 +125,15 @@ const remoteDeviceProxy = {
   cancel: (input) => bridgeRpc("remoteDevice", "cancel", [input]),
 };
 
+const mailProxy = {
+  accounts:()=>bridgeRpc("mail","accounts"),
+  list:(args)=>bridgeRpc("mail","list",[args]),
+  search:(args)=>bridgeRpc("mail","search",[args]),
+  read:(args)=>bridgeRpc("mail","read",[args]),
+  createDraft:(args)=>bridgeRpc("mail","createDraft",[args]),
+  sendDraft:(args)=>bridgeRpc("mail","sendDraft",[args]),
+};
+
 const plannerContinuation = new PlannerContinuationStore({
   file: path.join(userDataRoot, "planner-continuation.json"),
 });
@@ -156,6 +165,7 @@ const mcpServer = await startOwlMcpHttpServer({
   fallbackOwnerId,
   agentInbox: agentInboxProxy,
   remoteDeviceControl: remoteDeviceProxy,
+  mailService: mailProxy,
   plannerContinuation,
   fileDelivery: {
     send:async (path,authorize)=>{

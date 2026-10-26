@@ -11,6 +11,7 @@ export async function startDesktopCapabilityBridge({
   token,
   agentInbox,
   remoteDeviceControl,
+  mailService = null,
   onEvent = () => {},
 } = {}) {
   if (!token) {
@@ -48,6 +49,7 @@ export async function startDesktopCapabilityBridge({
     "cancel",
   ]);
 
+  const mailMethods = new Set(["accounts", "list", "search", "read", "createDraft", "sendDraft"]);
   app.post("/rpc", async (req, res) => {
     const { domain, method, args } = req.body ?? {};
     try {
@@ -69,6 +71,10 @@ export async function startDesktopCapabilityBridge({
           );
         }
         target = remoteDeviceControl();
+      } else if(domain === "mail") {
+        if(!mailMethods.has(method))throw codedError("MAIL_METHOD_UNSUPPORTED","Unknown mail operation");
+        if(!mailService)throw codedError("MAIL_SERVICE_UNAVAILABLE","Open OWL Desktop to use mail");
+        target=mailService;
       } else {
         throw codedError(
           "CAPABILITY_DOMAIN_UNSUPPORTED",

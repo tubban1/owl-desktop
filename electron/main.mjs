@@ -28,6 +28,7 @@ import { tunnelTransportAvailable } from "./services/tunnel-availability.mjs";
 import { ConnectionHostClient } from "./services/connection-host-client.mjs";
 import { startDesktopCapabilityBridge } from "./services/desktop-capability-bridge.mjs";
 import { IdentityVault } from "./services/identity-vault.mjs";
+import { OwlMailService } from "../shared/owl-mail/service.mjs";
 import { connectYoutubeBrowser } from "./services/youtube-oauth.mjs";
 import { connectInstagramBrowser, instagramRedirectUri, validateInstagramAppSecret } from "./services/instagram-oauth.mjs";
 import { publishInstagramReel } from "./services/instagram-publisher.mjs";
@@ -101,6 +102,7 @@ let connectivityIncidentStartedAt=null;
 const announcedApprovalIds=new Set();
 let store;
 let identityVault;
+let mailService;
 let tunnelSupervisor;
 let cloudBridgeStore;
 let remoteSubmissionStore;
@@ -1589,6 +1591,7 @@ async function startMcp() {
       fallbackOwnerId: settings.sessionId,
       agentInbox,
       remoteDeviceControl: remoteDeviceControl(),
+      mailService,
       userChromeBridge: windowsDevBrowser?.bridge ?? null,
       plannerContinuation: plannerContinuationStore,
       onEvent(level, message, meta) {
@@ -2348,6 +2351,11 @@ Only this single action will be approved.`,
       throw Error(safeCode);
     }
   });
+  // Account passwords enter only via the local renderer and are stored with
+  // Electron safeStorage; never exposed through the MCP or Cloud bridge.
+  ipcMain.handle("mail:accounts",()=>mailService.accounts());
+  ipcMain.handle("mail:connect",(_event,input)=>mailService.connect(input));
+  ipcMain.handle("mail:disconnect",(_event,accountId)=>mailService.disconnect({accountId}));
   ipcMain.handle("accounts:list", () => identityVault.list());
   ipcMain.handle("accounts:upsert", (_event, input) => identityVault.upsert(input));
   ipcMain.handle("accounts:delete", (_event, id) => identityVault.delete(id));
@@ -3289,6 +3297,22 @@ if (packagedConnectivityHostSoakOnly) {
     usageStatistics = new UsageStatisticsStore({ file: path.join(app.getPath("userData"), "usage-statistics-v1.json") });
     for (const entry of [...activity].reverse()) usageStatistics.ingest(entry);
     store = new DesktopStore();
+    mailService = new OwlMailService({
+      file:path.join(app.getPath("userData"),"mail-accounts.json"),
+      store,
+      approveSend:async({from,to,cc,subject,preview})=>{
+        if(!mainWindow||mainWindow.isDestroyed())return false;
+        const reply=await dialog.showMessageBox(mainWindow,{
+          type:"question",title:"Approve email send",buttons:["Cancel","Send email"],
+          defaultId:0,cancelId:0,noLink:true,
+          message:"Send this email from "+from+"?",
+          detail:"To: "+to.join(", ")+"\n"+
+            (cc.length?"CC: "+cc.join(", ")+"\n":"")+
+            "Subject: "+subject+"\n\nMessage preview:\n"+preview,
+        });
+        return reply.response===1;
+      },
+    });
     // Windows development only. Production uses the signed Runtime Host
     // lifecycle and never starts a runtime from a developer path.
     if (!app.isPackaged) {
@@ -3347,6 +3371,7 @@ if (packagedConnectivityHostSoakOnly) {
         token: externalConnectionHostToken,
         agentInbox,
         remoteDeviceControl,
+        mailService,
         onEvent(level, message, meta) {
           record(level, "connection-host", message, meta);
         },
@@ -3510,6 +3535,7 @@ if (packagedConnectivityHostSoakOnly) {
           token: externalConnectionHostToken,
           agentInbox,
           remoteDeviceControl,
+          mailService,
           onEvent(level, message, meta) {
             record(level, "connection-host", message, meta);
           },

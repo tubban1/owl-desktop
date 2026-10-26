@@ -19,6 +19,7 @@ import { StatisticsPanel } from "./statistics/StatisticsPanel";
 import { deviceCopy } from "./deviceCopy";
 import { RuntimePermissionCenter } from "./permissions/RuntimePermissionCenter";
 import { MissionReviewPanel } from "./permissions/MissionReviewPanel";
+import { MailAccountsPanel } from "./mail/MailAccountsPanel";
 import type { UsageStatisticsSnapshot } from "./statistics/statisticsModel";
 import {
   ApprovalAttention,
@@ -1880,6 +1881,7 @@ export default function App() {
         </>}
 
         {page === "settings" && settings && <>
+          <MailAccountsPanel />
           <SectionHeader title="Settings" description="Everyday preferences first. Technical connection details stay out of the way." />
           <section className="panel settings-panel">
             <div className="panel-heading"><div><span className="eyebrow">CONNECTIVITY DIAGNOSTICS</span><h3>最近的远程连接故障</h3></div>

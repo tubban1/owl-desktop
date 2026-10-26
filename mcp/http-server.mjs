@@ -14,6 +14,7 @@ export async function startOwlMcpHttpServer({
   fallbackOwnerId,
   agentInbox,
   remoteDeviceControl,
+  mailService = null,
   plannerContinuation,
   fileDelivery = null,
   browserCompanion = null,
@@ -183,7 +184,7 @@ export async function startOwlMcpHttpServer({
   }
 
   function createTransportSession() {
-    const server = createOwlMcpServer({ fileDelivery, browserCompanion, userChromeBridge });
+    const server = createOwlMcpServer({ fileDelivery, browserCompanion, userChromeBridge, mailService });
     // Announce the current tool registry to clients that support live
     // notifications. ChatGPT may still cache connector schemas until its
     // plugin connection is refreshed; legacy read_multiple_files remains
@@ -356,6 +357,7 @@ export async function startOwlMcpHttpServer({
             signal: requestAbort.signal,
             agentInbox,
             remoteDeviceControl,
+            mailService,
             plannerContinuation,
             bindWorkstream: (workstreamId, metadata = {}) => {
               const workstream = plannerContinuation?.get?.(workstreamId);
