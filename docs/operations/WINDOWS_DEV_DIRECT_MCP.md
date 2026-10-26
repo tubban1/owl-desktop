@@ -29,3 +29,23 @@ The connection is directly initiated by ChatGPT and handled by the Windows devic
 ## Safety
 
 Do not alter any Mac tunnel, old Windows Computer MCP (8787), or its running tunnel. The dev script only reaches loopback MCP 8790, and keeps source tokens outside logs and Git. Existing Runtime authorization and user-approved action policies still apply.
+
+
+## Windows native test gate
+
+The general \`npm test\` command includes macOS-only launchd, Darwin Runtime
+identity and POSIX mode/symlink tests. It is **not** a Windows release gate.
+Use \`npm run verify:windows:dev\` on a fresh Windows checkout. This runs all
+Windows-applicable tests (including the Chrome native messaging, upload
+permissions, scoped approval, Windows Runtime, direct MCP and mail tests),
+and prints the explicit list of macOS/POSIX-only suites it does **not** count
+as passed.
+
+A successful Windows gate is not equivalent to the complete macOS test
+suite. macOS CI must still run \`npm test\`, and production readiness needs
+the Windows device-specific Native Messaging round-trip and service health.
+Windows Git checkout must honor \`.gitattributes\` LF for \`*.mjs\`,
+particularly \`native-messaging-host.mjs\` with its importable shebang.
+Before replacing a running checkout, always perform \`node --check\` of the
+native host and renderer production build. A failed check must **not**
+stop the existing Desktop.
