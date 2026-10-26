@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 export const RUNTIME_PERMISSION_DEFINITIONS=Object.freeze({
+ write:{env:"ALLOW_WRITE",label:"Write files",actions:[],supportsReview:false},
  gitPush:{env:"ALLOW_GIT_PUSH",label:"Git Push",actions:["git.push"]},
  shell:{env:"ALLOW_SHELL",label:"Shell commands",actions:["shell.exec","shell.start","shell.input","shell.kill"]},
  delete:{env:"ALLOW_DELETE",label:"Delete files",actions:["fs.delete"]},
@@ -16,10 +17,11 @@ export function normalizeRuntimePermissionModes(value,legacyEnv=new Map()){
  const approved=new Set((legacyEnv.get("OWL_APPROVAL_ACTIONS")||
   "fs.delete,tx.rollback").split(",").map(x=>x.trim()));
  return Object.fromEntries(Object.entries(RUNTIME_PERMISSION_DEFINITIONS).map(([key,spec])=>{
-  if(["enabled","blocked","review"].includes(raw[key]))return [key,raw[key]];
+  if(["enabled","blocked","review"].includes(raw[key]))
+   return [key,raw[key]==="review"&&spec.supportsReview===false?"blocked":raw[key]];
   const flag=legacyEnv.get(spec.env);
-  const active=flag===undefined?key==="gitPush":flag==="true";
-  const ask=active&&legacyEnv.get("OWL_APPROVAL_MODE")==="enforce"&&
+  const active=flag===undefined?(key==="gitPush"||key==="write"):flag==="true";
+  const ask=active&&spec.supportsReview!==false&&legacyEnv.get("OWL_APPROVAL_MODE")==="enforce"&&
    spec.actions.every(action=>approved.has(action));
   return [key,ask?"review":active?"enabled":"blocked"];
  }));
@@ -41,7 +43,8 @@ export function runtimePermissionChangeCopy(mode){
 }
 export function validateRuntimePermissionChange(key,mode){
  if(!Object.hasOwn(RUNTIME_PERMISSION_DEFINITIONS,key)||
-  !["blocked","review","enabled"].includes(mode))
+  !["blocked","review","enabled"].includes(mode)||
+  (mode==="review"&&RUNTIME_PERMISSION_DEFINITIONS[key].supportsReview===false))
   throw new Error("INVALID_RUNTIME_PERMISSION_CHANGE");
  return {key,mode};
 }
@@ -123,7 +126,7 @@ export function runtimePermissionProjection(settings,envFile,{
   env.get("OWL_SCOPED_CAPABILITIES")==="1"&&
   (signedKeyConfiguredOverride===true||Boolean(env.get("OWL_HUMAN_APPROVAL_PUBLIC_KEY_B64")));
  const items=Object.entries(RUNTIME_PERMISSION_DEFINITIONS).map(([key,spec])=>{
-  const raw=env.get(spec.env),mode=modes[key],configured=raw===undefined&&key==="gitPush"?true:raw==="true";
+  const raw=env.get(spec.env),mode=modes[key],configured=raw===undefined&&(key==="gitPush"||key==="write")?true:raw==="true";
   const reviewConfigured=mode==="review"&&installedReviewSupport!==false&&signedReviewConfigured&&
    spec.actions.every(action=>activeActionApprovals.has(action))&&
    (key==="gitPush"||spec.actions.every(action=>scopedActions.has(action)));
@@ -132,6 +135,7 @@ export function runtimePermissionProjection(settings,envFile,{
    spec.actions.every(action=>activeActionApprovals.has(action)):
    spec.actions.every(action=>!activeActionApprovals.has(action)&&!scopedActions.has(action));
   return {key,label:spec.label,envName:spec.env,mode,configured,
+   supportsReview:spec.supportsReview!==false,
    configuredSource:raw===undefined?"Runtime default":"Desktop runtime.env",
    reviewConfigured,
    pendingApply:!flagMatches||!actionPolicyMatches||(mode==="review"&&!reviewConfigured),

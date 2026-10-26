@@ -105,7 +105,7 @@ export function createNativeAgentExecutor(chrome,storage){
     const collect=(root,depth)=>{
       if(depth>8 || nodes.length>=120)return;
       for(const el of root.querySelectorAll("*")){
-        if(el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone]") &&
+        if(el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[aria-placeholder],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone]") &&
            visible(el))nodes.push({el,shadowDepth:depth});
         if(nodes.length>=120)break;
         if(el.shadowRoot)collect(el.shadowRoot,depth+1);
@@ -119,7 +119,7 @@ export function createNativeAgentExecutor(chrome,storage){
         role:el.getAttribute("role")||"",
         editable:!!el.isContentEditable,
         label:(el.getAttribute("aria-label")||el.getAttribute("placeholder")||
-        el.getAttribute("data-placeholder")||el.getAttribute("name")||
+        el.getAttribute("aria-placeholder")||el.getAttribute("data-placeholder")||el.getAttribute("name")||
         el.textContent||"").trim().slice(0,125),
         shadowDepth,href:el.tagName==="A"?el.href:undefined};
     });
@@ -176,7 +176,8 @@ export function createNativeAgentExecutor(chrome,storage){
       await restoreAfterReload();
       return {
       instanceId,version:chrome.runtime?.getManifest?.().version||"unknown",
-      selfReloadProtocol:1,source:"owl-native-chrome",canSelfReload:true};
+      selfReloadProtocol:1,source:"owl-native-chrome",canSelfReload:true,
+      features:{trustedTextInsert:true,lazyTextActivation:true,readonlyFieldInspection:true}};
     }
     if(op==="extension_prepare_reload"){
       if(!persistent)throw Error("EXTENSION_PERSISTENT_CHECKPOINT_UNAVAILABLE");

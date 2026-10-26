@@ -4,7 +4,7 @@ import {createHash} from "node:crypto";
 import {applyRuntimePermissionModes,normalizeRuntimePermissionModes,RUNTIME_PERMISSION_DEFINITIONS} from "../../electron/services/runtime-permissions.mjs";
 
 export const DEV_PERMISSION_FLAG_NAMES=Object.freeze([
- "ALLOW_DELETE","ALLOW_SHELL","ALLOW_ROLLBACK","ALLOW_GIT_PUSH",
+ "ALLOW_WRITE","ALLOW_DELETE","ALLOW_SHELL","ALLOW_ROLLBACK","ALLOW_GIT_PUSH",
  "OWL_APPROVAL_MODE","OWL_APPROVAL_ACTIONS","OWL_SCOPED_CAPABILITIES",
  "OWL_SCOPED_ACTION_ALLOWLIST","OWL_HUMAN_APPROVAL_ENFORCE",
  "OWL_HUMAN_APPROVAL_PUBLIC_KEY_B64"

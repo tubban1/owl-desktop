@@ -8,9 +8,31 @@ import {
 } from "../electron/services/runtime-permissions.mjs";
 
 describe("P0 Runtime permission policy",()=>{
+ it("exposes ALLOW_WRITE through Settings without faking signed per-write Ask",()=>{
+  expect(validateRuntimePermissionChange("write","enabled")).toEqual({key:"write",mode:"enabled"});
+  expect(validateRuntimePermissionChange("write","blocked")).toEqual({key:"write",mode:"blocked"});
+  expect(()=>validateRuntimePermissionChange("write","review")).toThrow("INVALID_RUNTIME_PERMISSION_CHANGE");
+  expect(normalizeRuntimePermissionModes({write:"review"}).write).toBe("blocked");
+  const blocked=new Map([["ALLOW_WRITE","true"]]);
+  applyRuntimePermissionModes(blocked,{runtimePermissionModes:{write:"blocked"}});
+  expect(blocked.get("ALLOW_WRITE")).toBe("false");
+  const enabled=new Map([["ALLOW_WRITE","false"]]);
+  applyRuntimePermissionModes(enabled,{runtimePermissionModes:{write:"enabled"}});
+  expect(enabled.get("ALLOW_WRITE")).toBe("true");
+ });
+ it("does not claim write permission active until managed Runtime has applied the flag",()=>{
+  const projection=runtimePermissionProjection({runtimePermissionModes:{write:"enabled"}},"",
+    {envOverride:new Map([["ALLOW_WRITE","false"],["OWL_APPROVAL_MODE","enforce"]])});
+  const write=projection.items.find(item=>item.key==="write");
+  expect(write?.supportsReview).toBe(false);
+  expect(write?.pendingApply).toBe(true);
+  expect(projection.restartRequired).toBe(true);
+  expect(projection.liveRuntimeEffective).toBe("unverified");
+ });
+
  it("resolves legacy inherit without elevating disabled permissions",()=>{
   expect(normalizeRuntimePermissionModes(null)).toEqual({
-   gitPush:"enabled",shell:"blocked",delete:"blocked",rollback:"blocked"});
+   write:"enabled",gitPush:"enabled",shell:"blocked",delete:"blocked",rollback:"blocked"});
   const env=new Map([["ALLOW_GIT_PUSH","false"],["ALLOW_DELETE","false"]]);
   applyRuntimePermissionModes(env,{});
   expect(env.get("ALLOW_GIT_PUSH")).toBe("false");
@@ -159,7 +181,7 @@ describe("P0 Runtime permission policy",()=>{
    ["ALLOW_ROLLBACK","true"],["OWL_APPROVAL_MODE","enforce"],
    ["OWL_APPROVAL_ACTIONS","shell.exec,shell.start,shell.input,shell.kill,tx.rollback"]]);
   expect(normalizeRuntimePermissionModes({gitPush:"inherit",delete:"inherit"},flags)).toEqual({
-   gitPush:"blocked",shell:"review",delete:"blocked",rollback:"review"});
+   write:"enabled",gitPush:"blocked",shell:"review",delete:"blocked",rollback:"review"});
   expect(normalizeRuntimePermissionModes({delete:"review"},flags).delete).toBe("review");
   const legacyDefault=new Map([["ALLOW_DELETE","true"],["ALLOW_ROLLBACK","true"],
    ["OWL_APPROVAL_MODE","enforce"]]);

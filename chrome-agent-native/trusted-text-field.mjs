@@ -47,15 +47,28 @@ export function prepareTrustedTextField(uid,expectedOrigin){
     if(eligible.length===1)el=eligible[0];
     else {
       const role=wrapper.getAttribute("role")||"";
+      // Textbox shells may create their input only after the browser sends a
+      // real click. An onclick handler is not proof that a text control is
+      // dangerous; only activate a visible, explicitly text-semantic shell.
       const semantic=["textbox","combobox","searchbox"].includes(role)||
         wrapper.hasAttribute("aria-autocomplete")||
-        wrapper.hasAttribute("data-placeholder");
+        wrapper.hasAttribute("aria-placeholder")||
+        wrapper.hasAttribute("data-placeholder")||
+        (wrapper.hasAttribute("inputmode")&&wrapper.getAttribute("inputmode")!=="none");
+      const metadata=[
+        wrapper.getAttribute("aria-label"),wrapper.getAttribute("name"),
+        wrapper.getAttribute("autocomplete"),wrapper.getAttribute("type"),
+        wrapper.getAttribute("placeholder"),wrapper.getAttribute("aria-placeholder"),
+        wrapper.getAttribute("data-placeholder")
+      ].filter(Boolean).join(" ").slice(0,500);
       if(semantic && visible(wrapper) &&
-         !wrapper.hasAttribute("onclick") &&
          wrapper.getAttribute("aria-disabled")!=="true" &&
          wrapper.getAttribute("aria-readonly")!=="true" &&
-         ["div","span","label"].includes(leaf))
-        return {activationRequired:true,uid,role};
+         (["div","span","label"].includes(leaf)||leaf.includes("-"))){
+        if(/password|passkey|otp|one.time|verification.code|security.code|token|secret|api.?key|credit.card|cc-|cvv|银行卡|密码/i.test(metadata))
+          return {error:"SENSITIVE_OR_INVALID_FIELD"};
+        return {activationRequired:true,uid,role,reason:"LAZY_TEXT_CONTROL"};
+      }
       return {error:"TEXT_TARGET_NOT_EDITABLE",
         tag:leaf,role,descendantInputCount:found.length};
     }
@@ -152,12 +165,23 @@ export function locateTrustedTextActivation(uid,expectedOrigin){
   if(!el)return {error:"AGENT_SNAPSHOT_STALE"};
   const role=el.getAttribute("role")||"";
   if(!["textbox","combobox","searchbox"].includes(role) &&
-     !el.hasAttribute("aria-autocomplete")&&!el.hasAttribute("data-placeholder"))
+     !el.hasAttribute("aria-autocomplete")&&!el.hasAttribute("aria-placeholder")&&
+     !el.hasAttribute("data-placeholder")&&
+     !(el.hasAttribute("inputmode")&&el.getAttribute("inputmode")!=="none"))
     return {error:"TEXT_ACTIVATION_NOT_SEMANTIC"};
-  if(!["div","span","label"].includes(el.tagName?.toLowerCase())||
-     el.hasAttribute("onclick")||el.getAttribute("aria-disabled")==="true"||
+  const leaf=el.tagName?.toLowerCase()||"";
+  if(!(["div","span","label"].includes(leaf)||leaf.includes("-"))||
+     el.getAttribute("aria-disabled")==="true"||
      el.getAttribute("aria-readonly")==="true")
     return {error:"TEXT_ACTIVATION_DISALLOWED"};
+  const metadata=[
+    el.getAttribute("aria-label"),el.getAttribute("name"),
+    el.getAttribute("autocomplete"),el.getAttribute("type"),
+    el.getAttribute("placeholder"),el.getAttribute("aria-placeholder"),
+    el.getAttribute("data-placeholder")
+  ].filter(Boolean).join(" ").slice(0,500);
+  if(/password|passkey|otp|one.time|verification.code|security.code|token|secret|api.?key|credit.card|cc-|cvv|银行卡|密码/i.test(metadata))
+    return {error:"SENSITIVE_OR_INVALID_FIELD"};
   const style=getComputedStyle(el),r=el.getBoundingClientRect();
   if(style.display==="none"||style.visibility==="hidden"||
      style.pointerEvents==="none"||r.width<4||r.height<4||
