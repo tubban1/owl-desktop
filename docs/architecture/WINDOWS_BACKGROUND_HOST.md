@@ -90,3 +90,46 @@ Remaining implementation: dedicated service Host binary, protected service
 credential provisioning, authenticated Desktop ↔ Host IPC, service control,
 health/restart matrix and real hardware sign-out/reboot verification. Do not
 mark this feature complete just because a startup task exists.
+
+
+## Phase 1 in DEV: signed-in user guardian (implemented 2026-10-26)
+
+`scripts/windows/dev-guardian.ps1` provides a **non-elevated, per-user
+Task Scheduler logon task**, not a Windows Service. This is a temporary
+reliability improvement, and deliberately keeps
+`signOutPersistence=NOT_SUPPORTED`.
+
+The guardian starts at user logon, monitors the loopback Runtime (`8788`),
+MCP (`8790`) and dedicated Tunnel (`18081`) every 20 seconds, and
+starts the existing Windows DEV Desktop launcher if its core has exited.
+It starts the existing encrypted-DPAPI official Tunnel launcher only after
+MCP is healthy and the exact configured Tunnel ID has no running process.
+It never kills/restarts a live Tunnel on failed probes, does not touch
+Computer MCP (`8787`), and will not start a duplicate DEV process when a
+core port is owned. A process mutex prevents duplicate guardians.
+Failures are logged locally without tokens or API keys.
+
+Windows-user operations (no administrative rights needed):
+
+```powershell
+# Check status without changing anything
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\windows\dev-guardian.ps1 -Mode Check
+
+# Enable at logon and run immediately (explicit user opt-in)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\windows\dev-guardian.ps1 -Mode Install
+
+# Undo auto-recovery (keeps working Desktop and Tunnel untouched)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\windows\dev-guardian.ps1 -Mode Uninstall
+```
+
+`Install` is idempotency-guarded: refuses duplicate scheduled task names.
+Logs live under `%LOCALAPPDATA%\OWL LAB\guardian\guardian.jsonl` with
+simple bounded rotation. Installing this task does **not** extend any file,
+Git, shell or UI permissions. If the user intentionally quits the Electron
+window, this DEV guardian may reopen it to restore Runtime/MCP; the final
+Background Host will remove this user-visible coupling.
+
+**Phase 2 is still required:** Windows SCM background Host with dedicated
+service identity, secure service credentials, independent Runtime/MCP/Tunnel,
+authenticated Desktop attach, and real locked/logoff/reboot acceptance. The
+user-session guardian cannot run through actual sign-out or hibernation.
