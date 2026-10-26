@@ -164,7 +164,53 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     return {...dispatched,submittedToSiteNotVerified:true,
       grantConsumed:true,detailsReviewed:true};
   }
+  async function extensionInfo(owner){
+    let result;
+    try{result=await req(owner,"extension_info");}
+    catch(error){
+      // The old Chrome service worker predates the reload protocol.
+      // Do not treat it as a broken Native Messaging connection.
+      if(String(error?.message||"").includes("NATIVE_ACTION_NOT_ALLOWED"))
+        return {selfReloadSupported:false,bootstrapManualReloadRequired:true};
+      throw error;
+    }
+    if(result?.selfReloadProtocol!==1||typeof result.instanceId!=="string")
+      return {selfReloadSupported:false,bootstrapManualReloadRequired:true};
+    return {...result,selfReloadSupported:true};
+  }
+  async function reloadExtension(owner,expectedVersion){
+    if(typeof expectedVersion!=="string"||
+       !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(expectedVersion))
+      throw Error("EXTENSION_EXPECTED_VERSION_REQUIRED");
+    const before=await extensionInfo(owner);
+    if(!before.selfReloadSupported)
+      throw Error("EXTENSION_RELOAD_BOOTSTRAP_REQUIRED");
+    const accepted=await req(owner,"extension_prepare_reload",{expectedVersion});
+    if(accepted?.reloadPrepared!==true||
+       accepted.previousInstanceId!==before.instanceId)
+      throw Error("EXTENSION_RELOAD_NOT_ACCEPTED");
+    for(let attempt=0;attempt<18;attempt++){
+      await new Promise(resolve=>setTimeout(resolve,750));
+      try{
+        const after=await extensionInfo(owner);
+        if(after.selfReloadSupported&&after.instanceId!==before.instanceId){
+          if(after.version!==expectedVersion)
+            throw Error("EXTENSION_RELOAD_VERSION_MISMATCH");
+          return {reloaded:true,verified:true,previousVersion:before.version,
+            version:after.version,newInstance:true,tabsPreservedFromCheckpoint:true,
+            chromeForegroundUnchanged:true};
+        }
+      }catch(error){
+        if(error.message==="EXTENSION_RELOAD_VERSION_MISMATCH")throw error;
+        // Native Messaging disconnects briefly during a legitimate reload.
+        // Never re-dispatch a reload or guess success from port connectivity.
+      }
+    }
+    throw Error("EXTENSION_RELOAD_NOT_VERIFIED");
+  }
   return {
+    extensionInfo,
+    reloadExtension,
     open:(owner,url)=>req(owner,"open",{url}),
     tabs:owner=>req(owner,"tabs"),
     use:(owner,pageId)=>req(owner,"use",{pageId}),

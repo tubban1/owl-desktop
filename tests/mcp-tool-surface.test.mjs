@@ -123,6 +123,8 @@ describe("OWL MCP compatibility surface", () => {
       "browser_open",
       "browser_agent_open",
       "browser_agent_status",
+      "browser_agent_extension_info",
+      "browser_agent_reload_extension",
       "browser_agent_tabs",
       "browser_agent_snapshot",
       "browser_agent_fill",
