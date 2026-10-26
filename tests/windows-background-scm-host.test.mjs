@@ -124,6 +124,47 @@ describe("Windows non-interactive Background Host service contract",()=>{
    expect(output).not.toContain(env.OWL_BACKGROUND_TUNNEL_KEY);
    expect(output).not.toContain(env.OWL_BACKGROUND_RUNTIME_TOKEN);
  });
+ it("authenticates service MCP health without leaking runtime or tunnel credentials",async()=>{
+  const seen=[];
+  expect(await componentHealthy("mcp",{serviceEnv:env,fetcher:async(url,opts)=>{
+    seen.push({url,headers:opts.headers});
+    return {ok:true,json:async()=>({ok:true,service:"owl-mcp"})};
+  }})).toBe(true);
+  expect(seen).toEqual([{url:"http://127.0.0.1:8790/health",
+    headers:{Authorization:"Bearer "+env.OWL_BACKGROUND_MCP_TOKEN}}]);
+  expect(seen[0].headers.Authorization).not.toContain(env.OWL_BACKGROUND_RUNTIME_TOKEN);
+  expect(seen[0].headers.Authorization).not.toContain(env.OWL_BACKGROUND_TUNNEL_KEY);
+  const noAuth=await componentHealthy("runtime",{serviceEnv:env,fetcher:async(url,opts)=>{
+    expect(opts.headers).toEqual({});
+    return {ok:true,json:async()=>({ok:true,service:"owl-runtime"})};
+  }});
+  expect(noAuth).toBe(true);
+ });
+ it("prepares an offline protected snapshot without touching running DEV or secrets",async()=>{
+  const installer=await readFile(new URL("../scripts/windows/install-background-host.ps1",import.meta.url),"utf8");
+  for(const term of ["'Prepare'","BACKGROUND_PREPARED_OFFLINE_NO_SERVICE_CHANGE",
+    "BACKGROUND_PREPARE_DEST_ALREADY_EXISTS_","BACKGROUND_DEV_GIT_NOT_CLEAN",
+    "BACKGROUND_DEV_NOT_ON_REMOTE_MAIN","git -C $dev ls-files --cached",
+    "BACKGROUND_PREPARE_REPARSE_SOURCE_REFUSED",
+    "BACKGROUND_PREPARE_REPARSE_TRACKED_FILE_REFUSED",
+    "Remove-Item -LiteralPath $createdPath -Recurse -Force",
+    "BACKGROUND_PREPARE_SOURCE_INSIDE_DEST","BACKGROUND_STATE_ACL_FAILED"])
+    expect(installer).toContain(term);
+  const start=installer.indexOf("if($Mode -eq 'Prepare'){");
+  const end=installer.indexOf("if($Mode -eq 'Stage'){");
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeGreaterThan(start);
+  const prepare=installer.slice(start,end);
+  expect(prepare).not.toMatch(/\\bStart-Service\\b|\\bStop-Service\\b|\\bStop-ScheduledTask\\b|\\bStart-ScheduledTask\\b|\\bsc\\.exe\\b/);
+  expect(prepare).not.toContain("credentials.dpapi");
+ });
+ it("keeps non-admin service inspection safe behind protected ACLs",async()=>{
+  const installer=await readFile(new URL("../scripts/windows/install-background-host.ps1",import.meta.url),"utf8");
+  expect(installer).toContain("function FileAccess([string]$file)");
+  expect(installer).toContain("Test-Path -LiteralPath $file -PathType Leaf -ErrorAction Stop");
+  expect(installer).toContain("return 'Restricted'");
+  expect(installer).toContain("Assert-Admin");
+ });
  it("requires administrator provisioning and hardcoded Windows SCM isolation",async()=>{
   const csharp=await readFile(new URL("../scripts/windows/OwlBackgroundHostService.cs",import.meta.url),"utf8");
   const script=await readFile(new URL("../scripts/windows/install-background-host.ps1",import.meta.url),"utf8");
