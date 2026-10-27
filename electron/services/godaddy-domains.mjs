@@ -1,5 +1,6 @@
 // Official GoDaddy Domains v3 API client, constrained to one domain and
 // two read/write operations. Called only by OWL Desktop's scoped provider.
+import {randomUUID} from "node:crypto";
 const endpoint="https://api.godaddy.com/v3/domains/domain-names/tbn.cc";
 export function createGoDaddyRequester({fetchImpl=fetch}={}){
   return async function request(action,pat,nameservers){
@@ -13,7 +14,7 @@ export function createGoDaddyRequester({fetchImpl=fetch}={}){
       headers:{
         Authorization:"Bearer "+pat.trim(),
         Accept:"application/json",
-        ...(modifying?{"Content-Type":"application/json"}:{}),
+        ...(modifying?{"Content-Type":"application/json","Idempotency-Key":randomUUID()}:{}),
       },
       ...(modifying?{body:JSON.stringify(nameservers)}:{}),
       redirect:"error",
