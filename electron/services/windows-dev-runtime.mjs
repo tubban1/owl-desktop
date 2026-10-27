@@ -30,6 +30,12 @@ export function windowsDevWorkspacePermissions(env=process.env){
 // Opt-in Windows *development* Runtime bridge. Production must use the signed
 // Runtime Host supervisor; this bridge never grants computer permissions.
 let ownedChild=null;
+let appliedPermissionFlags=null;
+export function getWindowsDevAppliedPermissionFlags(){
+  if(!ownedChild||ownedChild.exitCode!==null||ownedChild.signalCode!==null)
+    return null;
+  return appliedPermissionFlags?new Map(appliedPermissionFlags):null;
+}
 export async function startWindowsDevRuntime({store,baseUrl}={}){
   if(process.platform!=="win32"||
      process.env.OWL_WIN_DEV_MANAGE_RUNTIME!=="true")
@@ -105,13 +111,18 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
   ownedChild=child;
   child.stdout?.on("data",()=>{});
   child.stderr?.on("data",()=>{});
-  child.on("exit",()=>{if(ownedChild===child)ownedChild=null;});
+  child.on("exit",()=>{if(ownedChild===child){ownedChild=null;appliedPermissionFlags=null;}});
   for(let n=0;n<55;n++){
     if(child.exitCode!==null)throw Error("WINDOWS_DEV_RUNTIME_EXITED_DURING_START");
     try {
       const response=await fetch("http://127.0.0.1:8788/health",
         {signal:AbortSignal.timeout(1000)});
       if(response.ok){
+        const disclosedFlags=new Set(["ALLOW_WRITE","ALLOW_DELETE","ALLOW_SHELL",
+          "ALLOW_GIT_PUSH","ALLOW_ROLLBACK","OWL_APPROVAL_MODE","OWL_APPROVAL_ACTIONS",
+          "OWL_SCOPED_CAPABILITIES","OWL_SCOPED_ACTION_ALLOWLIST",
+          "OWL_HUMAN_APPROVAL_ENFORCE","OWL_HUMAN_APPROVAL_PUBLIC_KEY_B64"]);
+        appliedPermissionFlags=new Map(Object.entries(env).filter(([key])=>disclosedFlags.has(key)));
         console.log("OWL_WIN_MANAGED_DEV_RUNTIME_READY",{pid:child.pid,leaseVerification:true});
         return {managed:true,pid:child.pid,
           effectiveDirectoryCount:documentAccess.allowedDirectories.length,
@@ -141,4 +152,5 @@ export async function restartWindowsDevRuntime({store,baseUrl}={}){
 export function stopWindowsDevRuntime(){
   if(ownedChild?.exitCode===null){try{ownedChild.kill();}catch{}}
   ownedChild=null;
+  appliedPermissionFlags=null;
 }

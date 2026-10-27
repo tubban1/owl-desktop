@@ -34,6 +34,7 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
    setData(result);
    setMessage(result.changed===false?"Cancelled; no permission changed.":
     result.restartRequired?"Saved, NOT ACTIVE: apply to the managed Runtime and confirm the connected Runtime before trying this action. No approval has been granted.":
+    result.liveRuntimeEffective==="verified"?"Saved and verified against the running Runtime.":
     "Saved. Connected Runtime policy still needs verification; no action has been approved.");
   }
   catch(e){setMessage(String(e));}finally{setPendingMode(null);setBusy(false);}
