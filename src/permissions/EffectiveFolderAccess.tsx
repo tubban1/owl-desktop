@@ -2,9 +2,7 @@ import {useEffect,useState} from "react";
 
 type EffectiveRoots={state:"loading"|"verified"|"unavailable";roots:string[];write:boolean;delete:boolean;reason?:string};
 const normal=(value:string)=>value.replace(/[\\/]+/g,"\\").replace(/\\+$/,"").toLowerCase();
-export function EffectiveFolderAccess({saved,platform,isPackaged}:{
- saved:string[];platform:string;isPackaged:boolean
-}){
+export function EffectiveFolderAccess({saved}:{saved:string[]}){
  const [data,setData]=useState<EffectiveRoots>({state:"loading",roots:[],write:false,delete:false});
  const [revision,setRevision]=useState(0);
  const fingerprint=saved.join("|");
@@ -37,12 +35,10 @@ export function EffectiveFolderAccess({saved,platform,isPackaged}:{
      {saved.map(folder=>{
       const allowed=data.roots.some(root=>normal(root)===normal(folder)||
         normal(folder).startsWith(normal(root)+"\\"));
-      const rootIsDrive=/^[a-zA-Z]:[\\/]?$/.test(folder);
+      // Active status is determined only from the connected Runtime.
       return <div key={folder} className="allowed-folder-row">
        <code>{folder}</code>
-       <strong>{allowed?"ACTIVE · read authorized":
-        rootIsDrive&&platform==="win32"&&!isPackaged?
-          "BLOCKED · DEV disallows whole-drive access":"NOT ACTIVE · Runtime has no matching grant"}</strong>
+       <strong>{allowed?"ACTIVE · Runtime root authorized":"NOT ACTIVE · Runtime has no matching grant"}</strong>
       </div>;
      })}
     </div>

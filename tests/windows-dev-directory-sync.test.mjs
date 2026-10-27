@@ -1,40 +1,60 @@
 import {describe,it,expect} from "vitest";
 import {projectWindowsDevDocumentRoots} from "../electron/services/windows-dev-file-permissions.mjs";
 import {windowsDevWorkspacePermissions} from "../electron/services/windows-dev-runtime.mjs";
+import {applyRuntimePermissionModes} from "../electron/services/runtime-permissions.mjs";
 const home="C:\\Users\\i95i";
 const workspace=home+"\\mcp-workspace";
-const settings={allowedDirectories:[
-  home+"\\Desktop",home+"\\Documents",home+"\\Downloads","C:\\",
-]};
-const opts={homeDir:home,workspaceRoot:workspace,exists:()=>true,realpath:p=>p};
-describe("Windows DEV settings authority projection",()=>{
- it("applies saved narrow folders plus the explicit DEV workspace",()=>{
-  const result=projectWindowsDevDocumentRoots({settings,...opts});
-  expect(result.allowedDirectories).toEqual([
-   workspace,home+"\\Desktop",home+"\\Documents",home+"\\Downloads"]);
-  expect(result.blockedDirectories).toContainEqual({path:"C:\\",reason:"WHOLE_DRIVE_NOT_ALLOWED"});
-  expect(result.writeDeleteShellStillRestricted).toBe(true);
+const settings={allowedDirectories:[home+"\\Desktop",home+"\\Documents",home+"\\Downloads","C:\\"]};
+const opts={workspaceRoot:workspace,exists:()=>true,realpath:p=>p};
+
+describe("Windows Desktop explicit user authorization",()=>{
+ it("honors user-selected C drive root and normal document folders",()=>{
+  const r=projectWindowsDevDocumentRoots({settings,...opts});
+  expect(r.allowedDirectories).toEqual([
+   workspace,home+"\\Desktop",home+"\\Documents",home+"\\Downloads","C:\\"]);
+  expect(r.blockedDirectories).toEqual([]);
  });
- it("refuses drive roots, profile roots, protected folders, UNC and traversal",()=>{
-  const unsafe=["C:\\","C:\\Users","C:\\Users\\i95i",
-     "C:\\Windows","C:\\Program Files","C:\\Users\\i95i\\AppData",
-     "C:\\Users\\i95i\\Downloads\\..\\..\\Windows",
-     "\\\\server\\share\\path"];
-  const r=projectWindowsDevDocumentRoots({settings:{allowedDirectories:unsafe},...opts});
+ it("does not invent a protected-folder ban beyond Windows ACLs",()=>{
+  const locations=["C:\\","C:\\Users",home,"C:\\Windows",
+   "C:\\Program Files",home+"\\AppData"];
+  const r=projectWindowsDevDocumentRoots({settings:{allowedDirectories:locations},...opts});
+  expect(r.allowedDirectories).toEqual([workspace,...locations]);
+  expect(r.blockedDirectories).toEqual([]);
+ });
+ it("still rejects malformed relative paths and missing directories",()=>{
+  const locations=["not-absolute",".\\folder",home+"\\missing"];
+  const r=projectWindowsDevDocumentRoots({settings:{allowedDirectories:locations},...opts,
+    exists:p=>!p.endsWith("missing")});
   expect(r.allowedDirectories).toEqual([workspace]);
-  expect(r.blockedDirectories).toHaveLength(unsafe.length);
+  expect(r.blockedDirectories.map(x=>x.reason)).toEqual(["INVALID_ROOT","INVALID_ROOT","NOT_FOUND"]);
  });
- it("deduplicates case-insensitively and blocks protected realpath targets",()=>{
-  const r=projectWindowsDevDocumentRoots({settings:{allowedDirectories:[home+"\\Desktop",
-      home.toLowerCase()+"\\desktop",home+"\\LinkToWindows"]},...opts,
-    realpath:p=>p.endsWith("LinkToWindows")?"C:\\Windows\\System32":p});
-  expect(r.allowedDirectories).toEqual([workspace,home+"\\Desktop"]);
-  expect(r.blockedDirectories.some(x=>x.reason==="PROTECTED_CANONICAL_ROOT")).toBe(true);
+ it("uses canonical paths and deduplicates case insensitive",()=>{
+  const r=projectWindowsDevDocumentRoots({settings:{allowedDirectories:[
+   home+"\\Desktop",home.toLowerCase()+"\\desktop",home+"\\LinkToFiles"
+  ]},...opts,realpath:p=>p.endsWith("LinkToFiles")?"D:\\Archive":p});
+  expect(r.allowedDirectories).toEqual([workspace,home+"\\Desktop","D:\\Archive"]);
  });
- it("never silently upgrades requested delete/shell/write in developer mode",()=>{
-  const e=windowsDevWorkspacePermissions({});
-  expect(e.ALLOW_SHELL).toBe("false");
-  expect(e.ALLOW_DELETE).toBe("false");
-  expect(e.ALLOW_WRITE).toBe("false");
+ it("maps explicit enabled settings to actual Runtime capability flags",()=>{
+  const flags=new Map(Object.entries(windowsDevWorkspacePermissions({})));
+  const modes={write:"enabled",delete:"enabled",shell:"enabled",
+    gitPush:"enabled",rollback:"enabled"};
+  applyRuntimePermissionModes(flags,{runtimePermissionModes:modes});
+  for(const key of ["ALLOW_WRITE","ALLOW_DELETE","ALLOW_SHELL","ALLOW_GIT_PUSH","ALLOW_ROLLBACK"]){
+   expect(flags.get(key)).toBe("true");
+  }
+ });
+ it("uses the Windows-native shell executable",async()=>{
+  const fs=await import("node:fs/promises");
+  const source=await fs.readFile(new URL("../electron/services/windows-dev-runtime.mjs",import.meta.url),"utf8");
+  expect(source).toContain('SHELL: "powershell.exe"');
+ });
+ it("preserves off switches, no silent enabling",()=>{
+  const flags=new Map(Object.entries(windowsDevWorkspacePermissions({})));
+  const modes={write:"blocked",delete:"blocked",shell:"blocked",
+   gitPush:"blocked",rollback:"blocked"};
+  applyRuntimePermissionModes(flags,{runtimePermissionModes:modes});
+  for(const key of ["ALLOW_WRITE","ALLOW_DELETE","ALLOW_SHELL","ALLOW_GIT_PUSH","ALLOW_ROLLBACK"]){
+   expect(flags.get(key)).toBe("false");
+  }
  });
 });
