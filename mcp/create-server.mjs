@@ -2095,8 +2095,8 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     {accountId:z.string().uuid(),mailbox:z.string().min(1).max(100).default("INBOX"),uid:z.number().int().positive()},
     {title:"Read Mail",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     async(args)=>mailCall("read",args));
-  tool(server,"mail_create_draft","Store a draft encrypted on OWL Desktop. Never sends a message.",
-    {accountId:z.string().uuid(),to:z.array(z.string().email()).min(1).max(20),cc:z.array(z.string().email()).max(20).default([]),subject:z.string().max(300),text:z.string().max(200000)},
+  tool(server,"mail_create_draft","Store a local encrypted draft, optionally with verified Mac/Windows Downloads attachments. Never sends a message.",
+    {accountId:z.string().uuid(),to:z.array(z.string().email()).min(1).max(20),cc:z.array(z.string().email()).max(20).default([]),subject:z.string().max(300),text:z.string().max(200000),attachment_paths:z.array(z.string().min(1).max(4096)).max(10).default([])},
     {title:"Save Mail Draft",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
     async(args)=>mailCall("createDraft",args));
   tool(server,"mail_send_draft","Request sending a previously saved draft. The OS user must approve a native confirmation showing recipients and preview; MCP cannot self-approve.",

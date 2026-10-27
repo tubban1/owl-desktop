@@ -48,11 +48,12 @@ export class OwlMailProtocol{
         attachments:(parsed.attachments||[]).map((a,i)=>({index:i,filename:a.filename||'attachment',size:a.size||0,contentType:a.contentType||'application/octet-stream'}))};
     });
   }
-  async send(account,password,{to,cc=[],subject,text}={}){
+  async send(account,password,{to,cc=[],subject,text,attachments=[]}={}){
     if(!Array.isArray(to)||!to.length||to.length>20||!Array.isArray(cc)||cc.length>20||typeof subject!=='string'||subject.length>300||typeof text!=='string'||text.length>200000)throw Error('MAIL_DRAFT_INVALID');
     for(const a of [...to,...cc])if(typeof a!=='string'||!/^[^\s@<>]+@[^\s@<>]+$/.test(a))throw Error('MAIL_RECIPIENT_INVALID');
+    if(!Array.isArray(attachments)||attachments.length>10||attachments.some(a=>!Buffer.isBuffer(a.content)||a.content.length<1))throw Error('MAIL_ATTACHMENTS_INVALID');
     const p=MAIL_PROVIDERS[account.provider];const smtp=this.newSmtp({...p.smtp,auth:{user:account.address,pass:password},pool:false,requireTLS:true});
-    try{const info=await smtp.sendMail({from:account.address,to,cc,subject,text,disableFileAccess:true,disableUrlAccess:true});return {accepted:(info.accepted||[]).length,messageId:info.messageId||null};}
+    try{const info=await smtp.sendMail({from:account.address,to,cc,subject,text,attachments,disableFileAccess:true,disableUrlAccess:true});return {accepted:(info.accepted||[]).length,messageId:info.messageId||null};}
     finally{smtp.close?.();}
   }
 }
