@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import {randomUUID} from "node:crypto";
 import {fileURLToPath} from "node:url";
-import {OWL_DESKTOP_REPOSITORY,versionSnapshot,verifyStagedDirectory,safeCommand} from "./lib/version-sync.mjs";
+import {OWL_DESKTOP_REPOSITORY,versionSnapshot,verifyStagedDirectory,safeCommand,resolveBundledNpm} from "./lib/version-sync.mjs";
 
 const stateRoot=path.join(os.homedir(),".owl-lab","version-sync","desktop");
 let savedSource=null;
@@ -59,11 +59,11 @@ function stage(){
   if(fetched!==commit)throw Error("SYNC_REMOTE_MOVED_RETRY_SAFELY");
   safeCommand("git",["-C",temporary,"checkout","--detach",commit]);
   // Never execute this code as a live server until all gates pass.
-  const npmArgs=process.platform==="win32"?args=>["/d","/s","/c","npm.cmd "+args.join(" ")]:args=>args;
-  const npm=process.platform==="win32"?"cmd.exe":"npm";
-  safeCommand(npm,npmArgs(["ci","--ignore-scripts"]),{cwd:temporary,timeout:360000});
-  safeCommand(npm,npmArgs(["test"]),{cwd:temporary,timeout:360000});
-  safeCommand(npm,npmArgs(["run","build"]),{cwd:temporary,timeout:240000});
+  const npmCli=resolveBundledNpm();
+  if(!npmCli)throw Error("SYNC_NPM_CLI_NOT_FOUND");
+  safeCommand(process.execPath,[npmCli,"ci","--ignore-scripts"],{cwd:temporary,timeout:360000});
+  safeCommand(process.execPath,[npmCli,"test"],{cwd:temporary,timeout:360000});
+  safeCommand(process.execPath,[npmCli,"run","build"],{cwd:temporary,timeout:240000});
   if(!verifyStagedDirectory(temporary,commit))throw Error("SYNC_STAGE_MODIFIED_DURING_VERIFICATION");
   fs.renameSync(temporary,target);temporary=null;
   atomicJson(path.join(stateRoot,"last-staged.json"),{commit,verifiedAt:new Date().toISOString(),testsPassed:true});

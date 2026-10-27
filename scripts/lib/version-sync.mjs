@@ -41,3 +41,13 @@ export function safeCommand(binary,args,{cwd,timeout=600000}={}){
  if(r.status!==0){const e=new Error("SYNC_STEP_FAILED: "+binary+" "+args.slice(0,2).join(" ")+": "+(r.error?.code||r.status));e.code="SYNC_STEP_FAILED";throw e;}
  return r.stdout.trim();
 }
+
+/** Resolve npm from the same Node installation, not a login-shell PATH. */
+export function resolveBundledNpm(nodeBinary=process.execPath){
+ const base=path.dirname(nodeBinary);
+ const candidates=[
+  path.resolve(base,"..","lib","node_modules","npm","bin","npm-cli.js"),
+  path.join(base,"node_modules","npm","bin","npm-cli.js"),
+ ];
+ return candidates.find(existsSync)??null;
+}

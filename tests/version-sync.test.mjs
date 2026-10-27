@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {execFileSync} from "node:child_process";
-import {versionSnapshot,verifyStagedDirectory,OWL_DESKTOP_REPOSITORY} from "../scripts/lib/version-sync.mjs";
+import {versionSnapshot,verifyStagedDirectory,OWL_DESKTOP_REPOSITORY,resolveBundledNpm} from "../scripts/lib/version-sync.mjs";
 
 function git(dir,...args){return execFileSync("git",["-C",dir,...args],{encoding:"utf8"}).trim();}
 function fixture(work){
@@ -48,4 +48,10 @@ describe("multi-device version sync",()=>{
  it("only trusts the designated GitHub repository as the default source",()=>{
   expect(OWL_DESKTOP_REPOSITORY).toBe("https://github.com/tubban1/owl-desktop.git");
  });
+});
+
+it("resolves bundled npm without assuming launchd or Task Scheduler PATH",()=>{
+ const npmCli=resolveBundledNpm();
+ expect(npmCli).toMatch(/npm-cli\.js$/);
+ expect(fs.existsSync(npmCli)).toBe(true);
 });
