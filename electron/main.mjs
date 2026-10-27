@@ -10,7 +10,7 @@ import { assessConnectivityRecovery } from "./services/connectivity-recovery-res
 import { DesktopStore } from "./store.mjs";
 import { UsageStatisticsStore } from "./services/usage-statistics-store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
-import { startWindowsDevRuntime, stopWindowsDevRuntime, restartWindowsDevRuntime } from "./services/windows-dev-runtime.mjs";
+import { startWindowsDevRuntime, stopWindowsDevRuntime, restartWindowsDevRuntime, getWindowsDevAppliedPermissionFlags } from "./services/windows-dev-runtime.mjs";
 import { probeWindowsDevDirectMcp } from "./services/windows-dev-direct-mcp.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { startWindowsDevNativeBrowser } from "./services/windows-dev-native-browser.mjs";
@@ -2393,6 +2393,14 @@ Only this single action will be approved.`,
   }
   function currentRuntimePermissionProjection(){
     const settings=store.getSettings();
+    const windowsDevFlags=!app.isPackaged&&process.platform==="win32"?
+      getWindowsDevAppliedPermissionFlags():null;
+    if(windowsDevFlags){
+      return {...runtimePermissionProjection(settings,"",{
+        packaged:false,envOverride:windowsDevFlags,
+        reviewSupportOverride:false,liveVerified:true
+      }),source:"Managed Windows DEV Runtime"};
+    }
     if(!app.isPackaged&&devForceConnectivity){
       const status=verifiedDevPermissionStatus();
       const envOverride=new Map(Object.entries(status?.flags??{}));
@@ -2430,7 +2438,15 @@ Only this single action will be approved.`,
     if(response===1){
       if(mode==="review")store.ensureHumanApprovalSigner();
       store.setRuntimePermission(key,mode);
-      record("info","runtime","Permission preference saved, requires Runtime restart",{capability:key,mode});
+      if(!app.isPackaged && process.platform==="win32" &&
+         process.env.OWL_WIN_DEV_MANAGE_RUNTIME==="true"){
+        const applied=await applyRuntimeUserPreferences(store.getSettings());
+        record(applied.applied?"info":"warn","runtime",
+          applied.applied?"Windows managed Runtime settings applied":"Windows managed Runtime settings not applied",
+          {capability:key,mode,applied:applied.applied,reason:applied.reason});
+      }else{
+        record("info","runtime","Permission preference saved, requires Runtime restart",{capability:key,mode});
+      }
     }
     return {...currentRuntimePermissionProjection(),changed:response===1};
   });
