@@ -17,7 +17,7 @@ function field({tag="INPUT",role=null,contenteditable=false,type="text",label="N
     matches:sel=>sel.includes("data-owl-agent-target-input")&&
       attrs.get("data-owl-agent-target-input")==="owl-agent-5",
     closest:()=>null,querySelector:()=>null,querySelectorAll:()=>[],
-    getBoundingClientRect:()=>({width:120,height:30}),
+    getBoundingClientRect:()=>({left:10,top:10,right:130,bottom:40,width:120,height:30}),
     focus(){globalThis.document.activeElement=el},
     getRootNode(){return globalThis.document},
     setSelectionRange(a,b){this.selectionStart=a;this.selectionEnd=b}
@@ -111,7 +111,8 @@ describe("Agent Browser custom text fields in owner-isolated Chrome",()=>{
     expect(result).toMatchObject({filled:true,domVerified:true,activatedWidget:true,
       websitePersisted:false,systemKeyboardUsed:false,foregroundUnchanged:true});
     const methods=calls.filter(x=>x[0]==="debugger").map(x=>x[1]);
-    expect(methods).toEqual(["Input.dispatchMouseEvent","Input.dispatchMouseEvent",
+    expect(methods).toEqual(["Page.enable","Emulation.setFocusEmulationEnabled",
+      "Input.dispatchMouseEvent","Input.dispatchMouseEvent",
       "Input.dispatchMouseEvent","Input.insertText"]);
     expect(calls.some(x=>x[1]==="locateTrustedTextActivation")).toBe(true);
     expect(calls.filter(x=>x[0]==="attach")).toHaveLength(1);
@@ -207,9 +208,17 @@ describe("Custom-field page-side safeguards",()=>{
     document.elementFromPoint=()=>wrapper;
     const result=locateTrustedTextActivation("owl-agent-5",origin);
     expect(result).toMatchObject({valid:true,uid:"owl-agent-5"});
-    wrapper.setAttribute("onclick","danger()");
+    // Legitimate text widgets often use onclick to mount an inner input.
+    wrapper.setAttribute("onclick","mountEditor()");
     expect(locateTrustedTextActivation("owl-agent-5",origin)).toMatchObject({
-      error:"TEXT_ACTIVATION_DISALLOWED"});
+      valid:true,uid:"owl-agent-5"});
+    wrapper.setAttribute("aria-label","One time verification code");
+    expect(locateTrustedTextActivation("owl-agent-5",origin)).toMatchObject({
+      error:"SENSITIVE_OR_INVALID_FIELD"});
+    wrapper.setAttribute("aria-label","Negative keyword themes");
+    wrapper.getBoundingClientRect=()=>({width:120,height:30});
+    expect(locateTrustedTextActivation("owl-agent-5",origin)).toMatchObject({
+      error:"TEXT_ACTIVATION_INVALID_GEOMETRY"});
     const other=field({tag:"BUTTON",role:"button"});
     mount(other);
     expect(locateTrustedTextActivation("owl-agent-5",origin)).toMatchObject({
