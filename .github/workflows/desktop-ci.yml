@@ -172,3 +172,25 @@ jobs:
           if [ -f "$RUNNER_TEMP/owl-runtime-agent-events.pid" ]; then
             kill "$(cat "$RUNNER_TEMP/owl-runtime-agent-events.pid")" 2>/dev/null || true
           fi
+
+  version-sync-cross-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.3'
+          cache: npm
+      - run: npm ci
+      - name: Version sync contract and dirty checkout safety
+        run: npx vitest run tests/version-sync.test.mjs --maxWorkers=1
+      - name: Check platform install and staged-source scripts
+        run: |
+          node --check scripts/lib/version-sync.mjs
+          node --check scripts/sync-dev-checkouts.mjs
+          node --check scripts/install-version-stager.mjs

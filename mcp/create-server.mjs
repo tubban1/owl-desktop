@@ -8,6 +8,11 @@ import { RuntimeHttpClient } from "../electron/runtime-http-client.mjs";
 import { currentMcpRequestContext } from "./request-context.mjs";
 import { assertMissionAction } from "../electron/services/mission-approval.mjs";
 import path from "node:path";
+import {fileURLToPath} from "node:url";
+import {versionSnapshot} from "../scripts/lib/version-sync.mjs";
+const MCP_SOURCE_ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
+const MCP_STARTUP_SOURCE=versionSnapshot(MCP_SOURCE_ROOT);
+const MCP_STARTED_AT=new Date().toISOString();
 
 // Trusted tool handlers alone may create native content. Runtime JSON never
 // passes the native-result guard or provides untrusted media blocks.
@@ -453,7 +458,7 @@ const WORKSTREAM_META_TOOLS = new Set([
 
 // Safe diagnosis must not be blocked by an unacknowledged progress prompt.
 const WORKSTREAM_RECOVERY_READ_TOOLS = new Set([
-  "runtime_info","runtime_health","runtime_diagnostics","provider_status",
+  "runtime_info","device_sync_status","runtime_health","runtime_diagnostics","provider_status",
   "primitive_catalog","skill_catalog","get_capabilities","capability_manifest",
   "get_audit_log","router_catalog","list_directory","read_file","read_document","file_info",
   "search_files","read_multiple_files","list_directory_tree","git_status",
@@ -1058,8 +1063,10 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     async () => {
       const info = await invoke("info");
       return { ...info, transport: "http",
+        mcpSource:{...MCP_STARTUP_SOURCE,startedAt:MCP_STARTED_AT,liveCodeRevisionVerified:false},
         mcpToolSurface: {
-          release:"2026-10-11-p0p1",
+          release:"2026-10-28-document-sync",
+          readDocument:true,
           nativeImage:true,
           legacyReadMultipleFilesImages:true,
           auditedExternalFallback:true,
@@ -1070,6 +1077,20 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       };
     },
   );
+
+  tool(server,"device_sync_status",
+    "Read-only GitHub main vs the MCP startup code revision. Reports drift, dirty source and disconnected/offline state. Does not update or restart processes.",
+    {},{title:"OWL Device Version Sync",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    async()=>{
+      const desired=versionSnapshot(MCP_SOURCE_ROOT,{queryRemote:true});
+      const same=Boolean(desired.remoteCommit&&MCP_STARTUP_SOURCE.sourceCommit===desired.remoteCommit&&!MCP_STARTUP_SOURCE.sourceDirty);
+      return {mcpAtStartup:MCP_STARTUP_SOURCE,githubMain:desired.remoteCommit,
+        upstreamReachable:desired.remoteStatus==="verified",
+        sourceMatchesMain:desired.remoteCommit?same:null,
+        needsUpdate:desired.remoteCommit?!same:null,
+        mcpStartedAt:MCP_STARTED_AT,
+        note:"Only code identity; service reload, Electron/Runtime versions and OS permissions must be verified separately. No live process changes."};
+    });
 
   tool(
     server,
