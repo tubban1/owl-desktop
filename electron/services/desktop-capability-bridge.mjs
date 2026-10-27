@@ -12,6 +12,7 @@ export async function startDesktopCapabilityBridge({
   agentInbox,
   remoteDeviceControl,
   mailService = null,
+  providerOperations = null,
   onEvent = () => {},
 } = {}) {
   if (!token) {
@@ -71,6 +72,11 @@ export async function startDesktopCapabilityBridge({
           );
         }
         target = remoteDeviceControl();
+      } else if(domain === "provider") {
+        if(!providerOperations)throw codedError("PROVIDER_UNAVAILABLE","Provider operations are unavailable");
+        if(method!=="inspect" && method!=="switchNameservers")
+          throw codedError("PROVIDER_METHOD_NOT_ALLOWED","Provider operation is not allowed");
+        target=providerOperations;
       } else if(domain === "mail") {
         if(!mailMethods.has(method))throw codedError("MAIL_METHOD_UNSUPPORTED","Unknown mail operation");
         if(!mailService)throw codedError("MAIL_SERVICE_UNAVAILABLE","Open OWL Desktop to use mail");

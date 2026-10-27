@@ -984,7 +984,7 @@ function tool(server, name, description, schema, annotations, handler) {
   );
 }
 
-export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,userChromeBridge=null,mailService=null}={}) {
+export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,userChromeBridge=null,mailService=null,providerOperations=null}={}) {
   const server = new McpServer(
     {
       name: "owl-mcp",
@@ -1955,6 +1955,31 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       }
     },
   );
+
+  // Capability-only Vault operations: requests run inside OWL Desktop and
+  // return sanitized results. No tool can list, export, or decrypt secrets.
+  tool(server,"provider_godaddy_domain",
+    "Inspect tbn.cc nameservers using the GoDaddy credential saved in the Desktop Vault. The credential never leaves Desktop.",
+    {},{title:"Inspect GoDaddy tbn.cc",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>{
+      requireStableOwner(currentMcpRequestContext());
+      if(!providerOperations)throw Error("PROVIDER_UNAVAILABLE");
+      return providerOperations.inspect({domain:"tbn.cc",operation:"inspect"});
+    });
+  tool(server,"provider_godaddy_cloudflare_cutover",
+    "Switch only tbn.cc nameservers from verified GoDaddy originals to the exact pre-staged Cloudflare pair. Reject any other domain or nameserver target. Never returns credentials.",
+    {confirmation:z.literal("switch-tbn.cc-to-cloudflare-nova-skip")},
+    {title:"Authorize tbn.cc Nameserver Cutover",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:false},
+    async({confirmation})=>{
+      requireStableOwner(currentMcpRequestContext());
+      if(confirmation!=="switch-tbn.cc-to-cloudflare-nova-skip")throw Error("PROVIDER_CONFIRMATION_REQUIRED");
+      if(!providerOperations)throw Error("PROVIDER_UNAVAILABLE");
+      return providerOperations.switchNameservers({
+        domain:"tbn.cc",operation:"switch_ns",
+        nameservers:["nova.ns.cloudflare.com","skip.ns.cloudflare.com"],
+        expected_current:["ns29.domaincontrol.com","ns30.domaincontrol.com"]
+      });
+    });
 
   function trustedUserChrome() {
     if (!userChromeBridge) {
