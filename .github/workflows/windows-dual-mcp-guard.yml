@@ -1,0 +1,40 @@
+name: Windows dual MCP watchdog safety
+on:
+  push:
+    paths:
+      - 'scripts/windows/dual-mcp-guardian.ps1'
+      - 'tests/windows-dual-mcp-guardian.test.mjs'
+      - '.github/workflows/windows-dual-mcp-guard.yml'
+  pull_request:
+    paths:
+      - 'scripts/windows/dual-mcp-guardian.ps1'
+      - 'tests/windows-dual-mcp-guardian.test.mjs'
+      - '.github/workflows/windows-dual-mcp-guard.yml'
+jobs:
+  powershell-guard:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell with Windows language parser
+        shell: pwsh
+        run: |
+          $null = $tokens = $errors = $null
+          $file = (Resolve-Path 'scripts/windows/dual-mcp-guardian.ps1').Path
+          $null = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+      - name: Read-only Check must not install or alter tasks
+        shell: pwsh
+        run: |
+          $state = & ./scripts/windows/dual-mcp-guardian.ps1 -Mode Check | ConvertFrom-Json
+          if ($null -eq $state.computerMcp -or $null -eq $state.owlMcp) {
+            throw 'MCP_HEALTH_FIELDS_MISSING'
+          }
+          if ($state.chatgptConnection -ne 'NOT_VERIFIABLE_FROM_LOCAL_HEALTH') {
+            throw 'OVERCLAIMS_REMOTE_CONNECTIVITY'
+          }
+          if ($state.watchdogInstalled) {
+            throw 'CHECK_UNEXPECTEDLY_INSTALLED_WATCHDOG'
+          }
