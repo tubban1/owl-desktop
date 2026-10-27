@@ -88,6 +88,23 @@ test('native input selection is still prepared without activation',()=>{
   assert.equal(el.selectionEnd,3);
 });
 
+test('nonstandard type=string is accepted only when the browser normalizes it to text',()=>{
+  const el=setup('INPUT',{type:'string','aria-label':'Add negative keyword'},
+    {type:'text',value:'',selectionStart:-1,selectionEnd:-1,
+      setSelectionRange(a,b){this.selectionStart=a;this.selectionEnd=b;}});
+  const result=prep();
+  assert.equal(result.ready,true);
+  assert.equal(result.kind,'native');
+  assert.equal(el.selectionStart,0);
+});
+
+test('sensitive browser-normalized input types remain excluded',()=>{
+  setup('INPUT',{type:'password','aria-label':'Password'},
+    {type:'password',value:'',selectionStart:0,selectionEnd:0,
+      setSelectionRange(){throw Error('should never select password');}});
+  assert.equal(prep().error,'TEXT_TARGET_NOT_EDITABLE');
+});
+
 test('origin mismatch refuses all DOM interaction',()=>{
   setup('DIV',{role:'textbox'});
   assert.equal(prepareTrustedTextField('owl-agent-1','https://wrong.test').error,'TEXT_ORIGIN_CHANGED');
