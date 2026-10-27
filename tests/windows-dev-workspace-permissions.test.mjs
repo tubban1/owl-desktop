@@ -30,7 +30,8 @@ describe("Windows DEV opt-in workspace permissions",()=>{
     expect(source).toContain('$env:OWL_WIN_DEV_WORKSPACE_ACCESS -eq "true"');
     expect(source).not.toMatch(/\$env:OWL_WIN_DEV_WORKSPACE_ACCESS\s*=\s*["']true["']/);
     const runtime=await readFile(new URL("../electron/services/windows-dev-runtime.mjs",import.meta.url),"utf8");
-    expect(runtime).toContain('...windowsDevWorkspacePermissions()');
+    expect(runtime).toContain('...workspacePermissions');
+    expect(runtime).toContain('projectWindowsDevDocumentRoots');
     expect(runtime).toContain('OWL_WIN_DEV_MANAGE_RUNTIME!=="true"');
     expect(runtime).toContain('ALLOW_BROWSER:"false"');
   });

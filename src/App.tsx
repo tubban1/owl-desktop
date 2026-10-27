@@ -473,9 +473,9 @@ export default function App() {
       "wakeAliases" in patch ||
       "allowedDirectories" in patch;
     setNotice(
-      runtimePreferenceChanged && env?.isPackaged === false
+      runtimePreferenceChanged && env?.isPackaged === false && env?.platform !== "win32"
         ? "Saved · restart dev:full to apply Runtime preferences"
-        : "Settings saved",
+        : "Settings saved · verify active Runtime permissions below",
     );
     window.setTimeout(() => setNotice(""), 2400);
   };
@@ -1949,10 +1949,11 @@ export default function App() {
             onDeny={denyRuntimeApproval} />
           <section className="panel settings-panel folder-settings">
             <div className="panel-heading">
-              <div><span className="eyebrow">FILES & FOLDERS</span><h3>Folders OWL can access</h3></div>
+              <div><span className="eyebrow">FILES & FOLDERS</span><h3>{env?.platform === "win32" && env?.isPackaged === false ? "Requested folders (Windows DEV)" : "Folders OWL can access"}</h3></div>
               <button className="secondary" onClick={addAllowedFolders}><FolderOpen size={15} />Add folder</button>
             </div>
-            <p className="panel-help">OWL can only read or write normal files inside these folders. OWL LAB's own internal product data is managed separately and does not need to be added here.</p>
+            <p className="panel-help">These are saved folder selections. Actual file access also depends on the active Runtime provider, OS permissions and action policy.</p>
+            {env?.platform === "win32" && env?.isPackaged === false && <p className="panel-help" role="status">Windows DEV: these folders are requested, not proof of Runtime access. Allowed narrow roots are loaded on a controlled DEV Desktop/Runtime restart. Whole-drive roots such as C:\\ and protected system paths stay blocked. Shell, delete and unrestricted write remain disabled by the separate DEV policy even when saved modes are Enabled. Verify effective permissions in the Runtime provider status.</p>}
             <div className="allowed-folder-list">
               {settings.allowedDirectories.map((folder) => <div className="allowed-folder-row" key={folder}>
                 <span className="folder-icon"><FolderOpen size={16} /></span>

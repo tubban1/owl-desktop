@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import {projectWindowsDevDocumentRoots} from "./windows-dev-file-permissions.mjs";
 
 // Per-device, explicit local opt-in. Source code alone must never grant remote
 // developers shell or filesystem access. The launcher inherits this setting
@@ -69,6 +70,14 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
       throw Error("WINDOWS_UIA_READONLY_ADAPTER_MISSING");
     }
   }
+  const workspacePermissions=windowsDevWorkspacePermissions();
+  // The DEV workspace-write opt-in must NEVER escalate saved document roots to
+  // writable paths. A per-root read/write grant needs a separate Runtime ABI.
+  const documentAccess=workspacePermissions.ALLOW_WRITE==="true"
+    ? {allowedDirectories:[path.dirname(canonicalRoot)],blockedDirectories:[]}
+    : projectWindowsDevDocumentRoots({
+      settings:store.getSettings(),workspaceRoot:path.dirname(canonicalRoot),
+    });
   const env={
     ...process.env,
     OWL_RUNTIME_API_TOKEN:token,
@@ -77,8 +86,8 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
     OWL_RUNTIME_MODE:"production",
     PORT:"8788",
     OWL_STATE_ROOT:path.join(path.dirname(canonicalRoot),"owl-runtime-win-state"),
-    ALLOWED_DIRECTORIES:path.dirname(canonicalRoot),
-    ...windowsDevWorkspacePermissions(),
+    ALLOWED_DIRECTORIES:documentAccess.allowedDirectories.join(","),
+    ...workspacePermissions,
     ALLOW_GUI:readOnlyUi ? "true" : "false",
     ALLOW_BROWSER:"false"
   };
@@ -97,7 +106,9 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
         {signal:AbortSignal.timeout(1000)});
       if(response.ok){
         console.log("OWL_WIN_MANAGED_DEV_RUNTIME_READY",{pid:child.pid,leaseVerification:true});
-        return {managed:true,pid:child.pid};
+        return {managed:true,pid:child.pid,
+          effectiveDirectoryCount:documentAccess.allowedDirectories.length,
+          blockedDirectoryReasons:documentAccess.blockedDirectories.map(x=>x.reason)};
       }
     }catch{}
     await new Promise(resolve=>setTimeout(resolve,330));
