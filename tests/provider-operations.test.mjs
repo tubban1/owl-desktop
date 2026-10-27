@@ -36,6 +36,18 @@ describe("Vault-backed provider operations",()=>{
    expect(request.mock.calls[1][2]).toEqual(GODADDY_CLOUDFLARE_NS);
    await expect(p.switchNameservers(cutover)).rejects.toThrow("PROVIDER_UPDATE_ALREADY_ATTEMPTED");
  });
+ it("sends nameserver update with idempotency header and no token in URL or body",async()=>{
+   const fetchImpl=vi.fn(async()=>({ok:true,status:202}));
+   const request=createGoDaddyRequester({fetchImpl});
+   await expect(request("switch_ns","gd_pat_validTest1234567890",GODADDY_CLOUDFLARE_NS))
+     .resolves.toMatchObject({accepted:true,status:202});
+   const [url,params]=fetchImpl.mock.calls[0];
+   expect(url).toBe("https://api.godaddy.com/v3/domains/domain-names/tbn.cc/nameservers");
+   expect(params.method).toBe("PUT");
+   expect(params.headers["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
+   expect(JSON.parse(params.body)).toEqual(GODADDY_CLOUDFLARE_NS);
+   expect(url+params.body).not.toContain("gd_pat_");
+ });
  it("does not produce credential in API failures",async()=>{
    const fetchImpl=vi.fn(async()=>({ok:false,status:403}));
    const request=createGoDaddyRequester({fetchImpl});
