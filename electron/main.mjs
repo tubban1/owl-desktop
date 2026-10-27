@@ -8,6 +8,8 @@ import { configureOwlDesktopStorage } from "./storage-layout.mjs";
 import { installStdioEpipeGuard } from "../scripts/lib/stdio-epipe-guard.mjs";
 import { assessConnectivityRecovery } from "./services/connectivity-recovery-result.mjs";
 import { DesktopStore } from "./store.mjs";
+import { createScopedProviderOperations } from "./services/provider-operations.mjs";
+import { createGoDaddyRequester } from "./services/godaddy-domains.mjs";
 import { UsageStatisticsStore } from "./services/usage-statistics-store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
 import { startWindowsDevRuntime, stopWindowsDevRuntime, restartWindowsDevRuntime, getWindowsDevAppliedPermissionFlags } from "./services/windows-dev-runtime.mjs";
@@ -101,6 +103,17 @@ let connectivityRecordedLayer=null;
 let connectivityIncidentStartedAt=null;
 const announcedApprovalIds=new Set();
 let store;
+let scopedProviderOperations;
+function providerOperations(){
+  if(!scopedProviderOperations){
+    scopedProviderOperations=createScopedProviderOperations({
+      readCredential:()=>store.readSecret("GODADDY","global"),
+      request:createGoDaddyRequester(),
+      audit:(event)=>record("info","provider", "GoDaddy operation recorded",event),
+    });
+  }
+  return scopedProviderOperations;
+}
 let identityVault;
 let mailService;
 let tunnelSupervisor;
@@ -1604,6 +1617,7 @@ async function startMcp() {
       agentInbox,
       remoteDeviceControl: remoteDeviceControl(),
       mailService,
+      providerOperations:providerOperations(),
       userChromeBridge: windowsDevBrowser?.bridge ?? null,
       plannerContinuation: plannerContinuationStore,
       onEvent(level, message, meta) {
@@ -3400,6 +3414,7 @@ if (packagedConnectivityHostSoakOnly) {
         agentInbox,
         remoteDeviceControl,
         mailService,
+        providerOperations:providerOperations(),
         onEvent(level, message, meta) {
           record(level, "connection-host", message, meta);
         },
@@ -3564,6 +3579,7 @@ if (packagedConnectivityHostSoakOnly) {
           agentInbox,
           remoteDeviceControl,
           mailService,
+          providerOperations:providerOperations(),
           onEvent(level, message, meta) {
             record(level, "connection-host", message, meta);
           },

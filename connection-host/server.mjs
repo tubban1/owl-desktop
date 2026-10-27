@@ -134,6 +134,11 @@ const mailProxy = {
   sendDraft:(args)=>bridgeRpc("mail","sendDraft",[args]),
 };
 
+const providerProxy = {
+  inspect:(args)=>bridgeRpc("provider","inspect",[args]),
+  switchNameservers:(args)=>bridgeRpc("provider","switchNameservers",[args]),
+};
+
 const plannerContinuation = new PlannerContinuationStore({
   file: path.join(userDataRoot, "planner-continuation.json"),
 });
@@ -166,6 +171,7 @@ const mcpServer = await startOwlMcpHttpServer({
   agentInbox: agentInboxProxy,
   remoteDeviceControl: remoteDeviceProxy,
   mailService: mailProxy,
+  providerOperations: providerProxy,
   plannerContinuation,
   fileDelivery: {
     send:async (path,authorize)=>{
