@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { registerBrowserWorkflowTools } from "./browser-workflow-tools.mjs";
 import { readAuthorizedLocalImage } from "./native-image.mjs";
+import { readAuthorizedDocument } from "./local-document.mjs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { RuntimeHttpClient } from "../electron/runtime-http-client.mjs";
@@ -454,7 +455,7 @@ const WORKSTREAM_META_TOOLS = new Set([
 const WORKSTREAM_RECOVERY_READ_TOOLS = new Set([
   "runtime_info","runtime_health","runtime_diagnostics","provider_status",
   "primitive_catalog","skill_catalog","get_capabilities","capability_manifest",
-  "get_audit_log","router_catalog","list_directory","read_file","file_info",
+  "get_audit_log","router_catalog","list_directory","read_file","read_document","file_info",
   "search_files","read_multiple_files","list_directory_tree","git_status",
   "git_diff","git_log","list_processes","get_process_output","task_list",
   "task_status","orchestration_snapshot","remote_task_status","device_list",
@@ -1235,6 +1236,8 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       args: { path },
     })),
   );
+
+  tool(server, "read_document", "Read local PDF/DOCX/XLSX/PPTX using Runtime file authorization.", {path:z.string().min(1)}, {title:"Read Document",readOnlyHint:true}, async ({path})=>readAuthorizedDocument(path,async target=>primitiveResult(await invoke("primitive.call",{primitive:"fs.stat",op:"get",args:{path:target}}))));
 
   tool(
     server,
