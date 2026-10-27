@@ -27,6 +27,45 @@ OWL LAB Runtime executes only after verifying a **device-bound, Ed25519-signed l
 
 For an explicitly self-hosted Cloud, operator must provide its own independently verified public key via `OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE`, and may specify `OWL_RUNTIME_LEASE_EXPECTED_SPKI_SHA256`. Automatic hosted-key discovery is restricted to OWL's exact official HTTPS origin.
 
+
+## Windows source installation (public verifier bootstrap)
+
+Windows users starting the development Desktop via \`scripts/windows/dev-desktop.ps1\`
+get the same **pinned official hosted-Cloud verifier bootstrap** as macOS
+\`npm run dev:full\`. No maintainer-issued PEM attachment, private signing
+key, or custom account approval is necessary for this trust prerequisite.
+
+1. Clone the latest \`owl-desktop\` and matching \`owl-runtime\` checkouts,
+   install dependencies, and build Runtime as described in the Windows
+   development setup. Start with the Windows source launcher.
+2. Before launching Electron, the script runs
+   \`node scripts/bootstrap-runtime-lease-trust.mjs\` and installs/verifies
+   the official Ed25519 **public** verifier under
+   \`%USERPROFILE%\.owl-lab\trust\owl-cloud-dev-runtime-lease-public.pem\`.
+   A previously installed \`owl-cloud-runtime-lease-public.pem\` in the
+   development workspace is supported only after the **same fixed SPKI pin**
+   is validated. An explicit \`OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE\` is also
+   supported; every key is verified before use.
+3. The launcher passes the verified public-key path directly to the managed
+   Runtime. It never disables signature enforcement, changes device
+   registration or overwrites an unrecognized verifier.
+4. Sign into your enrolled Cloud account in Desktop and use
+   **Reauthorize**. Only a freshly signed, device-bound Cloud authorization
+   lease (not the existence of this public key or a healthy Tunnel) can bring
+   the Runtime to \`READY\`.
+
+A first-start network outage or a wrong pin blocks startup with
+\`WINDOWS_DEV_RUNTIME_TRUST_BOOTSTRAP_FAILED\` and the underlying verifier
+diagnostic. Once the previously installed public key matches the pinned SPKI,
+it can be used offline without changing the signer trust. An official key
+rotation requires publishing and reviewing a new independent source pin.
+
+This is **Windows source/development bootstrap**, not certification of the
+Windows production installer, Native Windows GUI control, browser transport,
+or a separate ChatGPT end-to-end tool call. The user's own Windows report on
+Issue #34 confirms a successful signed Runtime lease with manually installed
+official verifier; that report does not certify all those other subsystems.
+
 ## Local service recovery independent of Tunnel
 
 For a source/dev install, keep the coordinator (`npm run dev:full`) alive. Exiting the Electron child can cause a temporary dev supervisor to stop its Connection Host even though an independently operated OpenAI Tunnel reports `ready`. This does **not** imply a crash. Do not recreate the Tunnel or device just to restart local services.
