@@ -1,4 +1,4 @@
-import test from 'node:test';
+import {it as test} from 'vitest';
 import assert from 'node:assert/strict';
 import {prepareTrustedTextField,locateTrustedTextActivation} from '../chrome-agent-native/trusted-text-field.mjs';
 

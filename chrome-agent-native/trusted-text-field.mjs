@@ -186,6 +186,10 @@ export function locateTrustedTextActivation(uid,expectedOrigin){
   if(/password|passkey|otp|one.time|verification.code|security.code|token|secret|api.?key|credit.card|cc-|cvv|银行卡|密码/i.test(metadata))
     return {error:"SENSITIVE_OR_INVALID_FIELD"};
   const style=getComputedStyle(el),r=el.getBoundingClientRect();
+  // Never dispatch a trusted click using NaN, infinite or partial geometry.
+  // Offscreen/invalid fixture coordinates must fail closed just like hidden UI.
+  if(![r.left,r.top,r.right,r.bottom,r.width,r.height,innerWidth,innerHeight]
+      .every(Number.isFinite))return {error:"TEXT_ACTIVATION_INVALID_GEOMETRY"};
   if(style.display==="none"||style.visibility==="hidden"||
      style.pointerEvents==="none"||r.width<4||r.height<4||
      r.bottom<=0||r.right<=0||r.top>=innerHeight||r.left>=innerWidth)
