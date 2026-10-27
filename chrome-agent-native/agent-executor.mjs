@@ -519,6 +519,9 @@ export function createNativeAgentExecutor(chrome,storage){
         const latest=await chrome.tabs.get(tabId);
         if(urlOrigin(latest.url)!==origin)throw Error("TEXT_ORIGIN_CHANGED");
         if(prepared.activationRequired){
+          // Scoped to the Agent-owned tab; does not foreground Chrome or move OS input.
+          await chrome.debugger.sendCommand(target,"Page.enable");
+          await chrome.debugger.sendCommand(target,"Emulation.setFocusEmulationEnabled",{enabled:true});
           const point=await inject(tabId,locateTrustedTextActivation,[args.uid,origin]);
           if(point?.error||!point?.valid)throw Error(point?.error||"TEXT_ACTIVATION_UNSAFE");
           await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
@@ -527,6 +530,8 @@ export function createNativeAgentExecutor(chrome,storage){
             type:"mousePressed",x:point.x,y:point.y,button:"left",clickCount:1});
           await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
             type:"mouseReleased",x:point.x,y:point.y,button:"left",clickCount:1});
+          // Allow the browser to finish handling the trusted activation click.
+          await new Promise(resolve=>setTimeout(resolve,150));
           activated=true;
           prepared=await inject(tabId,prepareTrustedTextField,[args.uid,origin]);
           if(prepared?.error)throw Error(prepared.error);
