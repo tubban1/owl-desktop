@@ -1,18 +1,27 @@
-# Windows Desktop saved folders versus Runtime effective access (2026-10-27)
+# Windows OWL Desktop user-authorized filesystem — 2026-10-27
 
-## Observed discrepancy
-OWL Desktop Settings showed four requested paths: C:\Users\i95i\Desktop, C:\Users\i95i\Documents, C:\Users\i95i\Downloads, and C:\ (entire volume).
-The persisted Settings JSON in APPDATA\OWL LAB\desktop\settings.json matched all four paths and recorded shell, delete, Git push and rollback as enabled.
-The live OWL Runtime provider showed only C:\Users\i95i\mcp-workspace and reported shell, write and delete disabled. Runtime list_directory calls for all four saved paths failed with outside ALLOWED_DIRECTORIES; only the workspace was readable.
-An older computer-mcp connector reported a DIFFERENT root and permissions; its configuration is independent, not evidence of OWL Runtime authority.
+## Proven issue
+The Windows development Desktop persisted the user's explicit folders including `C:\\`, but its managed Runtime had hard-coded `mcp-workspace` as the sole filesystem root. Separate DEV flags forced Shell, Write, Delete, Git Push and Rollback off even when Settings stored `enabled`.
 
-## Root cause
-The Windows Desktop is an unpackaged Electron DEV build from mcp-workspace. electron/services/windows-dev-runtime.mjs hard-coded the Runtime ALLOWED_DIRECTORIES to the parent of its pinned Runtime checkout, ignoring Desktop settings. The DEV launcher separately forces shell/delete off. Settings persisted the requested folders but did not apply them at the running Runtime; the UI transiently announced dev restart and misleadingly labeled the requested list as actual access.
+## Contract and solution
+Desktop **user-selected root directories are actual authorizations**. The Runtime includes them, including entire volumes, subject to the Windows OS access control and actual file existence. The application must not silently introduce a blanket root, profile or system-directory ban that contradicts the user's express approval. Invalid paths or inaccessible paths yield a clear error.
 
-## Remediation
-New projectWindowsDevDocumentRoots projects existing, canonicalized narrow saved folders into the read-only Windows DEV Runtime on its next controlled restart, while retaining the existing workspace. Drive roots, profile-wide, protected system/credentials, network UNC and unresolved paths fail closed. If the special Windows DEV workspace write-opt-in is enabled, do not broaden its existing workspace-only filesystem scope: per-root read/write capability separation must be implemented before enabling such mixed grants.
-The UI now calls them requested folders, with a persistent description of DEV restrictions. Shell, Delete and unrestricted write are not enabled just because a saved toggle requests them.
+On each managed Windows DEV Runtime startup:
+- Read saved `allowedDirectories` and canonicalize/deduplicate roots (including `C:\\`).
+- Apply `runtimePermissionModes` using the **same shared** `applyRuntimePermissionModes` logic used for packaged Runtime. On/Off must be honored. Ask depends on Runtime signed-approval support.
+- Use `powershell.exe` for the Windows Shell provider, which invokes commands with `-c`.
+- Windows Desktop Settings displays both saved roots and the live Runtime filesystem roots and Write/Delete effective switches. Updating folders restarts only the owned development Runtime.
 
-## Acceptance and limitations
-Build passed and 134 test files / 618 automated tests passed on Mac. A Windows live Runtime restart and provider_status/read of all narrow roots is STILL required before claiming Windows fixed in production.
-A safe product feature should show requested and effective grants separately with last applied timestamp, source and denial reason. Do not equate the legacy Computer MCP provider grants with OWL Runtime permissions.
+## Windows live acceptance evidence
+After updated Windows Desktop and managed Runtime restarted:
+- Live filesystem provider listed `mcp-workspace`, Desktop, Documents, Downloads, **and `C:\\`**.
+- Provider reported Write=true, Delete=true; Shell enabled, Git Push=true and Rollback=true.
+- `list_directory('C:\\\\')` succeeded; `file_info('C:\\\\Windows')` succeeded.
+- Created test file in Downloads, read exact contents, then deleted it; **all successful**.
+- `execute_command` running a PowerShell echo returned exitCode 0.
+- The live Desktop persists the user's 4 folders; no user files were modified during acceptance except the short-lived test file.
+
+## Scope
+An enabled feature remains bounded by the Windows operating-system rights of the user's account. A Runtime grant does not make arbitrary operations safe or make another connector share these permissions. Do not confuse a saved Desktop permission with a proven live Runtime capability. Never describe a permission as active without reading the live provider and running an appropriately scoped check.
+
+The original 2026-10-27 conservative Windows DEV restrictions were superseded by the user's explicit authorization and replaced as part of this repair.

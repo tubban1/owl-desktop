@@ -1954,7 +1954,7 @@ export default function App() {
               <button className="secondary" onClick={addAllowedFolders}><FolderOpen size={15} />Add folder</button>
             </div>
             <p className="panel-help">These are saved folder selections. Actual file access also depends on the active Runtime provider, OS permissions and action policy.</p>
-            {env?.platform === "win32" && env?.isPackaged === false && <p className="panel-help" role="status">Windows DEV: these folders are requested, not proof of Runtime access. Allowed narrow roots are loaded on a controlled DEV Desktop/Runtime restart. Whole-drive roots such as C:\\ and protected system paths stay blocked. Shell, delete and unrestricted write remain disabled by the separate DEV policy even when saved modes are Enabled. Verify effective permissions in the Runtime provider status.</p>}
+            {env?.platform === "win32" && env?.isPackaged === false && <p className="panel-help" role="status">Windows DEV: these folders are requested, not proof of Runtime access. Allowed narrow roots are loaded on a controlled DEV Desktop/Runtime restart. Explicitly selected drive roots are passed to Runtime. Write, delete, shell, Git push, and rollback follow the individually saved permission modes. Verify effective permissions in the Runtime provider status.</p>}
             <div className="allowed-folder-list">
               {settings.allowedDirectories.map((folder) => <div className="allowed-folder-row" key={folder}>
                 <span className="folder-icon"><FolderOpen size={16} /></span>
@@ -1963,7 +1963,7 @@ export default function App() {
               </div>)}
               {settings.allowedDirectories.length === 0 && <div className="empty folder-empty">No folders are allowed. OWL cannot access your normal files until you add one.</div>}
             </div>
-            <EffectiveFolderAccess saved={settings.allowedDirectories} platform={env?.platform??"unknown"} isPackaged={env?.isPackaged??false} />
+            <EffectiveFolderAccess saved={settings.allowedDirectories} />
           </section>
 
           <section className="panel settings-panel">

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import {projectWindowsDevDocumentRoots} from "./windows-dev-file-permissions.mjs";
+import {applyRuntimePermissionModes} from "./runtime-permissions.mjs";
 
 // Per-device, explicit local opt-in. Source code alone must never grant remote
 // developers shell or filesystem access. The launcher inherits this setting
@@ -70,16 +71,21 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
       throw Error("WINDOWS_UIA_READONLY_ADAPTER_MISSING");
     }
   }
-  const workspacePermissions=windowsDevWorkspacePermissions();
-  // The DEV workspace-write opt-in must NEVER escalate saved document roots to
-  // writable paths. A per-root read/write grant needs a separate Runtime ABI.
-  const documentAccess=workspacePermissions.ALLOW_WRITE==="true"
-    ? {allowedDirectories:[path.dirname(canonicalRoot)],blockedDirectories:[]}
-    : projectWindowsDevDocumentRoots({
-      settings:store.getSettings(),workspaceRoot:path.dirname(canonicalRoot),
-    });
+  const desktopSettings=store.getSettings();
+  const documentAccess=projectWindowsDevDocumentRoots({
+    settings:desktopSettings,workspaceRoot:path.dirname(canonicalRoot),
+  });
+  // Use the same Desktop On/Off/Ask permission mapping as the packaged Runtime.
+  // The user-selected directories, including volume roots, are not downgraded.
+  const runtimeFlags=new Map(Object.entries({
+    ...process.env,...windowsDevWorkspacePermissions(),
+  }));
+  applyRuntimePermissionModes(runtimeFlags,desktopSettings,{
+    humanApprovalPublicKey:store.getHumanApprovalPublicKey?.()??null,
+    runtimeSignedApprovalSupported:false,
+  });
   const env={
-    ...process.env,
+    ...Object.fromEntries(runtimeFlags),
     OWL_RUNTIME_API_TOKEN:token,
     OWL_RUNTIME_LEASE_PUBLIC_KEY_FILE:canonicalPublicKey,
     OWL_RUNTIME_ACCESS_MODE:"enforced",
@@ -87,9 +93,10 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
     PORT:"8788",
     OWL_STATE_ROOT:path.join(path.dirname(canonicalRoot),"owl-runtime-win-state"),
     ALLOWED_DIRECTORIES:documentAccess.allowedDirectories.join(","),
-    ...workspacePermissions,
     ALLOW_GUI:readOnlyUi ? "true" : "false",
-    ALLOW_BROWSER:"false"
+    ALLOW_BROWSER:"false",
+    // Runtime shellOps uses SHELL with the portable -c argument; PowerShell supports -c on Windows.
+    SHELL: "powershell.exe"
   };
   const child=spawn("node.exe",[entry],{
     cwd:canonicalRoot,env,windowsHide:true,shell:false,
