@@ -13,7 +13,7 @@ function validId(v){if(typeof v!=='string'||!/^[a-f0-9-]{36}$/.test(v))throw cod
 function read(file){try{const records=JSON.parse(fs.readFileSync(file,'utf8'));return Array.isArray(records)?records:[];}catch(e){if(e?.code==='ENOENT')return [];throw coded('MAIL_ACCOUNT_STORE_INVALID');}}
 function write(file,rows){fs.mkdirSync(path.dirname(file),{recursive:true,mode:0o700});const temporary=file+'.'+randomUUID()+'.tmp';try{fs.writeFileSync(temporary,JSON.stringify(rows,null,2),{mode:0o600,flag:'wx'});fs.renameSync(temporary,file);}finally{try{fs.unlinkSync(temporary);}catch{}}}
 export class OwlMailService{
- constructor({file,store,protocol=new OwlMailProtocol(),approveSend=async()=>false,attachmentRoots=[path.join(os.homedir(),'Downloads')]}={}){
+ constructor({file,store,protocol=new OwlMailProtocol(),approveSend=async()=>false,attachmentRoots=['Downloads','Documents','Desktop'].map(dir=>path.join(os.homedir(),dir))}={}){
   if(!file||!store?.readSecret||!store?.upsertSecret)throw coded('MAIL_VAULT_REQUIRED');
   Object.assign(this,{file,store,protocol,approveSend,attachmentRoots});this.sending=new Set();
  }

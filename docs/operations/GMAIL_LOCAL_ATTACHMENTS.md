@@ -8,7 +8,7 @@ The Gmail plugin in ChatGPT operates in a cloud file environment and cannot dere
 
 OWL Mail now accepts the Gmail provider at Settings > Mail accounts. Google app passwords (when enabled by Google) are entered locally and stored in Desktop's OS-backed encrypted vault. This is a **separate account connection** from the first-party ChatGPT Gmail plugin; Gmail OAuth tokens cannot be transferred or reused between these integrations.
 
-Use mail_create_draft with attachment_paths listing fully qualified local files under the current OS user's Downloads directory. This stores only SHA-256 fingerprints, file metadata and original paths in the encrypted local draft; it does not upload the PDFs, write them to S3 or copy them into ChatGPT.
+Use mail_create_draft with attachment_paths listing fully qualified local files under the current OS user's Downloads, Documents or Desktop directories. This stores only SHA-256 fingerprints, file metadata and original paths in the encrypted local draft; it does not upload the PDFs, write them to S3 or copy them into ChatGPT.
 
 Limits: 10 attachments, 15 MiB aggregate, approved standard document/image extensions, no symlinks, dotfiles or protected credential locations. Before sending, mail_send_draft displays native OS approval with attachment names and sizes. It re-reads and verifies each file; modified files abort before any SMTP call. Nodemailer accepts in-memory Buffer attachments only; filesystem and URL reads inside Nodemailer are disabled.
 

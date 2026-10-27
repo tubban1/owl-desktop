@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 const MAX_FILES=10;
 const MAX_TOTAL_BYTES=15*1024*1024; // Gmail's MIME/base64 adds ~33% overhead.
 const BLOCKED_PARTS=new Set(['.ssh','.aws','.gnupg','.config','Keychains','.owl-runtime-dev','.computer-mcp']);
-const ALLOWED_EXTENSIONS=new Set(['.pdf','.txt','.md','.csv','.docx','.xlsx','.pptx','.png','.jpg','.jpeg','.webp','.zip']);
+const ALLOWED_EXTENSIONS=new Set(['.pdf','.txt','.md','.csv','.json','.xml','.html','.htm','.rtf','.odt','.ods','.odp','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.pages','.numbers','.key','.png','.jpg','.jpeg','.webp','.gif','.heic','.zip']);
 function invalid(code){const error=new Error(code);error.code=code;throw error;}
 function under(root,file){
  const rel=path.relative(root,file);
@@ -42,7 +42,7 @@ function capture(file,roots,withContent){
 function enforceTotal(files){
  if(files.reduce((sum,f)=>sum+f.size,0)>MAX_TOTAL_BYTES)invalid('MAIL_ATTACHMENTS_TOO_LARGE');
 }
-export function snapshotLocalAttachments(files=[],roots=[path.join(os.homedir(),'Downloads')]){
+export function snapshotLocalAttachments(files=[],roots=['Downloads','Documents','Desktop'].map(dir=>path.join(os.homedir(),dir))){
  if(!Array.isArray(files)||files.length>MAX_FILES||files.some(f=>typeof f!=='string'))invalid('MAIL_ATTACHMENT_LIST_INVALID');
  if(new Set(files).size!==files.length)invalid('MAIL_ATTACHMENT_DUPLICATE');
  const captured=files.map(file=>capture(file,roots,false));
@@ -50,7 +50,7 @@ export function snapshotLocalAttachments(files=[],roots=[path.join(os.homedir(),
  enforceTotal(captured);
  return captured;
 }
-export function readVerifiedLocalAttachments(descriptors=[],roots=[path.join(os.homedir(),'Downloads')]){
+export function readVerifiedLocalAttachments(descriptors=[],roots=['Downloads','Documents','Desktop'].map(dir=>path.join(os.homedir(),dir))){
  if(!Array.isArray(descriptors)||descriptors.length>MAX_FILES)invalid('MAIL_ATTACHMENT_LIST_INVALID');
  const files=descriptors.map(before=>{
   const current=capture(before.path,roots,true);
