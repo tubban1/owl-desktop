@@ -116,6 +116,21 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
   child.kill();
   throw Error("WINDOWS_DEV_RUNTIME_STARTUP_TIMEOUT");
 }
+export async function restartWindowsDevRuntime({store,baseUrl}={}){
+  if(process.platform!=="win32"||process.env.OWL_WIN_DEV_MANAGE_RUNTIME!=="true")
+    return {managed:false,reason:"NOT_WINDOWS_MANAGED_DEV"};
+  const child=ownedChild;
+  if(!child) return {managed:false,reason:"NOT_DESKTOP_OWNED_RUNTIME"};
+  if(child.exitCode===null && child.signalCode===null){
+    const exited=new Promise(resolve=>child.once("exit",resolve));
+    if(!child.kill())throw Error("WINDOWS_DEV_RUNTIME_STOP_FAILED");
+    const stopped=await Promise.race([exited.then(()=>true),
+      new Promise(resolve=>setTimeout(()=>resolve(false),5000))]);
+    if(!stopped)throw Error("WINDOWS_DEV_RUNTIME_RESTART_STOP_TIMEOUT");
+  }
+  if(ownedChild===child)ownedChild=null;
+  return startWindowsDevRuntime({store,baseUrl});
+}
 export function stopWindowsDevRuntime(){
   if(ownedChild?.exitCode===null){try{ownedChild.kill();}catch{}}
   ownedChild=null;

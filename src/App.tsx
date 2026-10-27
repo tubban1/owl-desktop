@@ -18,6 +18,7 @@ import owlLogo from "../assets/owl-logo-ui.png";
 import { StatisticsPanel } from "./statistics/StatisticsPanel";
 import { deviceCopy } from "./deviceCopy";
 import { RuntimePermissionCenter } from "./permissions/RuntimePermissionCenter";
+import { EffectiveFolderAccess } from "./permissions/EffectiveFolderAccess";
 import { MissionReviewPanel } from "./permissions/MissionReviewPanel";
 import { MailAccountsPanel } from "./mail/MailAccountsPanel";
 import type { UsageStatisticsSnapshot } from "./statistics/statisticsModel";
@@ -1962,6 +1963,7 @@ export default function App() {
               </div>)}
               {settings.allowedDirectories.length === 0 && <div className="empty folder-empty">No folders are allowed. OWL cannot access your normal files until you add one.</div>}
             </div>
+            <EffectiveFolderAccess saved={settings.allowedDirectories} platform={env?.platform??"unknown"} isPackaged={env?.isPackaged??false} />
           </section>
 
           <section className="panel settings-panel">
