@@ -240,3 +240,28 @@ Windows administrator. There is no automatic credential migration from
 Electron safeStorage. Protect the service account's distinct Runtime/MCP
 and Cloud Tunnel keys; complete Cloud enrollment, authenticated Desktop
 reattachment, and sign-out/reboot validation before disabling user Guardian.
+
+
+### Local operator-approved credential enrollment (no remote key extraction)
+
+The explicit \`ProvisionCloudApproved\` administrator action is available
+after a successful \`Stage\`:
+it generates **distinct, random 64-character Runtime and MCP API tokens**
+locally, asks the Windows administrator through \`Read-Host -AsSecureString\`
+for the **already Cloud-authorized control-plane key** corresponding to the
+configured Windows Tunnel ID, then encrypts all three credentials under DPAPI
+LocalMachine with an admin/SYSTEM/LocalService-only file ACL. The ciphertext
+is written into a temporary file, locked down *before* an atomic rename to
+\`credentials.dpapi\`, and avoids updating any running service or Tunnel.
+
+Neither ChatGPT nor any remote MCP agent should retrieve or decrypt the
+existing user-DPAPI Tunnel key, ask the user to paste it into chat, or create
+a random substitute key (which Cloud would reject). The system does not yet
+provide a safe one-click Cloud-authorized secret transfer. Without an
+authorized key made available through the trusted local Windows prompt,
+STOP here; \`ProvisionCloudApproved\` is not the same as Cloud key issuance.
+
+Provisioning is not service installation. \`Install\` still refuses occupied
+ports and an active user-session Guardian. A separate, reversible cutover
+must be validated with an offline service credential probe and authenticated
+Desktop attachment before actually stopping the working Windows DEV.

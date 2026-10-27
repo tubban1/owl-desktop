@@ -2,7 +2,7 @@
 # This script never installs/restarts anything in Check or Build mode.
 [CmdletBinding()]
 param(
- [ValidateSet('Check','Build','Prepare','Stage','Provision','Install','Uninstall')]
+ [ValidateSet('Check','Build','Prepare','Stage','Provision','ProvisionCloudApproved','Install','Uninstall')]
  [string]$Mode='Check',
  [string]$RuntimeRoot,[string]$McpRoot,[string]$TunnelExe,
  [string]$PublicKeyFile,[string]$AllowedDirectories,[string]$StateRoot,
@@ -261,6 +261,66 @@ if($Mode -eq 'Provision'){
  Write-Output 'BACKGROUND_SERVICE_CREDENTIALS_PROVISIONED'
  exit 0
 }
+
+if($Mode -eq 'ProvisionCloudApproved'){
+ # Explicit administrator action. No legacy DPAPI decryption, no reading
+ # user vaults. Operator enters an ALREADY Cloud-authorized tunnel key through
+ # the local secure prompt; Runtime/MCP tokens are generated locally.
+ Assert-Staged
+ if(Get-Service -Name $name -ErrorAction SilentlyContinue){
+   throw 'BACKGROUND_PROVISION_SERVICE_ALREADY_REGISTERED'
+ }
+ if(Test-Path -LiteralPath $secrets -PathType Leaf){
+   throw 'BACKGROUND_PROVISION_CREDENTIAL_ALREADY_PRESENT'
+ }
+ Add-Type -AssemblyName System.Security
+ $serviceConfig=Get-Content -LiteralPath $cfg -Raw | ConvertFrom-Json
+ if($serviceConfig.tunnelId -notmatch '^tunnel_[a-f0-9]{32}$'){
+   throw 'BACKGROUND_PROVISION_TUNNEL_IDENTITY_INVALID'
+ }
+ $tunnelKey=Secure-Prompt ('Cloud-authorized key for '+$serviceConfig.tunnelId+' (local secure input)')
+ $randomA=$null
+ $randomB=$null
+ $clearBlob=$null
+ $cipher=$null
+ $tmp=Join-Path $root ('credentials.'+[Guid]::NewGuid().ToString('N')+'.tmp')
+ $completed=$false
+ try{
+   if($tunnelKey.Length -lt 24 -or $tunnelKey -match '\s' -or $tunnelKey.Length -gt 4096){
+     throw 'BACKGROUND_PROVISION_TUNNEL_KEY_INVALID'
+   }
+   $randomA=New-Object byte[] 48
+   $randomB=New-Object byte[] 48
+   $rng=[Security.Cryptography.RandomNumberGenerator]::Create()
+   try{$rng.GetBytes($randomA);$rng.GetBytes($randomB)}finally{$rng.Dispose()}
+   $runtimeToken=[Convert]::ToBase64String($randomA).TrimEnd('=').Replace('+','-').Replace('/','_')
+   $mcpToken=[Convert]::ToBase64String($randomB).TrimEnd('=').Replace('+','-').Replace('/','_')
+   if($runtimeToken -eq $mcpToken){throw 'BACKGROUND_PROVISION_TOKEN_COLLISION'}
+   $clearBlob=[Text.Encoding]::UTF8.GetBytes($runtimeToken+[char]10+$mcpToken+[char]10+$tunnelKey)
+   $cipher=[Security.Cryptography.ProtectedData]::Protect(
+     $clearBlob,$null,[Security.Cryptography.DataProtectionScope]::LocalMachine)
+   [IO.File]::WriteAllBytes($tmp,$cipher)
+   & icacls.exe $tmp '/inheritance:r' '/grant:r' '*S-1-5-19:R' '*S-1-5-32-544:F' '*S-1-5-18:F' | Out-Null
+   if($LASTEXITCODE -ne 0){throw 'BACKGROUND_PROVISION_SECRET_ACL_FAILED'}
+   if(Test-Path -LiteralPath $secrets -PathType Leaf){throw 'BACKGROUND_PROVISION_RACE_CREDENTIAL_EXISTS'}
+   Move-Item -LiteralPath $tmp -Destination $secrets -ErrorAction Stop
+   $completed=$true
+ } finally {
+   if($randomA){[Array]::Clear($randomA,0,$randomA.Length)}
+   if($randomB){[Array]::Clear($randomB,0,$randomB.Length)}
+   if($clearBlob){[Array]::Clear($clearBlob,0,$clearBlob.Length)}
+   if($cipher){[Array]::Clear($cipher,0,$cipher.Length)}
+   $tunnelKey=$null;$runtimeToken=$null;$mcpToken=$null
+   if(-not $completed -and (Test-Path -LiteralPath $tmp -PathType Leaf)){
+     Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+   }
+ }
+ if(-not $completed){throw 'BACKGROUND_PROVISION_ABORTED'}
+ Write-Output 'BACKGROUND_SERVICE_CREDENTIALS_PROVISIONED_BY_LOCAL_OPERATOR'
+ Write-Output 'BACKGROUND_EXISTING_DEV_TUNNEL_UNCHANGED'
+ exit 0
+}
+
 if($Mode -eq 'Install'){
  Assert-Staged
  if(-not(Test-Path $secrets -PathType Leaf)){throw 'BACKGROUND_SERVICE_CREDENTIAL_REQUIRED'}
