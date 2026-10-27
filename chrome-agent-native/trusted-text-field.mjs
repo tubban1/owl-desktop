@@ -74,7 +74,10 @@ export function prepareTrustedTextField(uid,expectedOrigin){
     }
   }
   const tag=el.tagName?.toLowerCase();
-  const type=(el.getAttribute("type")||"text").toLowerCase();
+  // The browser normalizes invalid input type attributes (e.g. Google Ads type="string")
+  // to a text control. Use the effective DOM type; keep raw attributes in
+  // the separate sensitive-field metadata check below.
+  const type=(el.type||el.getAttribute("type")||"text").toLowerCase();
   const native=["input","textarea"].includes(tag)&&
     (tag==="textarea"||["text","search","url","email","tel"].includes(type));
   const rich=el.isContentEditable===true;
