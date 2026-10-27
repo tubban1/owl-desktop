@@ -3300,7 +3300,7 @@ if (packagedConnectivityHostSoakOnly) {
     mailService = new OwlMailService({
       file:path.join(app.getPath("userData"),"mail-accounts.json"),
       store,
-      approveSend:async({from,to,cc,subject,preview})=>{
+      approveSend:async({from,to,cc,subject,preview,attachments=[]})=>{
         if(!mainWindow||mainWindow.isDestroyed())return false;
         const reply=await dialog.showMessageBox(mainWindow,{
           type:"question",title:"Approve email send",buttons:["Cancel","Send email"],
@@ -3308,7 +3308,7 @@ if (packagedConnectivityHostSoakOnly) {
           message:"Send this email from "+from+"?",
           detail:"To: "+to.join(", ")+"\n"+
             (cc.length?"CC: "+cc.join(", ")+"\n":"")+
-            "Subject: "+subject+"\n\nMessage preview:\n"+preview,
+            "Subject: "+subject+"\n"+(attachments.length?"Attachments ("+attachments.length+"): "+attachments.map(a=>a.name+" ("+a.size+" B)").join(", ")+"\n":"")+"\nMessage preview:\n"+preview,
         });
         return reply.response===1;
       },

@@ -1,5 +1,6 @@
 // Fixed provider endpoints: callers cannot turn an email account into SSRF.
 export const MAIL_PROVIDERS=Object.freeze({
+  gmail:Object.freeze({label:'Gmail',imap:{host:'imap.gmail.com',port:993,secure:true},smtp:{host:'smtp.gmail.com',port:465,secure:true}}),
   yahoo:Object.freeze({label:'Yahoo Mail',imap:{host:'export.imap.mail.yahoo.com',port:993,secure:true},smtp:{host:'smtp.mail.yahoo.com',port:465,secure:true}}),
   exmail:Object.freeze({label:'Tencent Exmail',imap:{host:'imap.exmail.qq.com',port:993,secure:true},smtp:{host:'smtp.exmail.qq.com',port:465,secure:true}}),
 });
@@ -9,6 +10,7 @@ export function mailAccountInput(input){
   const address=String(input?.address||'').trim().toLowerCase();
   if(!/^[^\s@<>]{1,64}@[^\s@<>]{1,190}$/.test(address)||address.length>254)throw Error('MAIL_ADDRESS_INVALID');
   // Provider selection is explicit: Exmail accounts can use custom domains.
+  if(provider==='gmail'&&!/@(?:gmail|googlemail)\.com$/.test(address))throw Error('MAIL_GMAIL_ADDRESS_MISMATCH');
   if(provider==='yahoo'&&!/@(?:yahoo\.(?:com|co\.uk|fr|de)|ymail\.com|rocketmail\.com)$/.test(address))throw Error('MAIL_YAHOO_ADDRESS_MISMATCH');
   return {provider,address};
 }

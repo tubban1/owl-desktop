@@ -31,8 +31,8 @@ declare global {
   interface Window {
     owlDesktop: {
       environment(): Promise<DesktopEnvironment>;
-      mailAccounts(): Promise<Array<{id:string;provider:"yahoo"|"exmail";address:string;label:string;createdAt:string}>>;
-      mailConnect(input:{provider:"yahoo"|"exmail";address:string;label?:string;password:string}):Promise<{id:string;provider:string;address:string;label:string;createdAt:string}>;
+      mailAccounts(): Promise<Array<{id:string;provider:"yahoo"|"exmail"|"gmail";address:string;label:string;createdAt:string}>>;
+      mailConnect(input:{provider:"yahoo"|"exmail"|"gmail";address:string;label?:string;password:string}):Promise<{id:string;provider:string;address:string;label:string;createdAt:string}>;
       mailDisconnect(id:string):Promise<{disconnected:boolean}>;
       directMcpStatus(): Promise<{
         ready: boolean;
