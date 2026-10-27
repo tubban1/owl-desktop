@@ -1967,6 +1967,22 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     return {bridge:userChromeBridge, owner:owner.runtimeSessionId};
   }
   tool(
+    server,"browser_agent_extension_info",
+    "Read the active OWL LAB Agent Browser extension version, service-worker instance and self-reload support. Does not affect tabs or user Chrome.",
+    {},{title:"Inspect Agent Browser Version",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async()=>{const {bridge,owner}=trustedUserChrome();return bridge.extensionInfo(owner);}
+  );
+  tool(
+    server,"browser_agent_reload_extension",
+    "After installing verified OWL LAB Agent Browser extension files in the user's registered unpacked-extension directory, ask that same extension to reload itself via chrome.runtime.reload(). Does not close Chrome, focus tabs, or modify webpages. Requires expected target manifest version and verifies a fresh service-worker instance after reconnect. First upgrade of legacy extensions without reload support requires one manual bootstrap reload.",
+    {expected_version:z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/)},
+    {title:"Reload My Agent Browser Extension",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+    async({expected_version})=>{
+      const {bridge,owner}=trustedUserChrome();
+      return bridge.reloadExtension(owner,expected_version);
+    }
+  );
+  tool(
     server,"browser_agent_open",
     "DEFAULT BROWSER MODE: Use the user's existing signed-in Chrome via Native Messaging (no headless or TCP/9222). Reuse an existing inactive tab only when its complete URL matches the requested URL exactly; otherwise open a new background tab. Never take over unrelated or foreign-Agent tabs. Routine controls work in foreground and background after Session selection; sensitive/destructive actions remain human-gated. Reused human tabs are released, not closed. For CAPTCHA/SSO use browser_agent_focus_login.",
     {url:z.string().url(),wait_until:z.enum(["load","domcontentloaded","networkidle"]).optional(),headless:z.boolean().optional()},
@@ -1995,6 +2011,13 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     "Read the accessibility snapshot of the selected Agent-owned normal Chrome tab. The page must belong to this OWL Agent.",
     {},{title:"Read Agent Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     async()=>{const{bridge,owner}=trustedUserChrome();return bridge.snapshot(owner);}
+  );
+  tool(
+    server,"browser_agent_text_control_inspect",
+    "Read only the structure of an Agent-owned Chrome field from the latest snapshot. Returns tag, ARIA role, nested input/editor counts and open-shadow-root count; never returns input values, page HTML, passwords or cookies. Use when a custom Google Ads-style widget is not editable.",
+    {uid:z.string().regex(/^owl-agent-\d{1,3}$/)},
+    {title:"Inspect My Chrome Text Field",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    async({uid})=>{const {bridge,owner}=trustedUserChrome();return bridge.inspectTextControl(owner,uid);}
   );
   tool(
     server,"browser_agent_fill",

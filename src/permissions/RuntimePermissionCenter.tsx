@@ -8,8 +8,24 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
 }){
  const [data,setData]=useState<RuntimePermissionProjection|null>(null);
  const [busy,setBusy]=useState(false),[message,setMessage]=useState("");
+ const [helper,setHelper]=useState<{platform:string;helperMode:string;helperInstalled:boolean;nativeInput:boolean;clipboard:boolean}|null>(null);
+ const [helperStatus,setHelperStatus]=useState("Not checked");
  const [pendingMode,setPendingMode]=useState<{key:RuntimePermissionKey;mode:"blocked"|"review"|"enabled"}|null>(null);
- const refresh=async()=>setData(await window.owlDesktop.getRuntimePermissions());
+ const refresh=async()=>{
+   const permission=await window.owlDesktop.getRuntimePermissions();setData(permission);
+   try{
+     const inventory=await window.owlDesktop.skillSnapshot();
+     const provider=inventory.providers.find(item=>item.id==="desktop");
+     const details=provider?.details as Record<string,unknown>|undefined;
+     if(!provider||!details){setHelper(null);setHelperStatus("Desktop provider status unavailable");return;}
+     setHelper({platform:String(details.platform??"unknown"),
+       helperMode:String(details.helperMode??"unknown"),
+       helperInstalled:details.helperInstalled===true,
+       nativeInput:details.nativeInput===true,
+       clipboard:details.clipboard===true});
+     setHelperStatus("Live Runtime provider snapshot");
+   }catch{setHelper(null);setHelperStatus("Runtime provider query failed · unverified");}
+ };
  useEffect(()=>{void refresh().catch(e=>setMessage(String(e)));},[]);
  const change=async(key:RuntimePermissionKey,mode:"blocked"|"review"|"enabled")=>{
   setBusy(true);setMessage("");setPendingMode({key,mode});
@@ -35,7 +51,7 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
  return <section className="panel settings-panel">
   <div className="panel-heading"><div><span className="eyebrow">RUNTIME PERMISSIONS</span><h3>Permission center</h3></div>
    <button className="secondary" disabled={busy} onClick={()=>void refresh()}><RefreshCw size={15}/>Refresh</button></div>
-  <p className="panel-help">Every permission has the same three states: On executes without action review, Off refuses, and Ask requires approval for every exact action. Device and workspace protections still apply. Saved settings must be activated on the connected Runtime.</p>
+  <p className="panel-help">Configure permissions by category. On allows authorized operations; Off refuses; Ask requires signed approval where Runtime supports it. File writes currently support On / Off only. Changes apply only to the selected managed Runtime after restart and verification.</p>
   {data?.installedRuntimeSupportsReview===false&&data.items.some(item=>item.mode==="review")&&<p role="alert" className="inline-warning">Your installed Runtime cannot provide signed per-action Review. This is a version incompatibility, not a request to enable ALLOW_DELETE globally. Upgrade to a compatible managed Runtime before applying Review.</p>}
   {data?.restartRequired&&<p role="alert" className="inline-warning">Review/permission changes are NOT active. A saved preference alone cannot authorize an action. Apply the settings to the actual managed Runtime and verify it is running the new policy.</p>}
   {data?.message&&<p className="panel-help">{data.message}</p>}
@@ -45,23 +61,41 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
    <span>Lease expires</span><strong>{access?.grant?.expiresAt?new Date(access.grant.expiresAt).toLocaleString():"Unknown"}</strong>
    <span>Live process flags</span><strong>{data?.liveRuntimeEffective==="verified"?"Verified managed Runtime policy snapshot":"Unverified · no effective permission claim"}</strong>
   </div>
-  {data?.items.map(item=><div className="setting-row" key={item.key}>
-   <div><strong>{item.label} ({item.envName})</strong>
-    <span>{item.pendingApply?"未生效 · NOT APPLIED":
-      data?.liveRuntimeEffective==="verified"?"已生效 · "+(item.mode==="review"?"询问 · Ask":item.mode==="enabled"?"打开 · On":"关闭 · Off"):
-      "设置已保存 · 运行状态未验证"} · {data?.source??item.configuredSource}</span>
-    <span>{item.mode==="review"?
-      item.pendingApply?"询问模式尚未生效；不会绕过权限执行。":
-      data?.liveRuntimeEffective==="verified"?"底层开关保持关闭，仅在本次操作获得有效签名批准后临时授权。":
-      "询问模式：底层开关保持关闭，等待运行时验证。":
-      "运行时底层开关："+(item.configured?"On":"Off")}</span></div>
-   <select className="setting-input compact-input" value={pendingMode?.key===item.key?pendingMode.mode:item.mode} disabled={busy}
-    onChange={e=>{const mode=e.target.value;if(mode==="blocked"||mode==="review"||mode==="enabled")void change(item.key,mode);}}>
-    <option value="enabled">打开 · On</option>
-    <option value="blocked">关闭 · Off</option>
-    <option value="review">询问 · Ask each action</option>
-   </select>
+  {[
+    {title:"Files & folders",keys:["write","delete"]},
+    {title:"Commands & processes",keys:["shell"]},
+    {title:"Git & recovery",keys:["gitPush","rollback"]},
+  ].map(group=><div key={group.title}>
+   <div className="setting-group-label"><span>{group.title}</span></div>
+   {data?.items.filter(item=>group.keys.includes(item.key)).map(item=><div className="setting-row" key={item.key}>
+    <div><strong>{item.label} ({item.envName})</strong>
+     <span>{item.pendingApply?"未生效 · NOT APPLIED":
+       data?.liveRuntimeEffective==="verified"?"已生效 · "+(item.mode==="review"?"询问 · Ask":item.mode==="enabled"?"打开 · On":"关闭 · Off"):
+       "设置已保存 · 运行状态未验证"} · {data?.source??item.configuredSource}</span>
+     <span>{item.mode==="review"?
+       item.pendingApply?"询问模式尚未生效；不会绕过权限执行。":
+       data?.liveRuntimeEffective==="verified"?"底层开关保持关闭，仅在本次操作获得有效签名批准后临时授权。":
+       "询问模式：底层开关保持关闭，等待运行时验证。":
+       "运行时底层开关："+(item.configured?"On":"Off")}</span>
+     {item.supportsReview===false&&<span>此能力的 Runtime 尚未支持逐操作签名授权；只提供 On / Off，不会用假 Ask 绕过安全机制。</span>}
+    </div>
+    <select className="setting-input compact-input" value={pendingMode?.key===item.key?pendingMode.mode:item.mode} disabled={busy}
+     onChange={e=>{const mode=e.target.value;if(mode==="blocked"||mode==="review"||mode==="enabled")void change(item.key,mode);}}>
+     <option value="enabled">打开 · On</option>
+     <option value="blocked">关闭 · Off</option>
+     {item.supportsReview!==false&&<option value="review">询问 · Ask each action</option>}
+    </select>
+   </div>)}
   </div>)}
+  <div className="setting-group-label"><span>Browser & desktop input</span></div>
+  <p className="panel-help">Browser text input uses Chrome tab-scoped trusted input, independently of Windows native keyboard control. The OS Helper requires a separate installed, consented implementation; changing file or Shell permissions cannot activate it.</p>
+  <div className="about-grid">
+   <span>Runtime capability source</span><strong>{helperStatus}</strong>
+   <span>OS platform</span><strong>{helper?.platform??"Unknown"}</strong>
+   <span>Windows Helper</span><strong>{!helper?"Not verified":helper.platform!=="win32"?"Not applicable":helper.helperInstalled?helper.helperMode+" · installed":"Not installed"}</strong>
+   <span>Native keyboard input</span><strong>{!helper?"Unverified":helper.nativeInput?"Available":"Unavailable · no approved native input"}</strong>
+   <span>OS clipboard</span><strong>{!helper?"Unverified":helper.clipboard?"Available":"Unavailable"}</strong>
+  </div>
   {pendingMode&&<p role="status" className="panel-help">Pending confirmation: {pendingMode.key} → {pendingMode.mode==="enabled"?"打开":pendingMode.mode==="blocked"?"关闭":"询问"}. This does not change the running Runtime.</p>}
   {message&&<p role="status" className="panel-help">{message}</p>}
   <div className="runtime-version">

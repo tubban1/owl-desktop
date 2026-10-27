@@ -26,3 +26,31 @@ The default browser backend is the user's **already running normal Chrome**, not
 ## Verification
 
 Unit tests use a fake persistent Chrome DevTools MCP connection to prove `new_page.background===true`, shared connection across Sessions, strict page ownership, human tab not exposed, non-credential fill, background screenshot, and explicit focus-for-login. Real existing-profile E2E requires the user's Chrome remote-debugging toggle and one user-approved Chrome consent; do not claim this acceptance until it has actually happened.
+
+
+## Framework-controlled and composite text fields (2026-10-26)
+
+\`browser_agent_snapshot\` now marks observed \`role=textbox\` and
+\`role=combobox\` controls (including controls inside *open* shadow roots)
+as well as native text inputs and contenteditables. \`browser_agent_fill\`
+uses the session-owned, foreground-unchanged Chrome extension's tab-scoped
+Chromium trusted text input, rather than a naked JavaScript \`value\` setter.
+This lets React/Angular/Google Ads-style controlled fields receive normal
+input events and supports combobox wrappers with nested text inputs. The
+control must be visible, writable, non-sensitive, belong to the current
+Agent Session and originate on the expected site; credential fields are
+never filled, even on a user-owned tab. No OS keyboard, clipboard, headless
+browser, 9222 remote debugging, DevTools MCP or arbitrary JS evaluation.
+
+Existing content is selected and replaced; empty values clear an observed
+field via a Chromium Backspace event. Every fill returns whether the DOM
+value was observed, but \`websitePersisted=false\` until the site explicitly
+shows a saved/persisted record. Chips/tags that require an Add or Save click
+must still use observed controls and be verified after any site commit.
+Never auto-press Enter to submit a form or silently claim campaign changes.
+
+Limitations: closed shadow roots, cross-origin iframe internals, inaccessible
+canvas widgets, and custom controls that expose no editable DOM descendants
+remain unsupported; these require a distinct, authorized adapter. Chrome
+extension source updates require reloading the unpacked extension in the
+user's ordinary Chrome; copying files without reload is insufficient.

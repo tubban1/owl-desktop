@@ -105,7 +105,26 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
       }
       return formSetApproved(owner,uid,change);
     }
-    return req(owner,"fill",{uid,value});
+    const result=await req(owner,"fill",{uid,value});
+    // A previous extension returned only {pageId} when an unsupported
+    // custom field could not be filled. Never reinterpret this as success.
+    if(result?.filled!==true)throw Error("BROWSER_FILL_NOT_CONFIRMED");
+    return {...result,domVerified:result.domVerified===true,websitePersisted:false};
+  }
+  async function compatibleRichEditorInsert(owner,uid,value){
+    try{return await req(owner,"rich_editor_insert",{uid,value});}
+    catch(error){
+      // Some modern controls look like rich editors but render a nested
+      // ordinary input on focus. The native rich-editor adapter explicitly
+      // rejects these. Reuse the verified, credential-safe text adapter
+      // instead of reporting an unhelpful EDITOR_NOT_EDITABLE error.
+      if(!["EDITOR_NOT_EDITABLE","EDITOR_NOT_FRAMEWORK_MANAGED"].includes(
+         String(error?.message||"")))throw error;
+      const filled=await compatibleFill(owner,uid,value);
+      if(filled?.domVerified!==true)throw Error("EDITOR_FALLBACK_DOM_NOT_VERIFIED");
+      return {...filled,edited:true,compatibilityFallback:"trusted_text",
+        websitePersisted:false};
+    }
   }
   async function compatibleClick(owner,uid){
     const snap=await req(owner,"snapshot");
@@ -160,18 +179,65 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     return {...dispatched,submittedToSiteNotVerified:true,
       grantConsumed:true,detailsReviewed:true};
   }
+  async function extensionInfo(owner){
+    let result;
+    try{result=await req(owner,"extension_info");}
+    catch(error){
+      // The old Chrome service worker predates the reload protocol.
+      // Do not treat it as a broken Native Messaging connection.
+      if(String(error?.message||"").includes("NATIVE_ACTION_NOT_ALLOWED"))
+        return {selfReloadSupported:false,bootstrapManualReloadRequired:true};
+      throw error;
+    }
+    if(result?.selfReloadProtocol!==1||typeof result.instanceId!=="string")
+      return {selfReloadSupported:false,bootstrapManualReloadRequired:true};
+    return {...result,selfReloadSupported:true};
+  }
+  async function reloadExtension(owner,expectedVersion){
+    if(typeof expectedVersion!=="string"||
+       !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(expectedVersion))
+      throw Error("EXTENSION_EXPECTED_VERSION_REQUIRED");
+    const before=await extensionInfo(owner);
+    if(!before.selfReloadSupported)
+      throw Error("EXTENSION_RELOAD_BOOTSTRAP_REQUIRED");
+    const accepted=await req(owner,"extension_prepare_reload",{expectedVersion});
+    if(accepted?.reloadPrepared!==true||
+       accepted.previousInstanceId!==before.instanceId)
+      throw Error("EXTENSION_RELOAD_NOT_ACCEPTED");
+    for(let attempt=0;attempt<18;attempt++){
+      await new Promise(resolve=>setTimeout(resolve,750));
+      try{
+        const after=await extensionInfo(owner);
+        if(after.selfReloadSupported&&after.instanceId!==before.instanceId){
+          if(after.version!==expectedVersion)
+            throw Error("EXTENSION_RELOAD_VERSION_MISMATCH");
+          return {reloaded:true,verified:true,previousVersion:before.version,
+            version:after.version,newInstance:true,tabsPreservedFromCheckpoint:true,
+            chromeForegroundUnchanged:true};
+        }
+      }catch(error){
+        if(error.message==="EXTENSION_RELOAD_VERSION_MISMATCH")throw error;
+        // Native Messaging disconnects briefly during a legitimate reload.
+        // Never re-dispatch a reload or guess success from port connectivity.
+      }
+    }
+    throw Error("EXTENSION_RELOAD_NOT_VERIFIED");
+  }
   return {
+    extensionInfo,
+    reloadExtension,
     open:(owner,url)=>req(owner,"open",{url}),
     tabs:owner=>req(owner,"tabs"),
     use:(owner,pageId)=>req(owner,"use",{pageId}),
     snapshot:owner=>req(owner,"snapshot"),
     fill:compatibleFill,
+    inspectTextControl:(owner,uid)=>req(owner,"text_control_inspect",{uid}),
     formControls:owner=>req(owner,"form_controls"),
     formSet:formSetApproved,
     formReview:(owner,pageUrl,submitUid)=>req(owner,"form_review",{pageUrl,submitUid}),
     submitReviewed,
     editText:(owner,uid,value)=>req(owner,"edit_text",{uid,value}),
-    richEditorInsert:(owner,uid,value)=>req(owner,"rich_editor_insert",{uid,value}),
+    richEditorInsert:compatibleRichEditorInsert,
     pasteText:(owner,uid,text)=>req(owner,"paste_text",{uid,text}),
     dragDrop:(owner,sourceUid,targetUid)=>req(owner,"drag_drop",{sourceUid,targetUid}),
     p2Capabilities:owner=>req(owner,"p2_capabilities"),

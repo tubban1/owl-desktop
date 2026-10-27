@@ -13,6 +13,8 @@ import {locateAgentFileDropZone,checkAgentFileDropZone} from "./file-drop-zone.m
 import {prepareAgentRichEditor,checkAgentRichEditor} from "./rich-editor.mjs";
 import {locateVirtualCursorTarget,showVirtualCursor,hideVirtualCursor} from "./virtual-cursor.mjs";
 import {executeFormAction} from "./form-controls.mjs";
+import {prepareTrustedTextField,checkTrustedTextField,
+  locateTrustedTextActivation,inspectTrustedTextControl} from "./trusted-text-field.mjs";
 
 // An explicit Agent open(url) can reuse an already-open INACTIVE tab with
 // the exact same URL (including path, query and fragment). Adoption grants
@@ -26,8 +28,49 @@ const urlOrigin=url=>{
 };
 export function createNativeAgentExecutor(chrome,storage){
   const downloads=createAgentDownloadWorkflow(chrome,storage);
-  const read=async()=>({owned:(await storage.get("owlNativeOwned")).owlNativeOwned||{},
-    selected:(await storage.get("owlNativeSelected")).owlNativeSelected||{}});
+  const instanceId=globalThis.crypto?.randomUUID?.()||
+    ("agent-worker-"+Date.now()+"-"+Math.random().toString(36).slice(2));
+  const persistent=chrome.storage?.local;
+  const reloadStateKey="owlNativeReloadCheckpoint";
+  let restored=false;
+  async function restoreAfterReload(){
+    if(restored)return;
+    restored=true;
+    if(!persistent)return;
+    const checkpoint=(await persistent.get(reloadStateKey))[reloadStateKey];
+    if(!checkpoint)return;
+    // One-use, bounded checkpoint. Never leave ownership grants in durable
+    // local storage after restoration, and never trust unrelated stale tabs.
+    await persistent.remove(reloadStateKey);
+    if(!checkpoint||checkpoint.version!==1||
+       !Number.isFinite(checkpoint.expiresAt)||checkpoint.expiresAt<Date.now()||
+       checkpoint.expiresAt>Date.now()+120_000||
+       !checkpoint.owned||typeof checkpoint.owned!=="object")return;
+    const active=(await storage.get("owlNativeOwned")).owlNativeOwned;
+    if(active&&Object.keys(active).length)return;
+    const owned={},selected={};
+    for(const [key,binding] of Object.entries(checkpoint.owned).slice(0,120)){
+      const id=Number(key);
+      if(!Number.isSafeInteger(id)||id<0||!binding||
+         typeof binding.owner!=="string"||binding.owner.length<2||
+         binding.owner.length>240)continue;
+      try{
+        const tab=await chrome.tabs.get(id);
+        if(binding.adopted&&urlOrigin(tab.url)!==binding.origin)continue;
+        if(!urlOrigin(tab.url)||tab.incognito)continue;
+        owned[id]=binding;
+      }catch{}
+    }
+    for(const [owner,id] of Object.entries(checkpoint.selected||{})){
+      if(owned[id]?.owner===owner)selected[owner]=id;
+    }
+    await storage.set({owlNativeOwned:owned,owlNativeSelected:selected});
+  }
+  const read=async()=>{
+    await restoreAfterReload();
+    return {owned:(await storage.get("owlNativeOwned")).owlNativeOwned||{},
+      selected:(await storage.get("owlNativeSelected")).owlNativeSelected||{}};
+  };
   const save=async s=>storage.set({owlNativeOwned:s.owned,owlNativeSelected:s.selected});
   async function current(owner,args={},requireSelected=true){
     const state=await read();
@@ -62,7 +105,7 @@ export function createNativeAgentExecutor(chrome,storage){
     const collect=(root,depth)=>{
       if(depth>8 || nodes.length>=120)return;
       for(const el of root.querySelectorAll("*")){
-        if(el.matches("a,button,input,textarea,select,[role=button],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone]") &&
+        if(el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[aria-placeholder],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone]") &&
            visible(el))nodes.push({el,shadowDepth:depth});
         if(nodes.length>=120)break;
         if(el.shadowRoot)collect(el.shadowRoot,depth+1);
@@ -73,8 +116,11 @@ export function createNativeAgentExecutor(chrome,storage){
       const key="owl-agent-"+i;
       el.setAttribute("data-owl-agent-control",key);
       return {uid:key,tag:el.tagName.toLowerCase(),type:el.getAttribute("type")||"",
+        role:el.getAttribute("role")||"",
+        editable:!!el.isContentEditable,
         label:(el.getAttribute("aria-label")||el.getAttribute("placeholder")||
-        el.textContent||el.getAttribute("name")||"").trim().slice(0,125),
+        el.getAttribute("aria-placeholder")||el.getAttribute("data-placeholder")||el.getAttribute("name")||
+        el.textContent||"").trim().slice(0,125),
         shadowDepth,href:el.tagName==="A"?el.href:undefined};
     });
     return {title:document.title,url:location.href,text:(document.body?.innerText||"").slice(0,10000),controls};
@@ -126,6 +172,37 @@ export function createNativeAgentExecutor(chrome,storage){
   }
   async function run({owner,op,args={}}){
     if(typeof owner!=="string"||owner.length<2||owner.length>240)throw Error("NATIVE_OWNER_INVALID");
+    if(op==="extension_info"){
+      await restoreAfterReload();
+      return {
+      instanceId,version:chrome.runtime?.getManifest?.().version||"unknown",
+      selfReloadProtocol:1,source:"owl-native-chrome",canSelfReload:true,
+      features:{trustedTextInsert:true,lazyTextActivation:true,readonlyFieldInspection:true}};
+    }
+    if(op==="extension_prepare_reload"){
+      if(!persistent)throw Error("EXTENSION_PERSISTENT_CHECKPOINT_UNAVAILABLE");
+      if(typeof args?.expectedVersion!=="string"||args.expectedVersion.length>32||
+         !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(args.expectedVersion))
+        throw Error("EXTENSION_EXPECTED_VERSION_INVALID");
+      const currentVersion=chrome.runtime?.getManifest?.().version||"unknown";
+      const rateKey="owlNativeExtensionReloadAt";
+      const last=(await persistent.get(rateKey))[rateKey];
+      if(typeof last==="number"&&last>Date.now()-20_000&&last<=Date.now())
+        throw Error("EXTENSION_RELOAD_RATE_LIMITED");
+      const state=await read();
+      // Explicit version pin prevents silently installing unintended or
+      // partially copied extension code. The new worker will prove version.
+      await persistent.set({
+        [rateKey]:Date.now(),
+        [reloadStateKey]:{
+          version:1,expiresAt:Date.now()+90_000,
+          owned:state.owned,selected:state.selected
+        }
+      });
+      return {reloadPrepared:true,previousInstanceId:instanceId,
+        currentVersion,expectedVersion:args.expectedVersion,
+        ownerTabsPreserved:Object.keys(state.owned).length};
+    }
     if(op==="open"){
       const url=args.url;
       if(typeof url!=="string"||url.length>2048||!urlOrigin(url))throw Error("NATIVE_URL_INVALID");
@@ -411,11 +488,77 @@ export function createNativeAgentExecutor(chrome,storage){
       const result=await inject(tabId,inspect);
       return {pageId:tabId,snapshot:result};
     }
+    if(op==="text_control_inspect"){
+      if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid))
+        throw Error("TEXT_UID_INVALID");
+      const origin=urlOrigin(tab.url);
+      if(!origin)throw Error("TEXT_ORIGIN_INVALID");
+      const result=await inject(tabId,inspectTrustedTextControl,[args.uid,origin]);
+      if(result?.error)throw Error(result.error);
+      return {pageId:tabId,...result};
+    }
     if(op==="fill"){
-      if(typeof args.uid!=="string"||args.uid.length>100||typeof args.value!=="string"||args.value.length>4000)
+      if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid)||
+         typeof args.value!=="string"||args.value.length>4000)
         throw Error("FILL_ARGUMENT_INVALID");
-      const r=await inject(tabId,operate,[args.uid,args.value,"fill"]);
-      return {pageId:tabId,...r};
+      const origin=urlOrigin(tab.url);
+      if(!origin)throw Error("TEXT_ORIGIN_INVALID");
+      // A single trusted Chromium input path for ordinary inputs AND modern
+      // role=textbox, role=combobox-with-input, contenteditable, open shadow
+      // roots. Frameworks must receive their browser events; DOM.value setter
+      // alone can appear to work while Google Ads/React state stays unchanged.
+      let prepared=await inject(tabId,prepareTrustedTextField,[args.uid,origin]);
+      if(prepared?.error)throw Error(prepared.error);
+      if(!prepared?.ready&&!prepared?.activationRequired)
+        throw Error("TEXT_FIELD_NOT_READY");
+      const target={tabId};
+      let attached=false,activated=false;
+      try{
+        await chrome.debugger.attach(target,"1.3");
+        attached=true;
+        const latest=await chrome.tabs.get(tabId);
+        if(urlOrigin(latest.url)!==origin)throw Error("TEXT_ORIGIN_CHANGED");
+        if(prepared.activationRequired){
+          // Scoped to the Agent-owned tab; does not foreground Chrome or move OS input.
+          await chrome.debugger.sendCommand(target,"Page.enable");
+          await chrome.debugger.sendCommand(target,"Emulation.setFocusEmulationEnabled",{enabled:true});
+          const point=await inject(tabId,locateTrustedTextActivation,[args.uid,origin]);
+          if(point?.error||!point?.valid)throw Error(point?.error||"TEXT_ACTIVATION_UNSAFE");
+          await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+            type:"mouseMoved",x:point.x,y:point.y});
+          await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+            type:"mousePressed",x:point.x,y:point.y,button:"left",clickCount:1});
+          await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+            type:"mouseReleased",x:point.x,y:point.y,button:"left",clickCount:1});
+          // Allow the browser to finish handling the trusted activation click.
+          await new Promise(resolve=>setTimeout(resolve,150));
+          activated=true;
+          prepared=await inject(tabId,prepareTrustedTextField,[args.uid,origin]);
+          if(prepared?.error)throw Error(prepared.error);
+          if(!prepared?.ready)throw Error("TEXT_ACTIVATION_DID_NOT_REVEAL_EDITABLE");
+        }
+        // Extension-scoped Chromium input; does NOT move OS cursor, bring tab
+        // to foreground, access the clipboard or require the 9222 port.
+        if(args.value.length){
+          await chrome.debugger.sendCommand(target,"Input.insertText",{text:args.value});
+        }else{
+          await chrome.debugger.sendCommand(target,"Input.dispatchKeyEvent",{
+            type:"keyDown",key:"Backspace",code:"Backspace",
+            windowsVirtualKeyCode:8,nativeVirtualKeyCode:8});
+          await chrome.debugger.sendCommand(target,"Input.dispatchKeyEvent",{
+            type:"keyUp",key:"Backspace",code:"Backspace",
+            windowsVirtualKeyCode:8,nativeVirtualKeyCode:8});
+        }
+      }finally{
+        if(attached)await chrome.debugger.detach(target).catch(()=>{});
+      }
+      const checked=await inject(tabId,checkTrustedTextField,[args.uid,origin,args.value]);
+      if(checked?.error)throw Error(checked.error);
+      if(!checked?.domVerified)throw Error("TEXT_DOM_UPDATE_NOT_CONFIRMED");
+      return {pageId:tabId,uid:args.uid,filled:true,length:args.value.length,
+        domVerified:true,websitePersisted:false,
+        inputMethod:"tab_scoped_chromium_trusted_text",activatedWidget:activated,
+        foregroundUnchanged:true,systemKeyboardUsed:false};
     }
     if(op==="edit_text"){
       if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid)||

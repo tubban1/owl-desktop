@@ -1,11 +1,11 @@
-export type RuntimePermissionKey = "gitPush" | "shell" | "delete" | "rollback";
+export type RuntimePermissionKey = "write" | "gitPush" | "shell" | "delete" | "rollback";
 export type RuntimePermissionMode = "enabled" | "blocked" | "review";
 export type RuntimePermissionProjection = {
   version:number;packaged:boolean;restartRequired:boolean;approvalPolicyPending:boolean;changed?:boolean;installedRuntimeSupportsReview:boolean|null;source?:string;
   liveRuntimeEffective:"unverified"|"verified";approvalModeConfigured:boolean;message:string;
   items:Array<{key:RuntimePermissionKey;label:string;envName:string;
     mode:RuntimePermissionMode;configured:boolean;configuredSource:string;
-    pendingApply:boolean;reviewConfigured:boolean;requiresExactRuntimeApproval:boolean;liveEffective:"unverified"|"verified"}>;
+    pendingApply:boolean;reviewConfigured:boolean;supportsReview:boolean;requiresExactRuntimeApproval:boolean;liveEffective:"unverified"|"verified"}>;
 };
 
 export type Settings = {
