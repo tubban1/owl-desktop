@@ -10,7 +10,7 @@ import { assessConnectivityRecovery } from "./services/connectivity-recovery-res
 import { DesktopStore } from "./store.mjs";
 import { UsageStatisticsStore } from "./services/usage-statistics-store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
-import { startWindowsDevRuntime, stopWindowsDevRuntime } from "./services/windows-dev-runtime.mjs";
+import { startWindowsDevRuntime, stopWindowsDevRuntime, restartWindowsDevRuntime } from "./services/windows-dev-runtime.mjs";
 import { probeWindowsDevDirectMcp } from "./services/windows-dev-direct-mcp.mjs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { startWindowsDevNativeBrowser } from "./services/windows-dev-native-browser.mjs";
@@ -288,6 +288,18 @@ function createLocalRuntimeBootstrap(settings) {
 }
 
 async function applyRuntimeUserPreferences(settings) {
+  if (!app.isPackaged && process.platform==="win32" && process.env.OWL_WIN_DEV_MANAGE_RUNTIME==="true") {
+    const result=await restartWindowsDevRuntime({store,baseUrl:settings.runtimeBaseUrl});
+    if(!result.managed) {
+      record("warn","runtime","Windows DEV preferences saved but Runtime is not Desktop-owned",{reason:result.reason});
+      return {applied:false,reason:result.reason};
+    }
+    record("info","runtime","Windows DEV folder preferences applied through Runtime restart",{
+      effectiveDirectoryCount:result.effectiveDirectoryCount,
+      blockedDirectoryReasons:result.blockedDirectoryReasons,
+    });
+    return {applied:true,effectiveDirectoryCount:result.effectiveDirectoryCount};
+  }
   if (!app.isPackaged) {
     record(
       "info",
