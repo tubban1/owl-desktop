@@ -12,6 +12,8 @@
     "sync:status": "node scripts/sync-dev-checkouts.mjs status",
     "sync:stage": "node scripts/sync-dev-checkouts.mjs stage",
     "sync:install": "node scripts/install-version-stager.mjs",
+    "activation:status": "node scripts/version-activation.mjs status",
+    "activation:preflight": "node scripts/version-activation.mjs preflight",
     "dev:full": "node scripts/dev-full.mjs",
     "dev:full:watch-runtime": "OWL_RUNTIME_DEV_WATCH=true node scripts/dev-full.mjs",
     "mcp:start": "node mcp/server.mjs",

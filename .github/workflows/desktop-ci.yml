@@ -188,7 +188,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Version sync contract and dirty checkout safety
-        run: npx vitest run tests/version-sync.test.mjs --maxWorkers=1
+        run: npx vitest run tests/version-sync.test.mjs tests/activation-gate.test.mjs --maxWorkers=1
       - name: Check platform install and staged-source scripts
         run: |
           node --check scripts/lib/version-sync.mjs
