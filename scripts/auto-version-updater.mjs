@@ -104,9 +104,9 @@ async function remoteHealth(){
   return {ok:true,sha:peer.sha,at:peer.at};
  }catch(e){return {ok:false,reason:String(e.message??e)}}
 }
-function inWindow(date=new Date()){
- const h=date.getUTCHours();return device==="mac"?h>=1&&h<3:h>=4&&h<6;
-}
+// Remote lease + fresh peer proof serialize updates any time both devices are online.
+// Do not require powered-on computers during a fixed overnight maintenance window.
+function inWindow(){return true;}
 function npmCommand(args,cwd,timeout=180000){
  const cli=resolveBundledNpm();if(!cli)throw Error("ROLL_NPM_UNAVAILABLE");
  return run(process.execPath,[cli,...args],{cwd,timeout});
@@ -208,7 +208,7 @@ async function prepare(){
  return {status:"ready",sha:stage.commit,root:dest,ciRunId:ci.runId};
 }
 async function tick(){
- const live=await liveStatus();await publish(live);
+ const live=await liveStatus();await publish(live,fs.existsSync(path.join(rollState,"rollout.lock")));
  if(!live.healthy)return {status:"blocked",reason:"local-unhealthy"};
  if(!inWindow())return {status:"blocked",reason:"utc-window",live:live.sha};
  const staged=readVerifiedStage(stageRoot);
@@ -249,10 +249,10 @@ async function tick(){
 if(mode==="init"){const identity=initIdentity();console.log(JSON.stringify(identity));}
 else if(mode==="configure"){console.log(JSON.stringify(configure(process.argv[3])));}
 else if(mode==="heartbeat"){
- const l=await liveStatus();await publish(l);console.log(JSON.stringify({device,sha:l.sha,healthy:l.healthy}));
+ const l=await liveStatus();await publish(l,fs.existsSync(path.join(rollState,"rollout.lock")));console.log(JSON.stringify({device,sha:l.sha,healthy:l.healthy}));
 }else if(mode==="status"){
  console.log(JSON.stringify({device,live:await liveStatus(),peer:await remoteHealth(),
-  stage:readVerifiedStage(stageRoot),utcWindow:inWindow(),requiresMainPushCi:true}));
+  stage:readVerifiedStage(stageRoot),onlineActivationWithCloudLease:true,requiresMainPushCi:true}));
 }else if(mode==="prepare"){console.log(JSON.stringify(await prepare()));}
 else if(mode==="tick"){console.log(JSON.stringify(await tick()));}
 else throw Error("Usage: auto-version-updater.mjs init|configure URL|heartbeat|status|prepare|tick");

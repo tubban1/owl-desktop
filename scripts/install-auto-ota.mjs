@@ -65,5 +65,5 @@ if(process.platform==="darwin"){
  }
 }else throw Error("OTA_INSTALL_UNSUPPORTED_PLATFORM");
 console.log(JSON.stringify({installed:true,platform:process.platform,heartbeatSeconds:60,
- updateWindowUtc:process.platform==="darwin"?"01:00–03:00":"04:00–06:00",
+ activationSchedule:"when-online-with-peer-health-and-cloud-lease",
  crossDeviceLeaseRequired:true,sourceCheckoutChanged:false,liveServiceRestarted:false}));
