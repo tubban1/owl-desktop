@@ -1,0 +1,41 @@
+name: Windows manual MCP peer restart safety
+on:
+  push:
+    paths:
+      - 'scripts/windows/manual-peer-restart.ps1'
+      - 'electron/services/windows-peer-recovery.mjs'
+      - 'tests/windows-manual-peer-restart.test.mjs'
+      - '.github/workflows/windows-manual-peer-restart.yml'
+  pull_request:
+    paths:
+      - 'scripts/windows/manual-peer-restart.ps1'
+      - 'electron/services/windows-peer-recovery.mjs'
+      - 'tests/windows-manual-peer-restart.test.mjs'
+      - '.github/workflows/windows-manual-peer-restart.yml'
+jobs:
+  powershell-peer-restart:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse script with Windows PowerShell
+        shell: powershell
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          $file = (Resolve-Path 'scripts/windows/manual-peer-restart.ps1').Path
+          $null = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+      - name: Read-only Check must not modify tasks
+        shell: powershell
+        run: |
+          $s = & ./scripts/windows/manual-peer-restart.ps1 -Mode Check | ConvertFrom-Json
+          if ($null -eq $s.owlMcp -or $null -eq $s.computerMcp) {
+            throw 'PEER_INSPECT_MISSING_HEALTH_FLAGS'
+          }
+          if ($s.remoteChatGPTConnection -ne 'UNVERIFIED') {
+            throw 'PEER_INSPECT_OVERCLAIMS_CHATGPT_HEALTH'
+          }
+          if ($s.mode -ne 'Check') { throw 'PEER_INSPECT_MODE_CHANGED' }
