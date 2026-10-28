@@ -16,6 +16,8 @@ const copies=[
  ["scripts/auto-version-updater.mjs","auto-version-updater.mjs"],
  ["scripts/lib/ota-client.mjs","lib/ota-client.mjs"],
  ["scripts/lib/ota-ci.mjs","lib/ota-ci.mjs"],
+ ["scripts/lib/mac-release-startup.mjs","lib/mac-release-startup.mjs"],
+ ["scripts/lib/mac-postactivation-health.mjs","lib/mac-postactivation-health.mjs"],
  ["scripts/lib/version-sync.mjs","lib/version-sync.mjs"],
  ["scripts/lib/device-version-state.mjs","lib/device-version-state.mjs"],
  ...(process.platform==="darwin"?[["scripts/mac-safe-cutover.mjs","mac-safe-cutover.mjs"]]:

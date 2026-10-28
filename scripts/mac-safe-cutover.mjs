@@ -9,6 +9,8 @@ import net from "node:net";
 import http from "node:http";
 import {spawnSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
+import {retireSupersededMacCurrentJobs} from "./lib/mac-release-startup.mjs";
+import {macDesktopMainPresent,postActivationRecoveryAction} from "./lib/mac-postactivation-health.mjs";
 
 const [mode,oldRoot,newRoot,oldSha,newSha]=process.argv.slice(2);
 const sha=/^[a-f0-9]{40}$/;
@@ -98,6 +100,10 @@ function exactSupervisor(dir){
  return birth.status===0&&birth.stdout.trim()?{pid,birth:birth.stdout.trim()}:null;
 }
 function expectedSupervisorRunning(dir){return Boolean(exactSupervisor(dir))}
+function desktopMainRunning(dir){
+ const ps=run("/bin/ps",["-axo","pid=,command="],{allowError:true});
+ return ps.status===0&&macDesktopMainPresent(dir,ps.stdout);
+}
 async function healMissingOwner(dir){
  if(ownerMatches(dir))return true;
  const exact=exactSupervisor(dir);
@@ -118,7 +124,7 @@ async function healthy(dir){
  // An external cleanup process may remove the non-authoritative owner receipt.
  // A unique exact PID + birth + immutable root is independently verifiable.
  if(!ownerMatches(dir))await healMissingOwner(dir);
- return Boolean(exactSupervisor(dir))&&await health(8790)&&await health(18788)&&await tunnelReady(dir);
+ return Boolean(exactSupervisor(dir))&&desktopMainRunning(dir)&&await health(8790)&&await health(18788)&&await tunnelReady(dir);
 }
 async function portsFree(){
  for(const port of [8790,8791,18788,5173])if(await portUp(port))return false;
@@ -205,7 +211,7 @@ if(mode==="watch"){
   const tracker=path.join(state,"mac-watchdog-failures.json");
   // A missing bookkeeping file alone must never roll back a healthy server.
   await healMissingOwner(newRoot);
-  const localOK=Boolean(exactSupervisor(newRoot))&&await health(8790)&&await health(18788);
+  const localOK=Boolean(exactSupervisor(newRoot))&&desktopMainRunning(newRoot)&&await health(8790)&&await health(18788);
   if(localOK){
    try{fs.unlinkSync(tracker)}catch{}
   }else{
@@ -213,11 +219,9 @@ if(mode==="watch"){
    if(!failed||failed.newSha!==newSha){
     fs.writeFileSync(tracker,JSON.stringify({newSha,firstSeenAt:new Date().toISOString()})+"\n",{mode:0o600});
    }else{
-    const age=Date.now()-Date.parse(failed.firstSeenAt);
-    if(age>30000&&age<150000&&!expectedSupervisorRunning(newRoot)){
-     try{kick(ids.next)}catch{}
-    }
-    if(age>=150000){await rollback("watchdog-post-activation-local-health-failed")}
+    const action=postActivationRecoveryAction({healthy:localOK,firstSeenAt:failed.firstSeenAt,supervisorPresent:expectedSupervisorRunning(newRoot)});
+    if(action==="restart"){try{kick(ids.next)}catch{}}
+    if(action==="rollback"){await rollback("watchdog-post-activation-local-health-failed")}
    }
   }
  }
@@ -236,6 +240,13 @@ try{
  kick(ids.next);
  if(!await waitFor(()=>healthy(newRoot),150000))throw Error("NEW_MCP_AND_RUNTIME_NOT_HEALTHY");
  journal({phase:"activated",oldRoot,newRoot,oldSha,newSha,activatedAt:new Date().toISOString()});
+ try{
+  const retired=retireSupersededMacCurrentJobs({agents,activeLabel:ids.next});
+  console.log("MAC_SUPERSEDED_CURRENT_JOBS_RETIRED="+JSON.stringify(retired));
+ }catch(error){
+  // Login-time retirement is a safety cleanup, not a reason to roll back a healthy release.
+  console.warn("MAC_SUPERSEDED_CURRENT_JOBS_RETIRE_PENDING="+String(error.message??error));
+ }
  console.log("MAC_CUTOVER_HEALTH_VERIFIED");
 }catch(e){
  const recovered=await rollback(String(e.message??e));
