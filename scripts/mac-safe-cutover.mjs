@@ -167,6 +167,24 @@ if(mode==="watch"){
    if(!(await healthy(newRoot))){await rollback("watchdog-activation-timeout")}
    else journal({...tx,phase:"activated",watchdogConfirmed:true});
  }
+ if(tx?.phase==="activated"&&tx.oldSha===oldSha&&tx.newSha===newSha){
+  const tracker=path.join(state,"mac-watchdog-failures.json");
+  const localOK=ownerMatches(newRoot)&&await health(8790)&&await health(18788);
+  if(localOK){
+   try{fs.unlinkSync(tracker)}catch{}
+  }else{
+   let failed=null;try{failed=JSON.parse(fs.readFileSync(tracker,"utf8"))}catch{}
+   if(!failed||failed.newSha!==newSha){
+    fs.writeFileSync(tracker,JSON.stringify({newSha,firstSeenAt:new Date().toISOString()})+"\n",{mode:0o600});
+   }else{
+    const age=Date.now()-Date.parse(failed.firstSeenAt);
+    if(age>30000&&age<150000&&!ownerMatches(newRoot)){
+     try{kick(ids.next)}catch{}
+    }
+    if(age>=150000){await rollback("watchdog-post-activation-local-health-failed")}
+   }
+  }
+ }
  process.exit(0);
 }
 if(process.ppid!==1)throw Error("CUTOVER_MUST_RUN_UNDER_INDEPENDENT_LAUNCHD");
