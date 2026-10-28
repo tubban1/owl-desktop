@@ -38,7 +38,11 @@ export class DevChildSupervisor {
         detached: process.platform !== "win32",
       });
       this.children.add(child);
-      if (process.platform !== "win32" && child.pid) this.childGroups.set(child, child.pid);
+      // Only a real Node spawn owns an OS process group. Test doubles or injected
+      // spawners must never signal an unrelated real group based on a fake PID.
+      if (this.spawnImpl === nodeSpawn && process.platform !== "win32" && child.pid) {
+        this.childGroups.set(child, child.pid);
+      }
       onLaunch(child);
       let terminationHandled = false;
 
