@@ -120,6 +120,15 @@ async function remoteHealth(){
   return {ok:true,sha:peer.sha,at:peer.at};
  }catch(e){return {ok:false,reason:String(e.message??e)}}
 }
+async function waitForHealthyLocal(expectedRoot,expectedSha,timeoutMs=60000){
+ const deadline=Date.now()+timeoutMs;
+ let result=await liveStatus();
+ while(!result.healthy&&result.root===expectedRoot&&result.sha===expectedSha&&Date.now()<deadline){
+  await delay(Math.min(3000,Math.max(1,deadline-Date.now())));
+  result=await liveStatus();
+ }
+ return result;
+}
 async function waitForHealthyPeer(timeoutMs=90000){
  const deadline=Date.now()+timeoutMs;
  let result=await remoteHealth();
@@ -250,9 +259,10 @@ async function tick(){
  let lease=null;
  try{
   const dest=candidate(staged.commit);
-  const before=await liveStatus();
+  const before=await waitForHealthyLocal(live.root,live.sha);
   if(staged.commit!==githubMainSha())throw Error("ROLL_MAIN_MOVED_AFTER_BUILD");
-  if(!before.healthy||before.sha!==live.sha)throw Error("ROLL_LOCAL_CHANGED_AFTER_BUILD");
+  if(before.sha!==live.sha||before.root!==live.root)throw Error("ROLL_LOCAL_CHANGED_AFTER_BUILD");
+  if(!before.healthy)throw Error("ROLL_LOCAL_TEMPORARY_UNHEALTHY_AFTER_BUILD");
   if(!(await waitForHealthyPeer(90000)).ok)throw Error("ROLL_PEER_NOT_READY_AFTER_BUILD");
   await publish(before);
   const locked=await acquire(staged.commit);lease=locked.token;
