@@ -130,7 +130,7 @@ export class ConnectionHostClient {
   health(options = {}) {
     return this.request("/health", {
       ...options,
-      timeoutMs: options.timeoutMs ?? 3_000,
+      timeoutMs: options.timeoutMs ?? 5_000,
     });
   }
 

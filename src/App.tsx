@@ -426,7 +426,8 @@ export default function App() {
   },[]);
   useEffect(() => {
     if (page !== "overview" && page !== "monitor") return;
-    const intervalMs = page === "monitor" ? 3000 : 5000;
+    // Run fewer expensive aggregate snapshots under concurrent build workloads.
+    const intervalMs = page === "monitor" ? 5000 : 10000;
     const tick = () => {
       if (document.hidden) return;
       setNow(Date.now());

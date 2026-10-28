@@ -1,3 +1,4 @@
+import { createHealthHysteresis } from "./services/health-hysteresis.mjs";
 import { activeManagedProcessCount } from "./services/usage-process-count.mjs";
 import os from "node:os";
 import path from "node:path";
@@ -155,6 +156,7 @@ let mcpState = { status: "stopped", url: null, error: null };
 let connectionHostClient;
 let connectionHostSnapshot = null;
 let connectionHostEventCursor = 0;
+const connectionHostHealthGate = createHealthHysteresis();
 let desktopCapabilityBridge;
 const seenConnectionHostEventIds = new Set();
 const activity = [];
@@ -204,6 +206,7 @@ async function refreshConnectionHost() {
   try {
     const snapshot = await connectionHostClient.health();
     connectionHostSnapshot = snapshot;
+    connectionHostHealthGate.success();
     const latestCursor = Math.max(0, Number(snapshot?.eventCursor ?? 0) || 0);
     if (latestCursor < connectionHostEventCursor) {
       connectionHostEventCursor = 0;
@@ -225,6 +228,9 @@ async function refreshConnectionHost() {
     };
     return snapshot;
   } catch (error) {
+    // A single localhost timeout under load is not equivalent to a dead host.
+    // Preserve the last proven MCP status until a sustained outage is seen.
+    if (!connectionHostHealthGate.failure()) return connectionHostSnapshot;
     connectionHostSnapshot = null;
     mcpState = {
       status: "error",
