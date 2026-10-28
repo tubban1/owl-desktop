@@ -80,4 +80,4 @@ ChatGPT's **current** connector uses D1 SQL; the private internal HTTP API is fo
 
 ## QA
 
-`node --test test/workflow.test.mjs`: six unit cases cover access control, input filters, non-matching recipient prevention, successful Brevo acceptance and uncertain transport. Full live queue test is recorded separately in D1 under QA ticket ID `CASE-E2E-20261028-OWL-SUPPORT-V1`.
+`node --test test/workflow.test.mjs`: twelve unit cases cover access control, case ownership, state transitions, idempotency, recipient checks, Brevo acceptance and uncertain transport. Full live queue test is recorded separately in D1 under QA ticket ID `CASE-E2E-20261028-OWL-SUPPORT-V1`.
