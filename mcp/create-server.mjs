@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { toolRegistrySnapshot } from "./tool-registry.mjs";
 import { registerBrowserWorkflowTools } from "./browser-workflow-tools.mjs";
 import { readAuthorizedLocalImage } from "./native-image.mjs";
 import { readAuthorizedDocument } from "./local-document.mjs";
@@ -1066,7 +1067,8 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       return { ...info, transport: "http",
         mcpSource:{...MCP_STARTUP_SOURCE,startedAt:MCP_STARTED_AT,liveCodeRevisionVerified:false},
         mcpToolSurface: {
-          release:"2026-10-28-document-sync",
+          release:"2026-10-28-tool-governance",
+          catalog:toolRegistrySnapshot(server),
           readDocument:true,
           nativeImage:true,
           legacyReadMultipleFilesImages:true,
@@ -1655,11 +1657,13 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       const capabilities = await invoke("capabilities.get", { goal: goal ?? "" });
       const context = currentMcpRequestContext();
       const store = context.plannerContinuation;
-      if (!store) return capabilities;
+      const registry=toolRegistrySnapshot(server,{goal,includeTools:!!goal});
+      if (!store) return {...capabilities,mcpToolRegistry:registry};
       const summary = store.summary?.();
       const handoff = summary?.latestReadyHandoff ?? null;
       return {
         ...capabilities,
+        mcpToolRegistry:registry,
         conversationContinuity: {
           compatibilityVersion: 1,
           readyHandoffCount: Number(summary?.readyHandoffCount ?? 0),
@@ -1699,7 +1703,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       idempotentHint: true,
       openWorldHint: false,
     },
-    ({ goal }) => invoke("capabilities.get", { goal: goal ?? "" }),
+    async ({ goal }) => ({...(await invoke("capabilities.get", { goal: goal ?? "" })),mcpToolRegistry:toolRegistrySnapshot(server,{goal,includeTools:!!goal})}),
   );
 
   tool(
