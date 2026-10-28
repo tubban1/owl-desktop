@@ -194,3 +194,14 @@ jobs:
           node --check scripts/lib/version-sync.mjs
           node --check scripts/sync-dev-checkouts.mjs
           node --check scripts/install-version-stager.mjs
+      - name: Parse independent Windows version-cutover script
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts/windows/verified-dev-cutover.ps1'),
+            [ref]$tokens, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) { $errors | Out-String | Write-Error; exit 1 }
