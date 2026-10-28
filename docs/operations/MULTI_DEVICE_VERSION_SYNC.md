@@ -31,3 +31,11 @@ Last known good source snapshots are kept under the SHA path. The stager does no
 ## E2E evidence
 
 Tests cover source SHA and version evidence, dirty untracked file protection, unknown repository state, and Windows/macOS parity through CI. Actual scheduled task installation and process activation are separate deployment verifications.
+
+## Activation readiness preflight (second phase)
+
+The new `npm run activation:preflight` checks the immutable SHA stage and previous isolated smoke/build receipt, queries GitHub **Main CI** for the *exact* staged commit (not a pull request run), starts the candidate MCP server only on a temporary loopback port against a synthetic Runtime (no credentials), inspects the tool registry, and verifies presence of Electron, Runtime and Tunnel release components. It also requires independent rollback-guardian evidence. Results are atomically stored at `~/.owl-lab/version-sync/desktop/activation-preflight.json`; `npm run activation:status` reads this without changing services.
+
+Preflight deliberately returns a blocked status if the staged snapshot is only a source build (common when installed with `npm ci --ignore-scripts`) and missing a runnable Electron bundle or Runtime/Tunnel assets. The previous staged commit remains intact. A passing isolated MCP check does **not** prove the full Desktop login/cloud Tunnel is ready, and is not live activation. The checked run must be the main-branch push CI for precisely the candidate SHA.
+
+**Live cutover remains fail-closed** until a distinct supervisor can recover the original running version after a forced crash or lost ChatGPT connection, and its rollback has been exercised without sacrificing the only working tunnel. Windows Computer MCP / OWL should remain independently recoverable, and actual deployed build identity must be recorded separately. No OS privacy settings or local developer worktrees are modified by preflight.
