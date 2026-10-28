@@ -15,7 +15,7 @@ const sha=/^[a-f0-9]{40}$/;
 const user=os.homedir();
 const sourceBoundary=path.join(user,"Documents","Me","Project","cursor")+path.sep;
 const state=path.join(user,".owl-lab","version-sync","desktop");
-const label="fan.fde.owl.dev-release";
+const label="fan.fde.owl.dev-release."+newSha.slice(0,8);
 const ids={old:label+".fallback",next:label+".current",watch:label+".watchdog"};
 const agents=path.join(user,"Library","LaunchAgents");
 const txFile=path.join(state,"mac-cutover-transaction.json");
@@ -83,8 +83,42 @@ async function tunnelReady(root){
  return false;
 }
 
+function exactSupervisor(dir){
+ const expected=path.join(dir,"scripts","dev-full.mjs");
+ const found=run("/bin/ps",["-axo","pid=,command="],{allowError:true});
+ if(found.status!==0)return null;
+ const matches=[];
+ for(const line of found.stdout.split("\n")){
+  const match=line.trim().match(/^(\d+)\s+(\S+)\s+(\S+)$/);
+  if(match&&match[3]===expected&&path.basename(match[2])==="node")matches.push(Number(match[1]));
+ }
+ if(matches.length!==1)return null;
+ const pid=matches[0];
+ const birth=run("/bin/ps",["-p",String(pid),"-o","lstart="],{allowError:true});
+ return birth.status===0&&birth.stdout.trim()?{pid,birth:birth.stdout.trim()}:null;
+}
+function expectedSupervisorRunning(dir){return Boolean(exactSupervisor(dir))}
+async function healMissingOwner(dir){
+ if(ownerMatches(dir))return true;
+ const exact=exactSupervisor(dir);
+ if(!exact||!(await health(8790))||!(await health(18788)))return false;
+ const old=loadOwner();
+ if(old?.pid&&old.pid!==exact.pid){
+  const oldProc=run("/bin/ps",["-p",String(old.pid),"-o","lstart="],{allowError:true});
+  if(oldProc.status===0&&oldProc.stdout.trim()===old.birth)return false;
+ }
+ const dest=path.join(user,".owl-lab","dev-full-owner.json");
+ const candidate={version:1,desktopRoot:dir,pid:exact.pid,birth:exact.birth};
+ const tmp=dest+"."+randomUUID()+".tmp";
+ try{fs.writeFileSync(tmp,JSON.stringify(candidate)+"\n",{flag:"wx",mode:0o600});fs.renameSync(tmp,dest)}
+ finally{try{fs.unlinkSync(tmp)}catch{}}
+ return ownerMatches(dir);
+}
 async function healthy(dir){
- return ownerMatches(dir)&&await health(8790)&&await health(18788)&&await tunnelReady(dir);
+ // An external cleanup process may remove the non-authoritative owner receipt.
+ // A unique exact PID + birth + immutable root is independently verifiable.
+ if(!ownerMatches(dir))await healMissingOwner(dir);
+ return Boolean(exactSupervisor(dir))&&await health(8790)&&await health(18788)&&await tunnelReady(dir);
 }
 async function portsFree(){
  for(const port of [8790,8791,18788,5173])if(await portUp(port))return false;
@@ -120,7 +154,7 @@ function plist(id,args,working,interval=0){
  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'+
  '<plist version="1.0"><dict><key>Label</key><string>'+xml(id)+'</string>'+
  '<key>ProgramArguments</key><array>'+arr+'</array><key>WorkingDirectory</key><string>'+xml(working)+'</string>'+
- env+'<key>RunAtLoad</key><false/><key>KeepAlive</key><false/>'+
+ env+'<key>RunAtLoad</key><'+(id===ids.next?'true':'false')+'/><key>KeepAlive</key><false/>'+
  (interval?'<key>StartInterval</key><integer>'+interval+'</integer>':'')+
  '<key>StandardOutPath</key><string>'+xml(path.join(state,id+".out.log"))+'</string>'+
  '<key>StandardErrorPath</key><string>'+xml(path.join(state,id+".err.log"))+'</string></dict></plist>\n';
@@ -169,7 +203,9 @@ if(mode==="watch"){
  }
  if(tx?.phase==="activated"&&tx.oldSha===oldSha&&tx.newSha===newSha){
   const tracker=path.join(state,"mac-watchdog-failures.json");
-  const localOK=ownerMatches(newRoot)&&await health(8790)&&await health(18788);
+  // A missing bookkeeping file alone must never roll back a healthy server.
+  await healMissingOwner(newRoot);
+  const localOK=Boolean(exactSupervisor(newRoot))&&await health(8790)&&await health(18788);
   if(localOK){
    try{fs.unlinkSync(tracker)}catch{}
   }else{
@@ -178,7 +214,7 @@ if(mode==="watch"){
     fs.writeFileSync(tracker,JSON.stringify({newSha,firstSeenAt:new Date().toISOString()})+"\n",{mode:0o600});
    }else{
     const age=Date.now()-Date.parse(failed.firstSeenAt);
-    if(age>30000&&age<150000&&!ownerMatches(newRoot)){
+    if(age>30000&&age<150000&&!expectedSupervisorRunning(newRoot)){
      try{kick(ids.next)}catch{}
     }
     if(age>=150000){await rollback("watchdog-post-activation-local-health-failed")}
@@ -192,10 +228,11 @@ if(!await healthy(oldRoot)||await healthy(newRoot))throw Error("CUTOVER_PREFLIGH
 provision();
 journal({phase:"started",oldRoot,newRoot,oldSha,newSha,startedAt:new Date().toISOString()});
 try{
- const pid=loadOwner()?.pid;
- if(!ownerMatches(oldRoot)||!pid)throw Error("OLD_SUPERVISOR_OWNER_CHANGED");
- process.kill(pid,"SIGTERM");
+ const original=exactSupervisor(oldRoot);
+ if(!original||!(await healthy(oldRoot)))throw Error("OLD_SUPERVISOR_IDENTITY_OR_HEALTH_CHANGED");
+ process.kill(original.pid,"SIGTERM");
  if(!await waitFor(portsFree,45000))throw Error("OLD_OWNED_PORTS_DID_NOT_RELEASE");
+ if(process.env.OWL_QA_FAIL_AFTER_STOP==="1")throw Error("INJECTED_QA_FAILURE_AFTER_STOP");
  kick(ids.next);
  if(!await waitFor(()=>healthy(newRoot),150000))throw Error("NEW_MCP_AND_RUNTIME_NOT_HEALTHY");
  journal({phase:"activated",oldRoot,newRoot,oldSha,newSha,activatedAt:new Date().toISOString()});
