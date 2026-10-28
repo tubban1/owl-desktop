@@ -5,6 +5,7 @@ import os from "node:os";
 import {randomUUID} from "node:crypto";
 import {fileURLToPath} from "node:url";
 import {OWL_DESKTOP_REPOSITORY,versionSnapshot,verifyStagedDirectory,safeCommand,resolveBundledNpm} from "./lib/version-sync.mjs";
+import {readVerifiedStage,deviceVersionState} from "./lib/device-version-state.mjs";
 
 const stateRoot=path.join(os.homedir(),".owl-lab","version-sync","desktop");
 let savedSource=null;
@@ -21,16 +22,11 @@ function assertSafeRoot(){
 }
 function status(){
  const source=versionSnapshot(thisRoot,{queryRemote:true});
- const desiredFile=path.join(stateRoot,"last-staged.json");
- let last=null;try{last=JSON.parse(fs.readFileSync(desiredFile,"utf8"));}catch{}
- const staged=last?.commit&&/^[0-9a-f]{40}$/.test(last.commit)&&
-  verifyStagedDirectory(path.join(stateRoot,last.commit),last.commit)?last.commit:null;
- output({...source,stagedCommit:staged,
-  sameSourceAsRemote:source.remoteCommit?source.remoteCommit===source.sourceCommit:null,
-  stagedUpToDate:source.remoteCommit?staged===source.remoteCommit:null,
-  deploymentStatus:"running-process-not-restarted",
-  note:"Staging is NOT activation. Never replace a live, dirty checkout or disconnect the sole MCP tunnel."});
- return {source,staged};
+ const stage=readVerifiedStage(stateRoot);
+ const status=deviceVersionState({source,stage});
+ output({...status,buildVersion:source.buildVersion,stagedCommit:stage.commit,
+  note:"CLI observes Git checkout and staging only. Read the connected MCP device_sync_status for its actual startup revision. Neither source nor staging implies activation."});
+ return {source,staged:stage.commit};
 }
 function atomicJson(file,value){
  const temp=file+"."+randomUUID()+".tmp";
@@ -48,8 +44,18 @@ function stage(){
   if(source.remoteStatus!=="verified"||!commit)throw Error("SYNC_REMOTE_UNAVAILABLE_KEEP_EXISTING");
   const target=path.join(stateRoot,commit);
   if(verifyStagedDirectory(target,commit)){
-   atomicJson(path.join(stateRoot,"last-staged.json"),{commit,verifiedAt:new Date().toISOString(),reused:true});
-   output({status:"already-tested",commit,stagingRoot:target,liveProcessChanged:false});return;
+   const prior=readVerifiedStage(stateRoot);
+   if(prior.commit===commit&&prior.gatesPassed){
+    atomicJson(path.join(stateRoot,"last-staged.json"),{...prior.receipt,lastCheckedAt:new Date().toISOString(),reused:true});
+    output({status:"already-tested",commit,stagingRoot:target,localSmokePassed:true,buildPassed:true,liveProcessChanged:false});return;
+   }
+   // A legacy reused-only receipt is not evidence of passed tests. Reverify the staged SHA.
+   const npmCli=resolveBundledNpm();if(!npmCli)throw Error("SYNC_NPM_CLI_NOT_FOUND");
+   safeCommand(process.execPath,[path.join(target,"node_modules","vitest","vitest.mjs"),"run","tests/version-sync.test.mjs","tests/device-version-state.test.mjs","tests/local-document-read.test.mjs","tests/mcp-tool-surface.test.mjs","--maxWorkers=1"],{cwd:target,timeout:180000});
+   safeCommand(process.execPath,[npmCli,"run","build"],{cwd:target,timeout:240000});
+   if(!verifyStagedDirectory(target,commit))throw Error("SYNC_REUSED_STAGE_MODIFIED");
+   atomicJson(path.join(stateRoot,"last-staged.json"),{commit,verifiedAt:new Date().toISOString(),localSmokePassed:true,buildPassed:true,requiresPassingGithubCi:true,legacyReceiptRevalidated:true});
+   output({status:"revalidated-existing-stage",commit,stagingRoot:target,liveProcessChanged:false});return;
   }
   if(fs.existsSync(target))throw Error("SYNC_EXISTING_STAGE_TAMPERED_MANUAL_INSPECTION");
   temporary=path.join(stateRoot,"pending-"+randomUUID());

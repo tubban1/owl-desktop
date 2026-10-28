@@ -10,6 +10,7 @@ import { assertMissionAction } from "../electron/services/mission-approval.mjs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {versionSnapshot} from "../scripts/lib/version-sync.mjs";
+import {deviceVersionState,readVerifiedStage} from "../scripts/lib/device-version-state.mjs";
 const MCP_SOURCE_ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const MCP_STARTUP_SOURCE=versionSnapshot(MCP_SOURCE_ROOT);
 const MCP_STARTED_AT=new Date().toISOString();
@@ -1083,13 +1084,14 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     {},{title:"OWL Device Version Sync",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
     async()=>{
       const desired=versionSnapshot(MCP_SOURCE_ROOT,{queryRemote:true});
-      const same=Boolean(desired.remoteCommit&&MCP_STARTUP_SOURCE.sourceCommit===desired.remoteCommit&&!MCP_STARTUP_SOURCE.sourceDirty);
-      return {mcpAtStartup:MCP_STARTUP_SOURCE,githubMain:desired.remoteCommit,
-        upstreamReachable:desired.remoteStatus==="verified",
-        sourceMatchesMain:desired.remoteCommit?same:null,
-        needsUpdate:desired.remoteCommit?!same:null,
-        mcpStartedAt:MCP_STARTED_AT,
-        note:"Only code identity; service reload, Electron/Runtime versions and OS permissions must be verified separately. No live process changes."};
+      const stage=readVerifiedStage();
+      const state=deviceVersionState({source:desired,live:MCP_STARTUP_SOURCE,stage});
+      return {...state,mcpAtStartup:MCP_STARTUP_SOURCE,mcpStartedAt:MCP_STARTED_AT,
+        githubMain:state.desiredMainCommit,stagedCommit:state.stagedCandidateCommit,
+        upstreamReachable:state.githubReachable,
+        sourceMatchesMain:state.sourceCheckoutStatus==="unknown"?null:state.sourceCheckoutStatus==="current",
+        needsUpdate:state.activationNeeded,
+        note:"runningMcpCommit is pinned at actual MCP process startup; Git checkout HEAD and staging receipt are separate. A source-stage does not prove runtime package activation or rollback."};
     });
 
   tool(

@@ -22,7 +22,7 @@ Use OWL_SYNC_SOURCE_ROOT to specify the actual long-running user development che
 
 ## Activation boundary / remaining work
 
-Sync staging is **not activation**. A single live OWL Cloud Tunnel and direct MCP transport must not restart during a remote ChatGPT session without an independently verified guardian/recovery path. Only an authenticated host supervisor should switch the running release after packaged component attestation, a health gate, and a verified rollback path. Do not equate GitHub merge, staged build or source SHA with a live update. A fully unattended signed production OTA also needs code-signing and authenticated artifact distribution for both OSes; those credentials are not provisioned by this source stager.
+Sync staging is **not activation**. A repeated staging check must preserve successful smoke/build receipts; a legacy `reused:true` receipt without gate evidence must be re-tested. The synced CLI distinguishes Git working-tree HEAD, staged snapshot, and unknown live version; the connected MCP `device_sync_status` is the authority for its own startup SHA. Never equate a matching staging SHA with a running process update. A single live OWL Cloud Tunnel and direct MCP transport must not restart during a remote ChatGPT session without an independently verified guardian/recovery path. Only an authenticated host supervisor should switch the running release after packaged component attestation, a health gate, and a verified rollback path. Do not equate GitHub merge, staged build or source SHA with a live update. A fully unattended signed production OTA also needs code-signing and authenticated artifact distribution for both OSes; those credentials are not provisioned by this source stager.
 
 ## Rollback / troubleshooting
 
