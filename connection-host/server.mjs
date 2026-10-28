@@ -138,6 +138,10 @@ const providerProxy = {
   inspect:(args)=>bridgeRpc("provider","inspect",[args]),
   switchNameservers:(args)=>bridgeRpc("provider","switchNameservers",[args]),
 };
+const peerRecoveryProxy = {
+  inspectComputer:()=>bridgeRpc("peerRecovery","inspectComputer"),
+  restartComputer:(args)=>bridgeRpc("peerRecovery","restartComputer",[args]),
+};
 
 const plannerContinuation = new PlannerContinuationStore({
   file: path.join(userDataRoot, "planner-continuation.json"),
@@ -172,6 +176,7 @@ const mcpServer = await startOwlMcpHttpServer({
   remoteDeviceControl: remoteDeviceProxy,
   mailService: mailProxy,
   providerOperations: providerProxy,
+  peerRecovery: peerRecoveryProxy,
   plannerContinuation,
   fileDelivery: {
     send:async (path,authorize)=>{
