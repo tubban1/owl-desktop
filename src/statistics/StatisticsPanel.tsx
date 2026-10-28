@@ -1,15 +1,11 @@
 import { useMemo, useState } from "react";
 import { Activity, AlertTriangle, CheckCircle2, Clock3, GitBranch, Network, RefreshCw } from "lucide-react";
 import { summarizeUsage, type StatisticsRange, type UsageStatisticsSnapshot } from "./statisticsModel";
+import {describeTool,summarizeToolDomains} from "../../shared/tool-taxonomy.mjs";
 
 const fmt = (n: number) => new Intl.NumberFormat().format(n);
 const duration = (ms: number | null) => ms === null ? "—" : ms < 1000 ? Math.round(ms) + " ms" : (ms/1000).toFixed(1) + " s";
-const friendlyTool = (tool: string) => ({
-  execute_command: "Run a command", get_process_output: "Check process result",
-  start_process: "Start background work", workstream_open: "Open workstream",
-  workstream_progress: "Report progress", workstream_complete: "Finish workstream",
-  read_file: "Read a file", edit_file: "Edit a file",
-}[tool] ?? tool.replaceAll("_"," "));
+const friendlyTool = (tool: string) => describeTool(tool).title;
 
 export function StatisticsPanel({ stats, deviceLocation }: { stats: UsageStatisticsSnapshot | null; deviceLocation: string }) {
   const [range, setRange] = useState<StatisticsRange>(7);
@@ -20,6 +16,8 @@ export function StatisticsPanel({ stats, deviceLocation }: { stats: UsageStatist
   const maxCalls = Math.max(1, ...model.rows.map((row) => row.calls));
   const maxTasks = Math.max(1, ...model.rows.map((row) => row.workstreamOpens));
   const maxTools = Math.max(1, ...displayedTools.map((tool) => tool.calls));
+  const byCategory=summarizeToolDomains(displayedTools);
+  const maxCategory=Math.max(1,...byCategory.map(x=>x.calls));
   const busiest = model.rows.reduce<(typeof model.rows)[number] | null>((best, row) => !best || row.calls > best.calls ? row : best, null);
   const frequentErrors = model.tools.filter((tool) => tool.errors > 0).sort((a,b) => b.errors-a.errors)[0];
   return <section className="usage-statistics panel" aria-label="OWL usage statistics">
@@ -62,9 +60,10 @@ export function StatisticsPanel({ stats, deviceLocation }: { stats: UsageStatist
       </div>
       <div className="stats-chart stats-top-tools">
         <div className="stats-tool-head"><h4>{selected ? "Tools · "+selected.day : "Most used tools"}</h4>{selected && <button onClick={() => setDay("")}>Clear date</button>}</div>
-        {displayedTools.map((tool) => <div className="stats-tool-row" key={tool.tool} title={tool.tool+" · "+tool.errors+" errors"}><span>{friendlyTool(tool.tool)}</span><div className="stats-tool-track"><i style={{width:tool.calls/maxTools*100+"%"}}/></div><strong>{tool.calls}</strong></div>)}
+        {displayedTools.map((tool) => <div className="stats-tool-row" key={tool.tool} title={[tool.tool,describeTool(tool.tool).category,describeTool(tool.tool).primitive ? describeTool(tool.tool).primitive+"("+describeTool(tool.tool).op+") → "+describeTool(tool.tool).action:"adapter/control plane",tool.errors+" errors"].join(" · ")}><span>{friendlyTool(tool.tool)}</span><div className="stats-tool-track"><i style={{width:tool.calls/maxTools*100+"%"}}/></div><strong>{tool.calls}</strong></div>)}
         {displayedTools.length === 0 && <p className="stats-empty">No tool calls recorded in this period.</p>}
       </div>
+      <div className="stats-chart stats-top-tools" aria-label="Tool calls by capability category"><h4>Capability categories</h4>{byCategory.map(category=><div className="stats-tool-row" key={category.category}><span>{category.category}</span><div className="stats-tool-track"><i style={{width:category.calls/maxCategory*100+"%"}}/></div><strong>{fmt(category.calls)}</strong></div>)}</div>
     </div>
     <div className="stats-insights"><AlertTriangle size={16}/><span><strong>Usage insight: </strong>{frequentErrors ? friendlyTool(frequentErrors.tool)+" had "+frequentErrors.errors+" error response(s). Review related events in Monitor." : busiest ? "Most active recorded day: "+busiest.day+" ("+busiest.calls+" calls). No tool errors recorded in this range." : "Waiting for the first recorded MCP interaction. Open Monitor to see live activity."}</span></div>
     {model.rows.length === 0 && <p className="stats-empty">No recorded data for this period. Charts will populate as OWL runs.</p>}

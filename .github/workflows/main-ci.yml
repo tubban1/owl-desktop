@@ -24,6 +24,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: node scripts/verify-mcp-catalog.mjs
       - run: node --test workers/owl-mailer/test/worker.test.mjs tests/ota-coordinator.test.mjs
       - run: npm run build
       - run: node --check electron/main.mjs
