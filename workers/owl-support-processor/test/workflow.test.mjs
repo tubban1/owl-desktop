@@ -80,3 +80,16 @@ test("reply cannot be queued by a different actor",async()=>{
  const r=await worker.fetch(req("/v1/cases/case-3/reply","POST",{actor:"chatgpt",requestId:"reply-other",subject:"Reply",text:"Hello"}),{...base,SUPPORT_DB:db});
  assert.equal(r.status,409);
 });
+test("reused event request id from a different case returns conflict",async()=>{
+ const c={id:"case-4",state:"received",version:0,assigned_to:null};
+ const db={prepare(sql){return {bind(){return this},async first(){if(sql.includes("SELECT * FROM support_cases"))return c;if(sql.includes("FROM support_case_events WHERE request_id"))return {id:"prior-event",case_id:"case-OTHER"};return null}}}};
+ const r=await worker.fetch(req("/v1/cases/case-4/claim","POST",{actor:"chatgpt",requestId:"reused-req"}),{...base,SUPPORT_DB:db});
+ assert.equal(r.status,409);
+ assert.equal((await r.json()).error,"idempotency_conflict");
+});
+test("outbox idempotency cannot cross ticket boundaries",async()=>{
+ const c={id:"case-5",state:"in_progress",version:1,assigned_to:"chatgpt",sender:"owner@example.org"};
+ const db={prepare(sql){return {bind(){return this},async first(){if(sql.includes("SELECT * FROM support_cases"))return c;if(sql.includes("FROM support_case_outbox WHERE idempotency_key"))return {id:"outbox-OTHER",status:"sent",body_sha256:"dummy",case_id:"case-OTHER",actor:"chatgpt"};return null}}}};
+ const r=await worker.fetch(req("/v1/cases/case-5/reply","POST",{actor:"chatgpt",requestId:"reused-reply",subject:"Reply",text:"Body"}),{...base,SUPPORT_DB:db});
+ assert.equal(r.status,409);
+});

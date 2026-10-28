@@ -81,7 +81,8 @@ async function handleApi(request,env) {
   if(!actor||!txt(data.requestId,120))return err("actor_and_requestId_required",400);
   const requestId="api:"+data.requestId;
   const operation=parts[3];
-  const existing=await q(env,"SELECT id,event_type FROM support_case_events WHERE request_id=?1",requestId).first();
+  const existing=await q(env,"SELECT id,event_type,case_id FROM support_case_events WHERE request_id=?1",requestId).first();
+  if(existing&&existing.case_id!==id)return err("idempotency_conflict",409);
   if(existing&&operation!=="reply")return respond({idempotent:true,eventId:existing.id,state:c.state});
   if(operation==="claim") {
     if(!["received","human_review","reopened","in_progress"].includes(c.state))return err("invalid_transition",409);
@@ -114,8 +115,8 @@ async function handleApi(request,env) {
     if(c.assigned_to!==actor||!["in_progress","awaiting_customer","resolved"].includes(c.state))return err("case_not_owned_or_not_active",409);
     if(!EMAIL.test(c.sender)||!txt(data.subject,220)||/[\r\n]/.test(data.subject)||!txt(data.text,50000))return err("invalid_reply",400);
     const hash=await sha256(data.text);
-    const prior=await q(env,"SELECT id,status,body_sha256 FROM support_case_outbox WHERE idempotency_key=?1",requestId).first();
-    if(prior)return prior.body_sha256===hash?respond({idempotent:true,outboxId:prior.id,status:prior.status}):err("idempotency_conflict",409);
+    const prior=await q(env,"SELECT id,status,body_sha256,case_id,actor FROM support_case_outbox WHERE idempotency_key=?1",requestId).first();
+    if(prior)return prior.body_sha256===hash&&prior.case_id===id&&prior.actor===actor?respond({idempotent:true,outboxId:prior.id,status:prior.status}):err("idempotency_conflict",409);
     const idOut=uuid();
     await q(env,"INSERT INTO support_case_outbox(id,case_id,idempotency_key,recipient,subject,body_sha256,status,actor,body_text,reply_to) VALUES (?1,?2,?3,?4,?5,?6,'prepared',?7,?8,'agent@tbn.cc')",idOut,id,requestId,c.sender,data.subject,hash,actor,data.text).run();
     return respond({queued:true,outboxId:idOut,status:"prepared"},202);
