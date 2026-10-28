@@ -12,6 +12,7 @@ import {verifyStagedDirectory,resolveBundledNpm} from "./lib/version-sync.mjs";
 import {readVerifiedStage} from "./lib/device-version-state.mjs";
 import {otaRoot,platform,initIdentity,configure,heartbeat,acquire,release,peerState} from "./lib/ota-client.mjs";
 import {isRetryablePeerFailure,shouldBackoffFailedRelease} from "./lib/ota-retry-policy.mjs";
+import {parseOtaReceipt} from "./lib/ota-receipt.mjs";
 
 const device=platform,peer=device==="mac"?"windows":"mac";
 if(!device)throw Error("ROLL_UNSUPPORTED_OS");
@@ -205,7 +206,7 @@ async function waitForActivation(sha){
  const file=path.join(stageRoot,device==="mac"?"mac-cutover-transaction.json":"cutover-last.json");
  const deadline=Date.now()+270000;
  while(Date.now()<deadline){
-  let r;try{r=JSON.parse(fs.readFileSync(file,"utf8"))}catch{}
+  let r;try{r=parseOtaReceipt(fs.readFileSync(file,"utf8"))}catch{}
   if(r&&(r.newSha===sha||r.toSha===sha)){
    if(["rolled-back","rolled-back-or-blocked","rollback-failed"].includes(r.phase))
     throw Error("ROLL_CUTOVER_ROLLED_BACK:"+String(r.reason??"unknown"));
@@ -249,7 +250,7 @@ async function tick(){
  if(!staged.gatesPassed||!staged.commit)return {status:"blocked",reason:"stage-unverified"};
  if(live.sha===staged.commit)return {status:"current",sha:live.sha};
  if(staged.commit!==githubMainSha())return {status:"blocked",reason:"stage-not-latest-main"};
- let last;try{last=JSON.parse(fs.readFileSync(path.join(rollState,"last-attempt.json")))}catch{}
+ let last;try{last=parseOtaReceipt(fs.readFileSync(path.join(rollState,"last-attempt.json"),"utf8"))}catch{}
  if(shouldBackoffFailedRelease(last,staged.commit))
   return {status:"blocked",reason:"failure-backoff"};
  const ci=await githubMainCi(staged.commit);
