@@ -192,6 +192,21 @@ function store(result){
  try{fs.writeFileSync(tmp,JSON.stringify({...result,at:Date.now()})+"\n",{flag:"wx",mode:0o600});fs.renameSync(tmp,dest)}
  finally{try{fs.unlinkSync(tmp)}catch{}}
 }
+function githubMainSha(){
+ const raw=run("git",["ls-remote","https://github.com/tubban1/owl-desktop.git","refs/heads/main"],{timeout:12000});
+ const [commit,ref]=raw.split(String.fromCharCode(9));
+ if(!SHA.test(commit)||ref!=="refs/heads/main")throw Error("ROLL_MAIN_SHA_NOT_VERIFIED");
+ return commit;
+}
+async function prepare(){
+ const stage=readVerifiedStage(stageRoot);
+ if(!stage.gatesPassed||!stage.commit)return {status:"blocked",reason:"stage-unverified"};
+ if(stage.commit!==githubMainSha())return {status:"blocked",reason:"stage-not-latest-main"};
+ const ci=await githubMainCi(stage.commit);
+ if(ci.status!=="success")return {status:"blocked",reason:"main-push-ci",ci:ci.status};
+ const dest=candidate(stage.commit);
+ return {status:"ready",sha:stage.commit,root:dest,ciRunId:ci.runId};
+}
 async function tick(){
  const live=await liveStatus();await publish(live);
  if(!live.healthy)return {status:"blocked",reason:"local-unhealthy"};
@@ -199,6 +214,7 @@ async function tick(){
  const staged=readVerifiedStage(stageRoot);
  if(!staged.gatesPassed||!staged.commit)return {status:"blocked",reason:"stage-unverified"};
  if(live.sha===staged.commit)return {status:"current",sha:live.sha};
+ if(staged.commit!==githubMainSha())return {status:"blocked",reason:"stage-not-latest-main"};
  let last;try{last=JSON.parse(fs.readFileSync(path.join(rollState,"last-attempt.json")))}catch{}
  if(last?.status==="failed"&&last?.target===staged.commit&&Date.now()-last.at<6*3600e3)
   return {status:"blocked",reason:"failure-backoff"};
@@ -210,6 +226,7 @@ async function tick(){
  try{
   const dest=candidate(staged.commit);
   const before=await liveStatus();
+  if(staged.commit!==githubMainSha())throw Error("ROLL_MAIN_MOVED_AFTER_BUILD");
   if(!before.healthy||before.sha!==live.sha||!(await remoteHealth()).ok)throw Error("ROLL_PEER_OR_LOCAL_CHANGED");
   await publish(before);
   const locked=await acquire(staged.commit);lease=locked.token;
@@ -236,5 +253,6 @@ else if(mode==="heartbeat"){
 }else if(mode==="status"){
  console.log(JSON.stringify({device,live:await liveStatus(),peer:await remoteHealth(),
   stage:readVerifiedStage(stageRoot),utcWindow:inWindow(),requiresMainPushCi:true}));
-}else if(mode==="tick"){console.log(JSON.stringify(await tick()));}
-else throw Error("Usage: auto-version-updater.mjs init|configure URL|heartbeat|status|tick");
+}else if(mode==="prepare"){console.log(JSON.stringify(await prepare()));}
+else if(mode==="tick"){console.log(JSON.stringify(await tick()));}
+else throw Error("Usage: auto-version-updater.mjs init|configure URL|heartbeat|status|prepare|tick");
