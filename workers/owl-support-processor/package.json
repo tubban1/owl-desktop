@@ -1,0 +1,9 @@
+{
+  "name": "@owl-lab/support-processor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "deploy": "wrangler deploy"
+  }
+}
