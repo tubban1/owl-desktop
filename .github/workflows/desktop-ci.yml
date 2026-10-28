@@ -205,3 +205,13 @@ jobs:
             [ref]$tokens, [ref]$errors
           ) | Out-Null
           if ($errors.Count -gt 0) { $errors | Out-String | Write-Error; exit 1 }
+
+      - name: macOS release cutover syntax and fail-closed SHA
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          node --check scripts/mac-safe-cutover.mjs
+          if node scripts/mac-safe-cutover.mjs check "$PWD" "$PWD" invalid invalid; then
+            echo 'Controller accepted invalid release SHA' >&2
+            exit 1
+          fi
