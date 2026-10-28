@@ -23,7 +23,7 @@ export function ownerMatches(record, expectedRoot) {
     const command = execFileSync("ps", ["-p", String(record.pid), "-o", "command="], {
       encoding: "utf8", timeout: 2000,
     }).trim();
-    return command.includes("scripts/dev-full.mjs");
+    return command.includes(path.join(expectedRoot, "scripts", "dev-full.mjs"));
   } catch { return false; }
 }
 
@@ -34,7 +34,7 @@ export function readDevOwner(file = devFullOwnerFile) {
 export function writeDevOwner(root, file = devFullOwnerFile) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const existing = readDevOwner(file);
-  if (ownerMatches(existing, root) && existing.pid !== process.pid) {
+  if (existing?.pid !== process.pid && ownerMatches(existing, existing?.desktopRoot)) {
     throw new Error("Another owned dev:full supervisor is already running (PID " + existing.pid + ").");
   }
   const record = { version: 1, desktopRoot: root, pid: process.pid, birth: processBirth(process.pid) };
