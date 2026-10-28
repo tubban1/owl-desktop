@@ -16,6 +16,7 @@ const copies=[
  ["scripts/auto-version-updater.mjs","auto-version-updater.mjs"],
  ["scripts/lib/ota-client.mjs","lib/ota-client.mjs"],
  ["scripts/lib/ota-ci.mjs","lib/ota-ci.mjs"],
+ ["scripts/lib/ota-retry-policy.mjs","lib/ota-retry-policy.mjs"],
  ["scripts/lib/mac-release-startup.mjs","lib/mac-release-startup.mjs"],
  ["scripts/lib/mac-postactivation-health.mjs","lib/mac-postactivation-health.mjs"],
  ["scripts/lib/version-sync.mjs","lib/version-sync.mjs"],
@@ -37,7 +38,7 @@ function xml(s){return s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceA
 if(process.platform==="darwin"){
  const agents=path.join(os.homedir(),"Library","LaunchAgents");
  fs.mkdirSync(agents,{recursive:true});
- for(const [label,mode,seconds] of [["fan.fde.owl.ota-heartbeat","heartbeat",60],["fan.fde.owl.ota-promote","tick",1800]]){
+ for(const [label,mode,seconds] of [["fan.fde.owl.ota-heartbeat","heartbeat",30],["fan.fde.owl.ota-promote","tick",600]]){
   const target=path.join(agents,label+".plist");
   const body='<?xml version="1.0" encoding="UTF-8"?>\n'+
    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'+
@@ -45,7 +46,7 @@ if(process.platform==="darwin"){
    '<key>ProgramArguments</key><array><string>'+xml(process.execPath)+'</string><string>'+
      xml(task)+'</string><string>'+mode+'</string></array>'+
    '<key>StartInterval</key><integer>'+seconds+'</integer>'+
-   '<key>RunAtLoad</key><'+(mode==="heartbeat"?"true":"false")+'/>'+
+   '<key>RunAtLoad</key><true/>'+
    '<key>StandardOutPath</key><string>'+xml(path.join(otaRoot,mode+".out.log"))+'</string>'+
    '<key>StandardErrorPath</key><string>'+xml(path.join(otaRoot,mode+".err.log"))+'</string>'+
    '</dict></plist>';
@@ -59,7 +60,7 @@ if(process.platform==="darwin"){
  const node=process.execPath.replaceAll('"',"");
  for(const [name,mode,minutes,script] of [
   ["OWL-LAB-OTA-Heartbeat","heartbeat",1,task],
-  ["OWL-LAB-OTA-Promote","tick",30,task],
+  ["OWL-LAB-OTA-Promote","tick",10,task],
   ["OWL-LAB-OTA-PostActivation-Watch","",1,path.join(stable,"windows","ota-post-activation-watch.ps1")]]){
   const action=mode?'"'+node+'" "'+script.replaceAll('"',"")+'" '+mode:
    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "'+script.replaceAll('"',"")+'"';
