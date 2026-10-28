@@ -990,7 +990,7 @@ function tool(server, name, description, schema, annotations, handler) {
   );
 }
 
-export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,userChromeBridge=null,mailService=null,providerOperations=null}={}) {
+export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,userChromeBridge=null,mailService=null,providerOperations=null,peerRecovery=null}={}) {
   const server = new McpServer(
     {
       name: "owl-mcp",
@@ -1979,6 +1979,26 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       }
     },
   );
+
+  // User-invoked Windows peer repair, not an arbitrary shell or process-kill API.
+  tool(server,"windows_computer_mcp_status",
+    "Check Windows Computer MCP local health and verified recovery tasks. Does not infer ChatGPT tunnel availability.",
+    {},{title:"Check Windows Computer MCP",readOnlyHint:true,destructiveHint:false,openWorldHint:false},
+    async()=>{
+      requireStableOwner(currentMcpRequestContext());
+      if(!peerRecovery)throw Error("PEER_RECOVERY_UNAVAILABLE");
+      return peerRecovery.inspectComputer();
+    });
+  tool(server,"windows_computer_mcp_restart",
+    "User-authorized restart of legacy Windows Computer MCP server or separate tunnel. Requires other OWL MCP healthy and a pre-existing validated Windows recovery task. Use Tunnel for a ChatGPT disconnect with locally healthy server; Server when local server is down.",
+    {component:z.enum(["Tunnel","Server"]),confirmation:z.literal("restart-peer-computer-mcp")},
+    {title:"Restart Windows Computer MCP Peer",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:false},
+    async({component,confirmation})=>{
+      requireStableOwner(currentMcpRequestContext());
+      if(confirmation!=="restart-peer-computer-mcp")throw Error("PEER_RESTART_CONFIRMATION_REQUIRED");
+      if(!peerRecovery)throw Error("PEER_RECOVERY_UNAVAILABLE");
+      return peerRecovery.restartComputer({component});
+    });
 
   // Capability-only Vault operations: requests run inside OWL Desktop and
   // return sanitized results. No tool can list, export, or decrypt secrets.
