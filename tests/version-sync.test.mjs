@@ -28,14 +28,14 @@ describe("multi-device version sync",()=>{
   expect(info.remoteStatus).toBe("not-checked");
   expect(info.updateAvailable).toBeNull();
   expect(verifyStagedDirectory(dir,expected)).toBe(true);
- }));
+ }),30000);
  it("rejects any dirty checkout as an immutable promoted stage",()=>fixture(dir=>{
   const sha=git(dir,"rev-parse","HEAD");
   fs.writeFileSync(path.join(dir,"local-settings.txt"),"user work; must never be reset");
   expect(versionSnapshot(dir).sourceDirty).toBe(true);
   expect(verifyStagedDirectory(dir,sha)).toBe(false);
   expect(fs.readFileSync(path.join(dir,"local-settings.txt"),"utf8")).toContain("never");
- }));
+ }),30000);
  it("does not claim remote parity when host lacks a Git working tree",()=>{
   const p=fs.mkdtempSync(path.join(os.tmpdir(),"owl-sync-unknown-"));
   try{

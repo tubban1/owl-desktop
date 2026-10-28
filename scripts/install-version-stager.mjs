@@ -24,6 +24,7 @@ function run(command,args){
 guardDir(state);guardDir(path.join(state,"agent"));guardDir(agent);guardDir(path.join(agent,"lib"));
 fs.copyFileSync(path.join(project,"scripts","sync-dev-checkouts.mjs"),script);
 fs.copyFileSync(path.join(project,"scripts","lib","version-sync.mjs"),path.join(agent,"lib","version-sync.mjs"));
+fs.copyFileSync(path.join(project,"scripts","lib","device-version-state.mjs"),path.join(agent,"lib","device-version-state.mjs"));
 const source=path.resolve(process.env.OWL_SYNC_SOURCE_ROOT||project);
 fs.writeFileSync(path.join(state,"source.json"),JSON.stringify({source})+"\n",{mode:0o600});
 if(process.platform==="darwin"){
