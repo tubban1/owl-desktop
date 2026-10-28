@@ -3,7 +3,7 @@
 # Keeps original root untouched. Fail closed and try rolling back old launcher.
 [CmdletBinding()]
 param(
- [ValidateSet('Check','Cutover','Watchdog')][string]$Mode='Check',
+ [ValidateSet('Check','Cutover','Watchdog','Monitor')][string]$Mode='Check',
  [Parameter(Mandatory=$true)][string]$OldRoot,
  [Parameter(Mandatory=$true)][string]$NewRoot,
  [Parameter(Mandatory=$true)][string]$ExpectedOldSha,
@@ -211,10 +211,56 @@ function Run-Watchdog {
  $null=Write-Receipt 'watchdog-rollback' $reason $restored
  Remove-Watchdog
 }
+# Independent post-activation health monitor. The new DEV Guardian is NOT
+# authoritative for rollback because it may auto-restart its own broken release.
+# Runs from a separate Task Scheduler job; never relies on the MCP it protects.
+function Run-Monitor {
+ $receiptPath=Join-Path $state 'cutover-last.json'
+ if(-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)){return}
+ $receipt=Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+ if($receipt.phase -ne 'activated' -or $receipt.fromSha -ne $ExpectedOldSha -or
+    $receipt.toSha -ne $ExpectedNewSha -or $receipt.from -ne $OldRoot -or $receipt.to -ne $NewRoot){return}
+ $tracker=Join-Path $state 'post-activation-failure.json'
+ $main=MainProcess $NewRoot
+ $healthy=[bool]($main -and (Test-Health))
+ if($healthy){
+  Remove-Item -LiteralPath $tracker -Force -ErrorAction SilentlyContinue
+  return
+ }
+ $first=$null
+ try{
+  $f=Get-Content -LiteralPath $tracker -Raw -ErrorAction Stop | ConvertFrom-Json
+  if($f.toSha -eq $ExpectedNewSha){$first=[datetime]::Parse($f.firstSeenUtc)}
+ }catch{}
+ if(-not $first){
+  @{toSha=$ExpectedNewSha;firstSeenUtc=(Get-Date).ToUniversalTime().ToString('o')}|
+   ConvertTo-Json | Set-Content -LiteralPath $tracker -Encoding UTF8
+  return
+ }
+ if(((Get-Date).ToUniversalTime()-$first.ToUniversalTime()).TotalSeconds -lt 150){return}
+ $reason='monitor-post-activation-local-health-failed'
+ if($main){try{(Get-Process -Id $main.ProcessId).CloseMainWindow()|Out-Null}catch{}}
+ Start-Sleep -Seconds 4
+ try{CleanupCandidatePorts $NewRoot ([int]$receipt.oldRuntimePid)}
+ catch {
+  # Foreign ownership means human intervention is needed; never kill unknown PIDs.
+  Write-Output ('OTA_MONITOR_BLOCKED_FOREIGN_PROCESS:'+([string]$_.Exception.Message))
+  return
+ }
+ if(-not (Wait-PortsReleased 18)){Write-Output 'OTA_MONITOR_PORTS_BLOCKED';return}
+ $restored=$false
+ try{$null=Launch $OldRoot;$restored=Wait-Healthy $OldRoot 90}catch{}
+ if($restored){try{Restore-OldGuardian}catch{$restored=$false;$reason+=':guardian-restore-failed'}}
+ $journal=Write-Receipt $(if($restored){'post-activation-rolled-back'}else{'post-activation-rollback-failed'}) $reason $restored
+ Add-Content -LiteralPath (Join-Path $state 'post-activation-history.jsonl') -Value ($journal|ConvertTo-Json -Compress) -Encoding UTF8
+ if($restored){Remove-Item -LiteralPath $tracker -Force -ErrorAction SilentlyContinue}
+}
+
 $OldRoot=Assert-Root $OldRoot $ExpectedOldSha
 $NewRoot=Assert-Root $NewRoot $ExpectedNewSha
 if($OldRoot -eq $NewRoot){throw 'CUTOVER_SAME_ROOT'}
 if($Mode -eq 'Watchdog'){Run-Watchdog;exit 0}
+if($Mode -eq 'Monitor'){Run-Monitor;exit 0}
 $original=MainProcess $OldRoot
 $preflight=[ordered]@{mode=$Mode;oldRoot=$OldRoot;newRoot=$NewRoot;
  oldMainPresent=[bool]$original;newMainPresent=[bool](MainProcess $NewRoot);
