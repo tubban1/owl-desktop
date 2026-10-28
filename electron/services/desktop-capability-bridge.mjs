@@ -13,6 +13,7 @@ export async function startDesktopCapabilityBridge({
   remoteDeviceControl,
   mailService = null,
   providerOperations = null,
+  peerRecovery = null,
   onEvent = () => {},
 } = {}) {
   if (!token) {
@@ -77,6 +78,11 @@ export async function startDesktopCapabilityBridge({
         if(method!=="inspect" && method!=="switchNameservers")
           throw codedError("PROVIDER_METHOD_NOT_ALLOWED","Provider operation is not allowed");
         target=providerOperations;
+      } else if(domain === "peerRecovery") {
+        if(!peerRecovery)throw codedError("PEER_RECOVERY_UNAVAILABLE","Windows peer recovery is unavailable");
+        if(!["inspectComputer","restartComputer"].includes(method))
+          throw codedError("PEER_RECOVERY_METHOD_NOT_ALLOWED","Unknown peer recovery operation");
+        target=peerRecovery;
       } else if(domain === "mail") {
         if(!mailMethods.has(method))throw codedError("MAIL_METHOD_UNSUPPORTED","Unknown mail operation");
         if(!mailService)throw codedError("MAIL_SERVICE_UNAVAILABLE","Open OWL Desktop to use mail");

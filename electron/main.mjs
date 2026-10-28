@@ -10,6 +10,7 @@ import { assessConnectivityRecovery } from "./services/connectivity-recovery-res
 import { DesktopStore } from "./store.mjs";
 import { createScopedProviderOperations } from "./services/provider-operations.mjs";
 import { createGoDaddyRequester } from "./services/godaddy-domains.mjs";
+import {createWindowsPeerRecovery} from "./services/windows-peer-recovery.mjs";
 import { UsageStatisticsStore } from "./services/usage-statistics-store.mjs";
 import { RuntimeHttpClient } from "./runtime-http-client.mjs";
 import { startWindowsDevRuntime, stopWindowsDevRuntime, restartWindowsDevRuntime, getWindowsDevAppliedPermissionFlags } from "./services/windows-dev-runtime.mjs";
@@ -104,6 +105,7 @@ let connectivityIncidentStartedAt=null;
 const announcedApprovalIds=new Set();
 let store;
 let scopedProviderOperations;
+const peerRecovery=createWindowsPeerRecovery();
 function providerOperations(){
   if(!scopedProviderOperations){
     scopedProviderOperations=createScopedProviderOperations({
@@ -1618,6 +1620,7 @@ async function startMcp() {
       remoteDeviceControl: remoteDeviceControl(),
       mailService,
       providerOperations:providerOperations(),
+        peerRecovery,
       userChromeBridge: windowsDevBrowser?.bridge ?? null,
       plannerContinuation: plannerContinuationStore,
       onEvent(level, message, meta) {
@@ -3415,6 +3418,7 @@ if (packagedConnectivityHostSoakOnly) {
         remoteDeviceControl,
         mailService,
         providerOperations:providerOperations(),
+        peerRecovery,
         onEvent(level, message, meta) {
           record(level, "connection-host", message, meta);
         },
@@ -3580,6 +3584,7 @@ if (packagedConnectivityHostSoakOnly) {
           remoteDeviceControl,
           mailService,
           providerOperations:providerOperations(),
+        peerRecovery,
           onEvent(level, message, meta) {
             record(level, "connection-host", message, meta);
           },
