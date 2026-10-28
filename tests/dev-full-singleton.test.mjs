@@ -1,4 +1,4 @@
-import test from "node:test";
+import {it} from "vitest";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -6,7 +6,7 @@ import path from "node:path";
 import {spawn} from "node:child_process";
 import {ownerMatches,processBirth,writeDevOwner,readDevOwner} from "../scripts/lib/dev-full-owner.mjs";
 
-test("one dev-full supervisor across distinct checkouts: a second cannot steal its owner receipt",{skip:process.platform!=="darwin"},async()=>{
+it.skipIf(process.platform!=="darwin")("one dev-full supervisor across distinct checkouts: a second cannot steal its owner receipt",async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"owl-single-owner-"));
  const original=path.join(dir,"release"),second=path.join(dir,"checkout"),recordFile=path.join(dir,"owner.json");
  const script=path.join(original,"scripts","dev-full.mjs");

@@ -1,11 +1,11 @@
-import test from "node:test";
+import {it} from "vitest";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {retireSupersededMacCurrentJobs} from "../scripts/lib/mac-release-startup.mjs";
 
-test("retire inactive macOS stale and QA current jobs; preserve active release, fallback and live jobs",{skip:process.platform!=="darwin"},()=>{
+it.skipIf(process.platform!=="darwin")("retire inactive macOS stale and QA current jobs; preserve active release, fallback and live jobs",()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"owl-mac-current-"));
  const active="fan.fde.owl.dev-release.4f84e8f0.current";
  const old="fan.fde.owl.dev-release.864ba1e5.current";
