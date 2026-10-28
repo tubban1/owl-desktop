@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
+import {randomUUID} from "node:crypto";
 import {fileURLToPath} from "node:url";
 import {githubMainCi} from "./lib/ota-ci.mjs";
 import {verifyStagedDirectory,resolveBundledNpm} from "./lib/version-sync.mjs";
@@ -44,6 +45,17 @@ function cleanRoot(root,sha,{built=false}={}){
 }
 function actualRoot(){
  if(device==="mac"){
+  // Authoritative supervisor owner receipt wins over unrelated development checkouts.
+  // Verify PID birth identity and exact script before trusting the receipt.
+  try{
+   const o=JSON.parse(fs.readFileSync(path.join(home,".owl-lab","dev-full-owner.json"),"utf8"));
+   if(Number.isSafeInteger(o.pid)&&typeof o.desktopRoot==="string"&&o.desktopRoot.startsWith(boundary())&&typeof o.birth==="string"){
+    const birth=run("/bin/ps",["-p",String(o.pid),"-o","lstart="],{allowError:true}).trim();
+    const command=run("/bin/ps",["-p",String(o.pid),"-o","command="],{allowError:true}).trim();
+    if(birth===o.birth&&command.endsWith(path.join(o.desktopRoot,"scripts","dev-full.mjs")))
+     return o.desktopRoot;
+   }
+  }catch{}
   const matches=[];
   for(const line of run("/bin/ps",["-axo","pid=,command="]).split("\n")){
    const m=line.trim().match(/^(\d+)\s+(\S+)\s+(\S+)$/);
@@ -52,7 +64,10 @@ function actualRoot(){
     if(root.startsWith(boundary()))matches.push(root);
    }
   }
-  return matches.length===1?matches[0]:null;
+  if(matches.length===1)return matches[0];
+  try{const owner=JSON.parse(fs.readFileSync(path.join(home,'.owl-lab','dev-full-owner.json'),'utf8'));
+   return matches.includes(owner.desktopRoot)?owner.desktopRoot:null;
+  }catch{return null}
  }
  const script="$list=@(Get-CimInstance Win32_Process -Filter \"Name='electron.exe'\" | Where-Object {$_.CommandLine -notmatch '--type='} | Select-Object -ExpandProperty ExecutablePath);$list|ConvertTo-Json -Compress";
  let paths;try{paths=JSON.parse(run("powershell.exe",["-NoProfile","-NonInteractive","-Command",script]));}catch{return null}
