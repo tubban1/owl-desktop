@@ -12,6 +12,7 @@ import {verifyStagedDirectory,resolveBundledNpm} from "./lib/version-sync.mjs";
 import {readVerifiedStage} from "./lib/device-version-state.mjs";
 import {otaRoot,platform,initIdentity,configure,heartbeat,acquire,release,peerState} from "./lib/ota-client.mjs";
 import {isRetryablePeerFailure,shouldBackoffFailedRelease} from "./lib/ota-retry-policy.mjs";
+import {parseOtaReceipt} from "./lib/ota-receipt.mjs";
 
 const device=platform,peer=device==="mac"?"windows":"mac";
 if(!device)throw Error("ROLL_UNSUPPORTED_OS");
@@ -120,6 +121,15 @@ async function remoteHealth(){
   return {ok:true,sha:peer.sha,at:peer.at};
  }catch(e){return {ok:false,reason:String(e.message??e)}}
 }
+async function waitForHealthyLocal(expectedRoot,expectedSha,timeoutMs=60000){
+ const deadline=Date.now()+timeoutMs;
+ let result=await liveStatus();
+ while(!result.healthy&&result.root===expectedRoot&&result.sha===expectedSha&&Date.now()<deadline){
+  await delay(Math.min(3000,Math.max(1,deadline-Date.now())));
+  result=await liveStatus();
+ }
+ return result;
+}
 async function waitForHealthyPeer(timeoutMs=90000){
  const deadline=Date.now()+timeoutMs;
  let result=await remoteHealth();
@@ -196,7 +206,7 @@ async function waitForActivation(sha){
  const file=path.join(stageRoot,device==="mac"?"mac-cutover-transaction.json":"cutover-last.json");
  const deadline=Date.now()+270000;
  while(Date.now()<deadline){
-  let r;try{r=JSON.parse(fs.readFileSync(file,"utf8"))}catch{}
+  let r;try{r=parseOtaReceipt(fs.readFileSync(file,"utf8"))}catch{}
   if(r&&(r.newSha===sha||r.toSha===sha)){
    if(["rolled-back","rolled-back-or-blocked","rollback-failed"].includes(r.phase))
     throw Error("ROLL_CUTOVER_ROLLED_BACK:"+String(r.reason??"unknown"));
@@ -240,7 +250,7 @@ async function tick(){
  if(!staged.gatesPassed||!staged.commit)return {status:"blocked",reason:"stage-unverified"};
  if(live.sha===staged.commit)return {status:"current",sha:live.sha};
  if(staged.commit!==githubMainSha())return {status:"blocked",reason:"stage-not-latest-main"};
- let last;try{last=JSON.parse(fs.readFileSync(path.join(rollState,"last-attempt.json")))}catch{}
+ let last;try{last=parseOtaReceipt(fs.readFileSync(path.join(rollState,"last-attempt.json"),"utf8"))}catch{}
  if(shouldBackoffFailedRelease(last,staged.commit))
   return {status:"blocked",reason:"failure-backoff"};
  const ci=await githubMainCi(staged.commit);
@@ -250,9 +260,10 @@ async function tick(){
  let lease=null;
  try{
   const dest=candidate(staged.commit);
-  const before=await liveStatus();
+  const before=await waitForHealthyLocal(live.root,live.sha);
   if(staged.commit!==githubMainSha())throw Error("ROLL_MAIN_MOVED_AFTER_BUILD");
-  if(!before.healthy||before.sha!==live.sha)throw Error("ROLL_LOCAL_CHANGED_AFTER_BUILD");
+  if(before.sha!==live.sha||before.root!==live.root)throw Error("ROLL_LOCAL_CHANGED_AFTER_BUILD");
+  if(!before.healthy)throw Error("ROLL_LOCAL_TEMPORARY_UNHEALTHY_AFTER_BUILD");
   if(!(await waitForHealthyPeer(90000)).ok)throw Error("ROLL_PEER_NOT_READY_AFTER_BUILD");
   await publish(before);
   const locked=await acquire(staged.commit);lease=locked.token;

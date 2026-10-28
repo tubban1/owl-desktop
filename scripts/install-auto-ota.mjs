@@ -17,6 +17,7 @@ const copies=[
  ["scripts/lib/ota-client.mjs","lib/ota-client.mjs"],
  ["scripts/lib/ota-ci.mjs","lib/ota-ci.mjs"],
  ["scripts/lib/ota-retry-policy.mjs","lib/ota-retry-policy.mjs"],
+ ["scripts/lib/ota-receipt.mjs","lib/ota-receipt.mjs"],
  ["scripts/lib/mac-release-startup.mjs","lib/mac-release-startup.mjs"],
  ["scripts/lib/mac-postactivation-health.mjs","lib/mac-postactivation-health.mjs"],
  ["scripts/lib/version-sync.mjs","lib/version-sync.mjs"],
