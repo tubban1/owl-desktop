@@ -62,11 +62,11 @@ function stage(){
   const npmCli=resolveBundledNpm();
   if(!npmCli)throw Error("SYNC_NPM_CLI_NOT_FOUND");
   safeCommand(process.execPath,[npmCli,"ci","--ignore-scripts"],{cwd:temporary,timeout:360000});
-  safeCommand(process.execPath,[npmCli,"test"],{cwd:temporary,timeout:360000});
+  safeCommand(process.execPath,[path.join(temporary,"node_modules","vitest","vitest.mjs"),"run","tests/version-sync.test.mjs","tests/local-document-read.test.mjs","tests/mcp-tool-surface.test.mjs","--maxWorkers=1"],{cwd:temporary,timeout:180000});
   safeCommand(process.execPath,[npmCli,"run","build"],{cwd:temporary,timeout:240000});
   if(!verifyStagedDirectory(temporary,commit))throw Error("SYNC_STAGE_MODIFIED_DURING_VERIFICATION");
   fs.renameSync(temporary,target);temporary=null;
-  atomicJson(path.join(stateRoot,"last-staged.json"),{commit,verifiedAt:new Date().toISOString(),testsPassed:true});
+  atomicJson(path.join(stateRoot,"last-staged.json"),{commit,verifiedAt:new Date().toISOString(),localSmokePassed:true,buildPassed:true,requiresPassingGithubCi:true});
   output({status:"verified-staged",commit,stagingRoot:target,liveProcessChanged:false,
    next:"Activate through the separately supervised owner/runtime handoff only after health gates."});
  }finally{

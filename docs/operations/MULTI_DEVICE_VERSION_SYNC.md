@@ -7,7 +7,7 @@ Both macOS and Windows synchronize independently from the same reviewed GitHub m
 ## Safety guarantees
 
 - The user's Git working trees (including dirty/behind Mac main) are not pulled, reset, stashed or checked out by the version stager.
-- The private per-user sync folder is ~/.owl-lab/version-sync/desktop. Each GitHub main SHA is cloned into a temporary directory and only admitted under its immutable SHA after npm ci, full npm test, npm run build and Git status checks. Failed stages cannot replace a current runtime.
+- The private per-user sync folder is ~/.owl-lab/version-sync/desktop. Each GitHub main SHA is cloned into a temporary directory and only admitted under its immutable SHA after npm ci, focused version-sync/document/MCP smoke tests, npm run build and Git status checks. Full test/build validation runs in mandatory GitHub CI before merging to main; the local stage does not falsely claim to rerun every test. Failed stages cannot replace a current runtime.
 - Source is pinned to tubban1/owl-desktop over HTTPS with noninteractive Git; every fetched checkout must match the exact main commit read from origin. If GitHub is unreachable, the previously staged revision is kept.
 - Scheduled staging runs every 30 minutes under the logged-in user via macOS LaunchAgent or Windows Task Scheduler. The scheduler never stops/starts the Desktop, Runtime, Tunnel or the fallback Computer MCP.
 - The actual MCP startup snapshot appears in runtime_info.mcpSource and a fresh remote check is exposed by device_sync_status. This avoids assuming that the Desktop package version or local main HEAD means a running server is current.
