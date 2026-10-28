@@ -11,6 +11,7 @@ import {githubMainCi} from "./lib/ota-ci.mjs";
 import {verifyStagedDirectory,resolveBundledNpm} from "./lib/version-sync.mjs";
 import {readVerifiedStage} from "./lib/device-version-state.mjs";
 import {otaRoot,platform,initIdentity,configure,heartbeat,acquire,release,peerState} from "./lib/ota-client.mjs";
+import {isRetryablePeerFailure,shouldBackoffFailedRelease} from "./lib/ota-retry-policy.mjs";
 
 const device=platform,peer=device==="mac"?"windows":"mac";
 if(!device)throw Error("ROLL_UNSUPPORTED_OS");
@@ -118,6 +119,15 @@ async function remoteHealth(){
    return {ok:false,reason:"peer-not-recent-healthy"};
   return {ok:true,sha:peer.sha,at:peer.at};
  }catch(e){return {ok:false,reason:String(e.message??e)}}
+}
+async function waitForHealthyPeer(timeoutMs=90000){
+ const deadline=Date.now()+timeoutMs;
+ let result=await remoteHealth();
+ while(!result.ok&&Date.now()<deadline){
+  await delay(Math.min(10000,Math.max(1,deadline-Date.now())));
+  result=await remoteHealth();
+ }
+ return result;
 }
 // Remote lease + fresh peer proof serialize updates any time both devices are online.
 // Do not require powered-on computers during a fixed overnight maintenance window.
@@ -231,23 +241,24 @@ async function tick(){
  if(live.sha===staged.commit)return {status:"current",sha:live.sha};
  if(staged.commit!==githubMainSha())return {status:"blocked",reason:"stage-not-latest-main"};
  let last;try{last=JSON.parse(fs.readFileSync(path.join(rollState,"last-attempt.json")))}catch{}
- if(last?.status==="failed"&&last?.target===staged.commit&&Date.now()-last.at<6*3600e3)
+ if(shouldBackoffFailedRelease(last,staged.commit))
   return {status:"blocked",reason:"failure-backoff"};
  const ci=await githubMainCi(staged.commit);
  if(ci.status!=="success")return {status:"blocked",reason:"main-push-ci",ci:ci.status};
- const p=await remoteHealth();if(!p.ok)return {status:"blocked",reason:"peer",detail:p.reason};
+ const p=await waitForHealthyPeer(90000);if(!p.ok)return {status:"blocked",reason:"peer",detail:p.reason};
  const unlock=lock();
  let lease=null;
  try{
   const dest=candidate(staged.commit);
   const before=await liveStatus();
   if(staged.commit!==githubMainSha())throw Error("ROLL_MAIN_MOVED_AFTER_BUILD");
-  if(!before.healthy||before.sha!==live.sha||!(await remoteHealth()).ok)throw Error("ROLL_PEER_OR_LOCAL_CHANGED");
+  if(!before.healthy||before.sha!==live.sha)throw Error("ROLL_LOCAL_CHANGED_AFTER_BUILD");
+  if(!(await waitForHealthyPeer(90000)).ok)throw Error("ROLL_PEER_NOT_READY_AFTER_BUILD");
   await publish(before);
   const locked=await acquire(staged.commit);lease=locked.token;
   await publish(before,true);
   await delay(18000);
-  if(!(await remoteHealth()).ok)throw Error("ROLL_PEER_CHANGED_AFTER_INTENT");
+  if(!(await waitForHealthyPeer(30000)).ok)throw Error("ROLL_PEER_CHANGED_AFTER_INTENT");
   if(device==="mac")applyMac(before.root,dest,before.sha,staged.commit);
   else applyWindows(before.root,dest,before.sha,staged.commit);
   const after=await waitForActivation(staged.commit);
@@ -256,7 +267,13 @@ async function tick(){
   await publish(after);
   return {status:"activated",sha:after.sha};
  }catch(e){
-  store({status:"failed",target:staged.commit,error:String(e.message??e)});
+  const reason=String(e.message??e);
+  if(isRetryablePeerFailure(reason)){
+   store({status:"deferred",target:staged.commit,reason});
+   await publish(await liveStatus());
+   return {status:"deferred",reason};
+  }
+  store({status:"failed",target:staged.commit,error:reason});
   await publish(await liveStatus());
   throw e;
  }finally{if(lease){try{await release(lease)}catch{}}unlock();}
