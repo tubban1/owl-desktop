@@ -1,0 +1,11 @@
+{
+  "name": "owl-ota-coordinator",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-10-28",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "UPGRADE_GATE", "class_name": "UpgradeGate" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UpgradeGate"] }],
+  "observability": { "enabled": true }
+}
