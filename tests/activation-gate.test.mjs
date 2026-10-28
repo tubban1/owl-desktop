@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {execFileSync} from "node:child_process";
-import {assertStagePath,readCandidate,assessActivation,githubMainCi,requiredReleaseArtifacts} from "../scripts/lib/activation-gate.mjs";
+import {assertStagePath,readCandidate,assessActivation,githubMainCi,requiredReleaseArtifacts,probeShadowMcp} from "../scripts/lib/activation-gate.mjs";
 
 function fixture(fn){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),"owl-activation-preflight-"));
@@ -65,3 +65,12 @@ describe("safe activation gate",()=>{
   expect((await githubMainCi("not-sha",{fetchImpl:ok})).status).toBe("invalid-sha");
  });
 });
+
+it("starts staged MCP in isolated loopback and lists core tools without production credentials", async()=>{
+ const candidate=path.resolve(process.cwd());
+ const result=await probeShadowMcp(candidate,{timeoutMs:12000});
+ expect(result.passed,result.reason).toBe(true);
+ expect(result.requiredToolsVerified).toContain("read_document");
+ expect(result.requiredToolsVerified).toContain("device_sync_status");
+ expect(result.liveProcessesTouched).toBe(false);
+},30000);
