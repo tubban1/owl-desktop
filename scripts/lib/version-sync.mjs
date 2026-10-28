@@ -37,7 +37,17 @@ export function verifyStagedDirectory(dir,expectedSha){
 }
 export function safeCommand(binary,args,{cwd,timeout=600000}={}){
  const r=spawnSync(binary,args,{cwd,timeout,encoding:"utf8",windowsHide:true,
-  maxBuffer:2*1024*1024,env:{...process.env,GIT_TERMINAL_PROMPT:"0",CI:"1"}});
+  maxBuffer:2*1024*1024,env:{...process.env,PATH:[path.dirname(process.execPath),process.env.PATH??""].join(path.delimiter),GIT_TERMINAL_PROMPT:"0",CI:"1"}});
  if(r.status!==0){const e=new Error("SYNC_STEP_FAILED: "+binary+" "+args.slice(0,2).join(" ")+": "+(r.error?.code||r.status));e.code="SYNC_STEP_FAILED";throw e;}
  return r.stdout.trim();
+}
+
+/** Resolve npm from the same Node installation, not a login-shell PATH. */
+export function resolveBundledNpm(nodeBinary=process.execPath){
+ const base=path.dirname(nodeBinary);
+ const candidates=[
+  path.resolve(base,"..","lib","node_modules","npm","bin","npm-cli.js"),
+  path.join(base,"node_modules","npm","bin","npm-cli.js"),
+ ];
+ return candidates.find(existsSync)??null;
 }

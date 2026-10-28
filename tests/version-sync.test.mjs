@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {execFileSync} from "node:child_process";
-import {versionSnapshot,verifyStagedDirectory,OWL_DESKTOP_REPOSITORY} from "../scripts/lib/version-sync.mjs";
+import {versionSnapshot,verifyStagedDirectory,OWL_DESKTOP_REPOSITORY,resolveBundledNpm,safeCommand} from "../scripts/lib/version-sync.mjs";
 
 function git(dir,...args){return execFileSync("git",["-C",dir,...args],{encoding:"utf8"}).trim();}
 function fixture(work){
@@ -48,4 +48,25 @@ describe("multi-device version sync",()=>{
  it("only trusts the designated GitHub repository as the default source",()=>{
   expect(OWL_DESKTOP_REPOSITORY).toBe("https://github.com/tubban1/owl-desktop.git");
  });
+});
+
+it("resolves bundled npm without assuming launchd or Task Scheduler PATH",()=>{
+ const npmCli=resolveBundledNpm();
+ expect(npmCli).toMatch(/npm-cli\.js$/);
+ expect(fs.existsSync(npmCli)).toBe(true);
+});
+
+it("runs npm lifecycle scripts without a login-shell PATH",()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),"owl-sync-npm-path-"));
+ const original=process.env.PATH;
+ try{
+  fs.writeFileSync(path.join(dir,"package.json"),JSON.stringify({name:"owl-sync-npm-test",version:"1.0.0",
+    scripts:{check:"node --version"}}));
+  process.env.PATH=process.platform==="win32"?"C:\\Windows\\System32":"/usr/bin:/bin";
+  const stdout=safeCommand(process.execPath,[resolveBundledNpm(),"run","check"],{cwd:dir,timeout:15000});
+  expect(stdout).toContain(process.version);
+ }finally{
+  if(original===undefined)delete process.env.PATH;else process.env.PATH=original;
+  fs.rmSync(dir,{recursive:true,force:true});
+ }
 });
