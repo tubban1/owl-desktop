@@ -64,8 +64,27 @@ async function health(port){
   return data.ok===true;
  }catch{return false}
 }
+async function tunnelReady(root){
+ const proc=run("/usr/bin/pgrep",["-fl","tunnel-client-runtime"],{allowError:true});
+ if(proc.status!==0)return false;
+ const prefix=path.join(root,"vendor","owl-tunnel");
+ for(const line of proc.stdout.split("\n")){
+  if(!line.includes(prefix)||!line.includes("tunnel-client-runtime run"))continue;
+  const match=line.match(/--health\.url-file\s+(\S+)/);
+  if(!match)continue;
+  try{
+   const url=fs.readFileSync(match[1],"utf8").trim();
+   if(!url.startsWith("http://127.0.0.1:"))continue;
+   const res=await fetch(url.replace(/\/$/,"")+"/health?details=true",{signal:AbortSignal.timeout(2600)});
+   const data=await res.json();
+   if(res.ok&&data.ready===true&&data.live===true)return true;
+  }catch{}
+ }
+ return false;
+}
+
 async function healthy(dir){
- return ownerMatches(dir)&&await health(8790)&&await health(18788);
+ return ownerMatches(dir)&&await health(8790)&&await health(18788)&&await tunnelReady(dir);
 }
 async function portsFree(){
  for(const port of [8790,8791,18788,5173])if(await portUp(port))return false;
