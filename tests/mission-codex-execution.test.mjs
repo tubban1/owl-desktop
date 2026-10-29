@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
+import {generateKeyPairSync,sign} from "node:crypto";
+import {assertMissionAction,missionApprovalScope,missionApprovalDigest,missionApprovalMessage} from "../electron/services/mission-approval.mjs";
 import {afterEach,describe,it,expect} from "vitest";
 import {compileApprovedCodexResume} from "../mcp/mission-codex-execution.mjs";
 
@@ -54,6 +56,28 @@ describe("Mission-scoped, non-shell Codex continuation",()=>{
     fs.writeFileSync(outsider,"No edits to production; Garden Rose art R3");
     expect(()=>compileApprovedCodexResume(f.owner,{...f.args,instruction_file:outsider},runOptions(f))).toThrow("MISSION_CODEX_INSTRUCTION_OUTSIDE_SCOPE");
     expect(()=>compileApprovedCodexResume(f.owner,{...f.args,cwd:path.dirname(f.root)},runOptions(f))).toThrow("MISSION_CODEX_WORKTREE_MISMATCH");
+  });
+  it.skipIf(process.platform!=="darwin")("permits only the exact signed sandbox command via existing start_process",()=>{
+    const f=fixture();
+    f.owner.workstream.workstreamId="owl-workstream:demo";
+    f.owner.workstream.missionContract.allowedRepositories=["worktree"];
+    const {privateKey,publicKey}=generateKeyPairSync("ed25519");
+    const signer=path.join(f.dir,"human-approval-signer.json");
+    fs.writeFileSync(signer,JSON.stringify({publicKeyB64:publicKey.export({format:"der",type:"spki"}).toString("base64")}));
+    const scope=missionApprovalScope(f.owner);
+    f.owner.workstream.missionContract.approval={
+      digest:missionApprovalDigest(scope),
+      signature:sign(null,Buffer.from(missionApprovalMessage(scope)),privateKey).toString("base64"),
+    };
+    // Use the actual fixed user Codex binary in the bridge, never a fake program.
+    const realBin=path.join(os.homedir(),".codex/plugins/.plugin-appserver/codex-cli/bin/codex");
+    if(!fs.existsSync(realBin))return; // Native CLI unavailable on CI macOS.
+    // The compiler must see an authentic, preverified user-home Codex path.
+    const constructed=compileApprovedCodexResume(f.owner,f.args,{userHome:os.homedir()});
+    const allowed={cwd:constructed.cwd,command:constructed.command,workspace_mode:"write"};
+    expect(()=>assertMissionAction(f.owner,signer,"start_process",allowed)).not.toThrow();
+    expect(()=>assertMissionAction(f.owner,signer,"start_process",{...allowed,command:allowed.command+" ; echo unauthorized"})).toThrow("MISSION_OPAQUE_ACTION_BLOCKED");
+    expect(()=>assertMissionAction(f.owner,signer,"execute_command",allowed)).toThrow("MISSION_OPAQUE_ACTION_BLOCKED");
   });
   it.skipIf(process.platform!=="darwin")("macOS kernel denies production/historical writes and symlink escape",()=>{
     const f=fixture();

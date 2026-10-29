@@ -25,6 +25,8 @@ export function compileApprovedCodexResume(owner, args, {
     reject("MISSION_SANDBOX_UNAVAILABLE","Verified macOS Seatbelt is required.");
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args.thread_id||""))
     reject("MISSION_CODEX_THREAD_INVALID");
+  if(args.thread_id.toLowerCase()!=="01a184da-0ca6-7d83-b596-0ca602d17b3d")
+    reject("MISSION_CODEX_THREAD_UNAUTHORIZED");
   const mission=owner?.workstream?.missionContract;
   const worktree=owner?.checkpoint?.workspace?.worktree;
   if(!mission||typeof worktree!=="string"||

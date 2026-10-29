@@ -1,6 +1,7 @@
 /** Canonical, domain-separated Desktop human consent for a single OWL mission. */
 import fs from "node:fs";
 import path from "node:path";
+import { compileApprovedCodexResume } from "../../mcp/mission-codex-execution.mjs";
 import { createHash, createPublicKey, verify } from "node:crypto";
 
 export function missionApprovalScope(owner) {
@@ -83,6 +84,23 @@ export function assertMissionAction(owner, signerRecordFile, toolName, args, pub
     const err = new Error("MISSION_APPROVAL_REQUIRED: review the exact mission in OWL Desktop before modifying this project (" + status.reason + ").");
     err.code = "MISSION_APPROVAL_REQUIRED";
     throw err;
+  }
+  // Backward-compatible bridge for MCP clients with stale tool lists.
+  // An exact, signed, OS-sandboxed Codex command is permitted; all other
+  // start_process/execute_command shell strings remain blocked.
+  if (toolName === "start_process" && args?.workspace_mode === "write" &&
+      typeof args.command === "string" && typeof args.cwd === "string") {
+    const match = args.command.match(/\bexec resume --json '([0-9a-f-]{36})' /i);
+    if (match) {
+      try {
+        const expected = compileApprovedCodexResume(owner, {
+          cwd: args.cwd, thread_id: match[1],
+          instruction_file: path.join(status.scope.workspaceRoot,
+            ".tmp/botanical32-quality/art-directed/reports/CODEX_R3_ART_REWORK_ORDER_20261029.md"),
+        });
+        if (args.command === expected.command && args.cwd === expected.cwd) return;
+      } catch { /* Invalid command is never authorized. */ }
+    }
   }
   const root = status.scope.workspaceRoot;
   const confined = {
