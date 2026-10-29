@@ -1,5 +1,8 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import {it as test, expect} from "vitest";
+const assert={
+  equal:(actual,expected)=>expect(actual).toBe(expected),
+  deepEqual:(actual,expected)=>expect(actual).toEqual(expected),
+};
 import {selectTrustedAgentOption} from "../chrome-agent-native/trusted-select.mjs";
 function setup({label="Choose domain",disabled=false,multiple=false,options=[
   {value:"",textContent:"Choose domain",disabled:false},

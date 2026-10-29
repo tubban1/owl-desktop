@@ -512,21 +512,7 @@ export function createNativeAgentExecutor(chrome,storage){
       return {pageId:tabId,...result};
     }
     if(op==="fill"){
-      // An observed HTML select is not a text field. A specific option
-      // label/value can be picked without opening an OS-native dialog.
-      // Keep the same owner, tab and origin protections as text filling.
-      const snapshot=await inject(tabId,inspect);
-      const observed=snapshot.controls?.find(x=>x.uid===args.uid);
-      if(observed?.tag==="select"){
-        const origin=urlOrigin(tab.url);
-        if(!origin)throw Error("SELECT_ORIGIN_INVALID");
-        const r=await inject(tabId,selectTrustedAgentOption,
-          [args.uid,args.value,origin]);
-        if(r?.error)throw Error(r.error);
-        if(!r?.selected||!r.domVerified)throw Error("SELECT_NOT_CONFIRMED");
-        return {pageId:tabId,...r,foregroundUnchanged:true,
-          inputMethod:"tab_scoped_native_select",osPointerMoved:false};
-      }
+      // Reject invalid and sensitive-prone arguments BEFORE any page script.
       if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid)||
          typeof args.value!=="string"||args.value.length>4000)
         throw Error("FILL_ARGUMENT_INVALID");
@@ -537,6 +523,21 @@ export function createNativeAgentExecutor(chrome,storage){
       // roots. Frameworks must receive their browser events; DOM.value setter
       // alone can appear to work while Google Ads/React state stays unchanged.
       let prepared=await inject(tabId,prepareTrustedTextField,[args.uid,origin]);
+      // Only fall back to the observed native-select path when trusted text
+      // preparation proves the target is not a text field. Normal text
+      // typing must not gain an extra snapshot/injection.
+      if(prepared?.error==="TEXT_TARGET_NOT_EDITABLE"){
+        const snapshot=await inject(tabId,inspect);
+        const observed=snapshot?.controls?.find(x=>x.uid===args.uid);
+        if(observed?.tag==="select"){
+          const chosen=await inject(tabId,selectTrustedAgentOption,
+            [args.uid,args.value,origin]);
+          if(chosen?.error)throw Error(chosen.error);
+          if(!chosen?.selected||!chosen.domVerified)throw Error("SELECT_NOT_CONFIRMED");
+          return {pageId:tabId,...chosen,foregroundUnchanged:true,
+            inputMethod:"tab_scoped_native_select",osPointerMoved:false};
+        }
+      }
       if(prepared?.error)throw Error(prepared.error);
       if(!prepared?.ready&&!prepared?.activationRequired)
         throw Error("TEXT_FIELD_NOT_READY");
