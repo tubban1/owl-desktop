@@ -54,6 +54,15 @@ declare global {
           allowedRepositories: string[];
           prohibitedChanges: string[];
           acceptanceCriteria: string[];
+          executionPermissions?: Array<{
+            id: string;
+            executable: string;
+            cwd: string;
+            argv: string[];
+            workspaceMode: "read" | "write";
+            writableRoots: string[];
+            sandbox: {type:string; requiredArgvSegments:string[][]};
+          }>;
         } | null;
         pendingProgressBoundary: boolean;
       }>>;

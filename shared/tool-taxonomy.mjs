@@ -5,6 +5,7 @@ const explicit = {
   execute_command:["Run Command","Process","sys.exec","run","shell.exec","privileged"],
   start_process:["Start Process","Process","process.manage","start","shell.start"],
   mission_codex_resume:["Resume Scoped Codex","Process",null,null,"mission.codex.resume","side-effect"],
+  mission_process_start:["Start Approved Mission Process","Process",null,null,"mission.process.start","side-effect"],
   get_process_output:["Get Process Output","Process","process.manage","output","shell.output"],
   list_processes:["List Processes","Process","process.manage","list","shell.processes"],
   send_process_input:["Send Process Input","Process","process.manage","input","shell.input"],
@@ -75,7 +76,7 @@ export function describeTool(id,source={}){
   primitive:primitive??null,op:op??null,action:action??null,
   executionPath:primitive?"runtime-primitive":group==="Browser"&&id.startsWith("browser_agent_")?"adapter-native":group==="Orchestration"?"runtime-control":"capability-dependent",
   riskTier:tier??(source.annotations?.destructiveHint?"side-effect":"standard"),
-  supportedPlatforms:id==="mission_codex_resume"?["darwin"]:["darwin","win32"],availability:"probe-provider",deprecated:legacy,
+  supportedPlatforms:["darwin","win32"],availability:"probe-provider",deprecated:legacy,
   replacement:["computer_action","computer_batch","computer_graph","router_catalog"].includes(id)?"primitive_call":null});
 }
 export function summarizeToolDomains(rows){

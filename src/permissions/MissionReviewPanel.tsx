@@ -35,6 +35,7 @@ export function MissionReviewPanel() {
           <span>Root: {row.scope?.workspaceRoot || "Not provided — cannot approve"}</span>
           <span>Allowed: {row.scope?.allowedRepositories?.join(", ") || "None"}</span>
           <span>Prohibited: {row.scope?.prohibitedChanges?.join("; ") || "None declared"}</span>
+          <span>Process permissions: {row.scope?.executionPermissions?.length ?? 0} (exact executable, arguments and writable roots shown in confirmation)</span>
           <small>{row.reason}{row.pendingProgressBoundary ? " · Waiting for progress acknowledgement" : ""}</small>
         </div>
         <button className="secondary"
