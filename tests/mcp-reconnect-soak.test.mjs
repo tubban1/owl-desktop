@@ -152,6 +152,10 @@ describe("OWL MCP reconnect soak", () => {
     }
 
     expect(mcp.sessionCount()).toBe(1);
+    // Static registry: initializing a fresh MCP session must not claim the
+    // tools changed or send an unsolicited tools/list_changed notification.
+    expect(events.filter((event) =>
+      event.message === "OWL MCP tool registry change announced")).toHaveLength(0);
     expect(events.filter((event) => event.message === "MCP transport session reclaimed" &&
       event.meta?.reason === "session_cap")).toHaveLength(0);
     expect(events.filter((event) => event.message === "MCP stale owner transports superseded")).toHaveLength(bindingSoakCycles);
