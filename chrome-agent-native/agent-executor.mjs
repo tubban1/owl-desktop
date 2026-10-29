@@ -13,6 +13,7 @@ import {locateAgentFileDropZone,checkAgentFileDropZone} from "./file-drop-zone.m
 import {prepareAgentRichEditor,checkAgentRichEditor} from "./rich-editor.mjs";
 import {locateVirtualCursorTarget,showVirtualCursor,hideVirtualCursor} from "./virtual-cursor.mjs";
 import {executeFormAction} from "./form-controls.mjs";
+import {selectTrustedAgentOption} from "./trusted-select.mjs";
 import {prepareTrustedTextField,checkTrustedTextField,
   locateTrustedTextActivation,inspectTrustedTextControl} from "./trusted-text-field.mjs";
 
@@ -511,6 +512,21 @@ export function createNativeAgentExecutor(chrome,storage){
       return {pageId:tabId,...result};
     }
     if(op==="fill"){
+      // An observed HTML select is not a text field. A specific option
+      // label/value can be picked without opening an OS-native dialog.
+      // Keep the same owner, tab and origin protections as text filling.
+      const snapshot=await inject(tabId,inspect);
+      const observed=snapshot.controls?.find(x=>x.uid===args.uid);
+      if(observed?.tag==="select"){
+        const origin=urlOrigin(tab.url);
+        if(!origin)throw Error("SELECT_ORIGIN_INVALID");
+        const r=await inject(tabId,selectTrustedAgentOption,
+          [args.uid,args.value,origin]);
+        if(r?.error)throw Error(r.error);
+        if(!r?.selected||!r.domVerified)throw Error("SELECT_NOT_CONFIRMED");
+        return {pageId:tabId,...r,foregroundUnchanged:true,
+          inputMethod:"tab_scoped_native_select",osPointerMoved:false};
+      }
       if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid)||
          typeof args.value!=="string"||args.value.length>4000)
         throw Error("FILL_ARGUMENT_INVALID");
