@@ -11,6 +11,40 @@ function call(id = "mcp_1") {
 }
 
 describe("CloudMcpCallConsumer parity", () => {
+  it("uses HTTP liveness at the old 50-second cadence but full MCP proof only every five minutes", async()=>{
+    const now=Date.now();
+    let fullAt=new Date(now-55_000).toISOString();
+    let lightAt=fullAt;
+    let lastError=null;
+    const probe=vi.fn(async()=>{
+      fullAt=new Date().toISOString();lightAt=fullAt;lastError=null;
+    });
+    const probeLightweight=vi.fn(async()=>{
+      lightAt=new Date().toISOString();lastError=null;
+    });
+    const executor={probe,probeLightweight,
+      snapshot:()=>({lastProofAt:fullAt,lastLivenessProofAt:lightAt,lastError})};
+    const consumer=new CloudMcpCallConsumer({
+      cloudClient:{pullMcpCalls:vi.fn(async()=>({calls:[]}))},
+      executor,pollIntervalMs:5_000,
+    });
+    expect(consumer.executorProbeIntervalMs).toBe(50_000);
+    expect(consumer.executorFullProbeIntervalMs).toBe(300_000);
+    await consumer.ensureExecutorReady();
+    expect(probe).not.toHaveBeenCalled();
+    expect(probeLightweight).toHaveBeenCalledTimes(1);
+    await consumer.ensureExecutorReady();
+    expect(probeLightweight).toHaveBeenCalledTimes(1);
+    fullAt=new Date(now-360_000).toISOString();
+    await consumer.ensureExecutorReady();
+    expect(probe).toHaveBeenCalledTimes(1);
+    await consumer.ensureExecutorReady(true);
+    expect(probe).toHaveBeenCalledTimes(2);
+    lastError={at:new Date().toISOString(),code:"LOCAL_MCP_LIVENESS_FAILED"};
+    await consumer.ensureExecutorReady();
+    expect(probe).toHaveBeenCalledTimes(3);
+  });
+
   it("is single-flight and claims before execution", async () => {
     const order = [];
     const cloudClient = {

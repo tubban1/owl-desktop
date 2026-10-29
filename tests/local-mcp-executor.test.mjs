@@ -55,6 +55,38 @@ describe("LocalMcpExecutor", () => {
     expect(runtime.requests).toHaveLength(0);
   });
 
+  it("checks lightweight health without initializing another MCP transport", async () => {
+    const runtime = await fakeRuntime();
+    const events=[];
+    const mcp = await startOwlMcpHttpServer({
+      port:0,runtimeBaseUrl:runtime.url,
+      onEvent:(_level,message)=>events.push(message),
+    });
+    closers.push(()=>mcp.close());
+    const executor=new LocalMcpExecutor({mcpUrl:mcp.url});
+    await executor.probe();
+    const openedBefore=events.filter(x=>x==="MCP transport session opened").length;
+    const fullProofAt=executor.snapshot().lastProofAt;
+    expect(openedBefore).toBe(1);
+    await executor.probeLightweight();
+    await executor.probeLightweight();
+    expect(executor.snapshot()).toMatchObject({
+      lastProofAt:fullProofAt,lastError:null,
+    });
+    expect(executor.snapshot().lastLivenessProofAt).toBeTruthy();
+    expect(events.filter(x=>x==="MCP transport session opened")).toHaveLength(1);
+    // Each /health request proves downstream Runtime connectivity,
+    // but never registers new MCP tools or owner sessions.
+    expect(runtime.requests).toHaveLength(2);
+  });
+
+  it("rejects unhealthy liveness and does not falsify the previous full proof", async()=>{
+    const executor=new LocalMcpExecutor({mcpUrl:"http://127.0.0.1:1/mcp",connectTimeoutMs:500});
+    await expect(executor.probeLightweight()).rejects.toThrow();
+    expect(executor.snapshot().lastProofAt).toBeNull();
+    expect(executor.snapshot().lastError).toBeTruthy();
+  });
+
   it("reuses one stable Runtime idempotency identity across fresh MCP transports", async () => {
     const runtime = await fakeRuntime();
     const mcp = await startOwlMcpHttpServer({
