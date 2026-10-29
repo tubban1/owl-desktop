@@ -22,6 +22,7 @@ export class LocalMcpExecutor {
     this.callTimeoutMs = bounded(callTimeoutMs, 120_000, 1_000, 600_000);
     this.onEvent = onEvent;
     this.lastProofAt = null;
+    this.lastLivenessProofAt = null;
     this.lastError = null;
   }
 
@@ -59,6 +60,7 @@ export class LocalMcpExecutor {
       ]);
       await client.listTools(undefined, { signal: controller.signal });
       this.lastProofAt = new Date().toISOString();
+      this.lastLivenessProofAt = this.lastProofAt;
       this.lastError = null;
       return this.snapshot();
     } catch (error) {
@@ -74,6 +76,50 @@ export class LocalMcpExecutor {
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
       await transport.close().catch(() => undefined);
+    }
+  }
+
+  // A high-frequency readiness check must not establish an entire MCP
+  // transport and call tools/list every minute. /health verifies both the
+  // local MCP HTTP listener and its downstream Runtime without adding an
+  // MCP Session. Full protocol proof still runs at startup, after wake,
+  // after errors, and periodically in CloudMcpCallConsumer.
+  async probeLightweight({ signal } = {}) {
+    const url = new URL("/health", this.mcpUrl);
+    const timeout = AbortSignal.timeout(this.connectTimeoutMs);
+    const combinedSignal = signal
+      ? AbortSignal.any([signal, timeout]) : timeout;
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: this.mcpToken
+          ? { authorization: `Bearer ${this.mcpToken}` } : {},
+        signal: combinedSignal,
+      });
+      if (!response.ok) {
+        const error = new Error("Local MCP health endpoint was unavailable.");
+        error.code = "LOCAL_MCP_HEALTH_HTTP_ERROR";
+        throw error;
+      }
+      const health = await response.json();
+      if (health?.ok !== true || health?.service !== "owl-mcp") {
+        const error = new Error("Local MCP returned an unhealthy health projection.");
+        error.code = "LOCAL_MCP_HEALTH_INVALID";
+        throw error;
+      }
+      this.lastLivenessProofAt = new Date().toISOString();
+      this.lastError = null;
+      return this.snapshot();
+    } catch (error) {
+      this.lastError = {
+        at: new Date().toISOString(),
+        code: error?.code ?? "LOCAL_MCP_LIVENESS_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+      };
+      this.onEvent("warn", "Local MCP lightweight readiness probe failed", {
+        code: this.lastError.code,
+      });
+      throw error;
     }
   }
 
@@ -138,6 +184,7 @@ export class LocalMcpExecutor {
         { signal: controller.signal },
       );
       this.lastProofAt = new Date().toISOString();
+      this.lastLivenessProofAt = this.lastProofAt;
       return result;
     } catch (error) {
       this.lastError = {
@@ -160,6 +207,7 @@ export class LocalMcpExecutor {
   snapshot() {
     return {
       lastProofAt: this.lastProofAt,
+      lastLivenessProofAt: this.lastLivenessProofAt,
       lastError: this.lastError,
     };
   }

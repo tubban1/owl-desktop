@@ -70,9 +70,16 @@ export class CloudMcpCallConsumer {
     this.activeCallId = null;
     this.processed = 0;
     this.lastExecutorProbeAt = null;
+    // Lightweight HTTP liveness stays as frequent as the previous check.
+    // A full MCP initialize + tools/list is substantially more expensive:
+    // 5s Cloud polling once caused a new local MCP transport every 50s,
+    // i.e. ~1,728 extra sessions/day even with no tool calls.
     this.executorProbeIntervalMs = Math.max(
       5_000,
       Math.min(60_000, this.pollIntervalMs * 10),
+    );
+    this.executorFullProbeIntervalMs = Math.max(
+      5 * 60_000, this.executorProbeIntervalMs,
     );
   }
 
@@ -185,12 +192,25 @@ export class CloudMcpCallConsumer {
     if (typeof this.executor.probe !== "function") return;
     const snapshot = this.executor.snapshot?.() ?? null;
     const lastProofMs = snapshot?.lastProofAt ? Date.parse(snapshot.lastProofAt) : NaN;
-    const proofFresh =
+    const fullProofFresh =
       Number.isFinite(lastProofMs) &&
-      Date.now() - lastProofMs < this.executorProbeIntervalMs &&
+      Date.now() - lastProofMs < this.executorFullProbeIntervalMs &&
       !snapshot?.lastError;
-    if (proofFresh && !force) return;
-    await this.executor.probe();
+    if (!fullProofFresh || force) {
+      await this.executor.probe();
+      this.lastExecutorProbeAt = new Date().toISOString();
+      return;
+    }
+    const lastLightweightMs = snapshot?.lastLivenessProofAt
+      ? Date.parse(snapshot.lastLivenessProofAt) : lastProofMs;
+    if (Number.isFinite(lastLightweightMs) &&
+        Date.now() - lastLightweightMs < this.executorProbeIntervalMs) return;
+    if (typeof this.executor.probeLightweight === "function") {
+      await this.executor.probeLightweight();
+    } else {
+      // Older mock/custom executors retain the previous full-proof behavior.
+      await this.executor.probe();
+    }
     this.lastExecutorProbeAt = new Date().toISOString();
   }
 
