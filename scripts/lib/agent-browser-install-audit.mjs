@@ -9,7 +9,9 @@ export const EXTENSION_ID="dolpahioegolmcedoebnmebbgfpoiace";
 const ASSETS=[
   "manifest.json","service-worker.mjs","agent-executor.mjs",
   "download-workflow.mjs","p2-capabilities.mjs","p2-interactions.mjs",
-  "file-inputs.mjs","file-drop-zone.mjs","rich-editor.mjs","virtual-cursor.mjs"
+  "file-inputs.mjs","file-drop-zone.mjs","rich-editor.mjs","virtual-cursor.mjs",
+  "form-controls.mjs","trusted-text-field.mjs","popup.html","popup.mjs",
+  "icons/icon16.png","icons/icon32.png","icons/icon48.png","icons/icon128.png"
 ];
 const read=async p=>fs.readFile(p).catch(()=>null);
 

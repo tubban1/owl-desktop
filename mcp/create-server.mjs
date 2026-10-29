@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { toolRegistrySnapshot } from "./tool-registry.mjs";
+import {createBrowserCompatRouter} from "./browser-compat-router.mjs";
 import { registerBrowserWorkflowTools } from "./browser-workflow-tools.mjs";
 import { readAuthorizedLocalImage } from "./native-image.mjs";
 import { readAuthorizedDocument } from "./local-document.mjs";
@@ -2266,14 +2267,23 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     async()=> userChromeBridge?.status() ?? {connected:false,mode:"chrome-native-autoconnect"}
   );
 
+  // Browser compatibility methods share one owner-scoped routing policy on
+  // macOS and Windows. Native Chrome is default; isolated browser is explicit.
+  const browserCompat=createBrowserCompatRouter({
+    native:trustedUserChrome,
+    sessionId:()=>currentMcpRequestContext().runtimeSessionId,
+    isolated:async(primitive,op,args,timeoutMs)=>primitiveResult(await invoke(
+      "primitive.call",{primitive,op,args},timeoutMs??10_000)),
+  });
   tool(
     server,
     "browser_open",
-    "OPTIONAL isolated managed browser mode: open a URL in OWL independent Chromium (may be headless and require separate login). For DEFAULT user Chrome use browser_agent_open via OWL Native Messaging + browser_agent_snapshot/fill/click/screenshot. Never switch global headless mode to solve a user login challenge.",
+    "DEFAULT: Open a background tab in the user's existing signed-in Chrome through OWL Native Messaging, reusing an exact-URL inactive tab where authorized. Never start separate Chromium or fall back silently. Set mode=isolated explicitly to use a separate Chromium browser.",
     {
       url: z.string().url(),
       wait_until: z.enum(["load", "domcontentloaded", "networkidle"]).optional(),
       headless: z.boolean().optional(),
+      mode: z.enum(["chrome","isolated"]).optional(),
     },
     {
       title: "Browser Open",
@@ -2282,17 +2292,13 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       idempotentHint: false,
       openWorldHint: true,
     },
-    async (args) => primitiveResult(await invoke("primitive.call", {
-      primitive: "web.open",
-      op: "navigate",
-      args,
-    }, BROWSER_OPEN_RUNTIME_TIMEOUT_MS)),
+    async (args) => browserCompat.open(args),
   );
 
   tool(
     server,
     "browser_list_tabs",
-    "List OWL-managed Chrome tabs including stable Chromium tabId and owner-scoped active status. This list is not the same as read-only ChatGPT Browser tabs; tab IDs are locators, not permissions.",
+    "List only this Agent's owned Chrome tabs; default is the user's existing signed-in Chrome. Explicit mode=isolated uses independent managed Chromium.",
     {},
     {
       title: "Browser Tabs",
@@ -2301,18 +2307,15 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       idempotentHint: true,
       openWorldHint: true,
     },
-    async () => primitiveResult(await invoke("primitive.call", {
-      primitive: "web.session",
-      op: "tabs",
-      args: {},
-    })),
+    async () => browserCompat.tabs(),
   );
 
   tool(
     server,
     "browser_use_tab",
-    "Select one OWL-managed browser tab without stealing the user\'s foreground focus. Prefer stable tab_id from browser_list_tabs over index; selecting a tab owned by another agent is denied.",
-    { index: z.number().int().min(0).optional(), tab_id: z.string().regex(/^[a-fA-F0-9]{32}$/).optional() },
+    "Select a tab owned by this Agent without foreground focus; default Chrome mode uses page_id from browser_list_tabs. Separate Chromium is explicit.",
+    { index: z.number().int().min(0).optional(), tab_id: z.string().min(1).optional(),
+      page_id: z.number().int().nonnegative().optional() },
     {
       title: "Use Browser Tab",
       readOnlyHint: false,
@@ -2320,17 +2323,13 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       idempotentHint: true,
       openWorldHint: true,
     },
-    async (args) => primitiveResult(await invoke("primitive.call", {
-      primitive: "web.session",
-      op: "use_tab",
-      args,
-    })),
+    async (args) => browserCompat.use(args),
   );
 
   tool(
     server,
     "browser_close",
-    "Compatibility tool: close the managed browser session.",
+    "Release/close only the selected Agent-owned Chrome tab; never close the user's existing Chrome window or unrelated tabs. In explicit isolated mode close that session.",
     {},
     {
       title: "Close Browser",
@@ -2339,11 +2338,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       idempotentHint: true,
       openWorldHint: true,
     },
-    async () => primitiveResult(await invoke("primitive.call", {
-      primitive: "web.session",
-      op: "close",
-      args: {},
-    })),
+    async () => browserCompat.close(),
   );
 
   // Existing signed-in Chrome: opt-in via extension pairing code.
@@ -2480,7 +2475,7 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
   tool(
     server,
     "browser_snapshot",
-    "Read the current agent-owned OWL browser tab DOM/text and controls before or after a UI action; this is independent of the user\'s foreground tab.",
+    "Read selected Agent-owned tab accessibility snapshot in the user's existing Chrome by default; use owl-agent-N controls for browser_type and browser_click.",
     {
       max_chars: z.number().int().min(1000).max(100000).optional(),
     },
@@ -2491,17 +2486,13 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       idempotentHint: true,
       openWorldHint: true,
     },
-    async (args) => primitiveResult(await invoke("primitive.call", {
-      primitive: "web.query",
-      op: "snapshot",
-      args,
-    })),
+    async (args) => browserCompat.snapshot(args),
   );
 
   tool(
     server,
     "browser_click",
-    "Click a selector in the current agent-owned writable OWL browser tab. Use after a snapshot for authorized website edits, then inspect or screenshot to verify the changed page. This is not the read-only ChatGPT Browser connector.",
+    "Click an observed owl-agent-N UID from browser_snapshot inside the user's existing Chrome. CSS selectors work only in explicit isolated mode; destructive actions remain gated.",
     { selector: z.string().min(1) },
     {
       title: "Browser Click",
@@ -2510,17 +2501,13 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       idempotentHint: false,
       openWorldHint: true,
     },
-    async (args) => primitiveResult(await invoke("primitive.call", {
-      primitive: "web.act",
-      op: "click",
-      args,
-    })),
+    async (args) => browserCompat.click(args),
   );
 
   tool(
     server,
     "browser_type",
-    "Fill a selector in the current agent-owned writable OWL browser tab. Does not activate the human\'s other tabs. Follow with page inspection and verification before reporting a saved change.",
+    "Fill an observed owl-agent-N UID in the user's existing Chrome. Credentials and unreviewed form submission are refused. CSS selectors only in explicit isolated mode.",
     {
       selector: z.string().min(1),
       text: z.string(),
@@ -2533,17 +2520,13 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       idempotentHint: false,
       openWorldHint: true,
     },
-    async (args) => primitiveResult(await invoke("primitive.call", {
-      primitive: "web.act",
-      op: "type",
-      args,
-    })),
+    async (args) => browserCompat.type(args),
   );
 
   tool(
     server,
     "browser_screenshot",
-    "Capture the current agent-owned OWL browser tab directly, without screen focus or interrupting human browsing. The returned Chromium tabId identifies the page for verification when supported by Runtime.",
+    "Capture the selected Agent-owned tab from existing Chrome as an inline native image without taking focus. Native mode does not write the requested path; explicit isolated mode supports file output.",
     {
       path: z.string().min(1),
       full_page: z.boolean().optional(),
@@ -2555,11 +2538,15 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       idempotentHint: true,
       openWorldHint: true,
     },
-    async (args) => primitiveResult(await invoke("primitive.call", {
-      primitive: "vision.capture",
-      op: "page",
-      args,
-    })),
+    async (args) => {
+      const result=await browserCompat.screenshot(args);
+      if(result.isolated)return result.result;
+      if(result.image?.type!=="image")throw Error("CHROME_NATIVE_SCREENSHOT_INVALID");
+      return new NativeMcpResult([result.image,{type:"text",text:JSON.stringify({
+        pageId:result.pageId??null,browserMode:"existing-chrome",background:true,
+        savedToDisk:false,requestedFilePathNotWritten:result.requestedFilePath!==null,
+      })}],{imageCount:1,captured:true,existingChrome:true});
+    },
   );
 
   tool(
