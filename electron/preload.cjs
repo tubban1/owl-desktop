@@ -10,7 +10,9 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   statistics: () => ipcRenderer.invoke("desktop:statistics"),
   refreshRuntime: (options) => ipcRenderer.invoke("runtime:refresh", options),
   listMissionReviews: () => ipcRenderer.invoke("mission:review:list"),
-  approveMission: (workstreamId) => ipcRenderer.invoke("mission:review:approve", workstreamId),
+  approveMission: (workstreamId, confirmation) =>
+    ipcRenderer.invoke("mission:review:approve", workstreamId, confirmation),
+  revokeMission: (workstreamId) => ipcRenderer.invoke("mission:review:revoke", workstreamId),
   listRuntimeApprovals: () => ipcRenderer.invoke("runtime:approvals:list"),
   approveRuntimeApproval: (approvalId) =>
     ipcRenderer.invoke("runtime:approval:approve", approvalId),

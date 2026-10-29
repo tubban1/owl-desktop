@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { missionApprovalDigest, missionApprovalScope, missionApprovalStatus } from "./mission-approval.mjs";
+import { missionApprovalDigest, missionApprovalScope, missionApprovalStatus,
+  selectMissionExecutionPermissions } from "./mission-approval.mjs";
 
 function readJson(file, fallback) {
   try {
@@ -478,24 +479,33 @@ export class PlannerContinuationStore {
       .slice(0, Math.min(limit, 100))
       .map(owner => {
         const status = missionApprovalStatus(owner, path.join(path.dirname(this.file),"human-approval-signer.json"));
+        const proposedScope = missionApprovalScope(owner,null);
+        const proposedIds = proposedScope?.executionPermissions?.map(grant=>grant.id) ?? [];
+        const storedIds = owner.workstream.missionContract.approval?.enabledPermissionIds;
         return {
+          reviewDigest:missionApprovalDigest(proposedScope),
+          enabledPermissionIds: status.approved
+            ? (Array.isArray(storedIds) ? [...storedIds] : proposedIds)
+            : [],
           workstreamId: owner.ownerId,
           goal: owner.workstream.goal,
           label: owner.workstream.label ?? null,
           status: status.approved ? "approved" : "needs_review",
           reason: status.reason,
-          scope: status.scope,
+          scope: proposedScope,
           pendingProgressBoundary: owner.workstream.progressBoundary?.pending === true,
         };
       });
   }
 
-  attachMissionApproval(ownerId, signed, now = new Date().toISOString()) {
+  attachMissionApproval(ownerId, signed, now = new Date().toISOString(), options = {}) {
     const state = this.read();
     const owner = state.owners[ownerId];
     if (!owner?.workstream || owner.workstream.status === "completed")
       throw Object.assign(new Error("MISSION_WORKSTREAM_NOT_ACTIVE"), {code:"MISSION_WORKSTREAM_NOT_ACTIVE"});
-    const scope = missionApprovalScope(owner);
+    const proposed = missionApprovalScope(owner,null);
+    const ids = options.enabledPermissionIds;
+    const scope = ids === undefined ? proposed : selectMissionExecutionPermissions(proposed,ids);
     const digest = missionApprovalDigest(scope);
     if (!scope?.workspaceRoot || !Array.isArray(scope.allowedRepositories) ||
         scope.allowedRepositories.length === 0 ||
@@ -504,7 +514,9 @@ export class PlannerContinuationStore {
     const before = owner.workstream.missionContract.approval;
     owner.workstream.missionContract = {
       ...owner.workstream.missionContract,
-      approval: {digest,signature:signed,approvedAt:now,source:"desktop_human_dialog"},
+      approval: {digest,signature:signed,approvedAt:now,
+        source:ids !== undefined ? "desktop_inline_confirm" : "desktop_human_dialog",
+        ...(ids !== undefined ? {enabledPermissionIds:[...ids]} : {})},
     };
     const verification = missionApprovalStatus(owner,path.join(path.dirname(this.file),"human-approval-signer.json"));
     if (!verification.approved) {
@@ -514,6 +526,22 @@ export class PlannerContinuationStore {
     owner.updatedAt = now;
     this.write(state);
     return {workstreamId:ownerId, approved:true, digest, scope};
+  }
+
+  revokeMissionApproval(ownerId, now = new Date().toISOString()) {
+    const state=this.read();
+    const owner=state.owners[ownerId];
+    if(!owner?.workstream || owner.workstream.status==="completed")
+      throw Object.assign(new Error("MISSION_WORKSTREAM_NOT_ACTIVE"),{code:"MISSION_WORKSTREAM_NOT_ACTIVE"});
+    const proof=owner.workstream.missionContract?.approval;
+    if(!proof || proof.revokedAt)
+      return {workstreamId:ownerId,approved:false,revoked:Boolean(proof?.revokedAt)};
+    owner.workstream.missionContract.approval={
+      ...proof,revokedAt:now,revokedBy:"desktop_permission_switch",
+    };
+    owner.updatedAt=now;
+    this.write(state);
+    return {workstreamId:ownerId,approved:false,revoked:true};
   }
 
   noteProgressAdvisory(ownerId, now = new Date().toISOString()) {

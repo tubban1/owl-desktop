@@ -162,10 +162,17 @@ export class ConnectionHostClient {
     });
   }
 
-  approveMission(workstreamId, { digest, signature }, options = {}) {
+  approveMission(workstreamId, { digest, signature, enabledPermissionIds }, options = {}) {
     return this.request("/missions/reviews/" + encodeURIComponent(workstreamId) + "/approve", {
-      method: "POST", body: { digest, signature },
+      method: "POST", body: { digest, signature,
+        ...(enabledPermissionIds !== undefined ? {enabledPermissionIds} : {}) },
       ...options, timeoutMs: options.timeoutMs ?? 5_000,
+    });
+  }
+
+  revokeMission(workstreamId, options = {}) {
+    return this.request("/missions/reviews/" + encodeURIComponent(workstreamId) + "/revoke", {
+      method: "POST",body:{},...options,timeoutMs:options.timeoutMs ?? 5_000,
     });
   }
 

@@ -30,7 +30,12 @@ const subsequence=(haystack,needles)=>{
 export function executionGrant(owner, permissionId) {
   if(!text(permissionId)||!/^[\w.-]{1,100}$/.test(permissionId))
     deny("MISSION_PERMISSION_ID_INVALID");
-  const grants=owner?.workstream?.missionContract?.executionPermissions;
+  const mission=owner?.workstream?.missionContract;
+  const grants=mission?.executionPermissions;
+  // The user can sign fewer permissions than the planner proposed.
+  const selected=mission?.approval?.enabledPermissionIds;
+  if(Array.isArray(selected)&&!selected.includes(permissionId))
+    deny("MISSION_EXEC_PERMISSION_NOT_GRANTED");
   const found=Array.isArray(grants)?grants.filter(grant=>grant?.id===permissionId):[];
   if(found.length!==1)deny("MISSION_EXEC_PERMISSION_NOT_GRANTED");
   return found[0];
