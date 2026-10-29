@@ -13,6 +13,7 @@ import {readVerifiedStage} from "./lib/device-version-state.mjs";
 import {otaRoot,platform,initIdentity,configure,heartbeat,acquire,release,peerState} from "./lib/ota-client.mjs";
 import {isRetryablePeerFailure,shouldBackoffFailedRelease} from "./lib/ota-retry-policy.mjs";
 import {parseOtaReceipt} from "./lib/ota-receipt.mjs";
+import {tryAcquireLocalRolloutLock} from "./lib/ota-local-rollout-lock.mjs";
 
 const device=platform,peer=device==="mac"?"windows":"mac";
 if(!device)throw Error("ROLL_UNSUPPORTED_OS");
@@ -216,12 +217,6 @@ async function waitForActivation(sha){
  }
  throw Error("ROLL_CUTOVER_TIMEOUT");
 }
-function lock(){
- fs.mkdirSync(rollState,{recursive:true,mode:0o700});
- const f=path.join(rollState,"rollout.lock");
- const fd=fs.openSync(f,"wx",0o600);fs.writeSync(fd,JSON.stringify({pid:process.pid,at:Date.now()}));
- return ()=>{fs.closeSync(fd);try{fs.unlinkSync(f)}catch{}};
-}
 function store(result){
  const dest=path.join(rollState,"last-attempt.json"),tmp=dest+"."+randomUUID()+".tmp";
  try{fs.writeFileSync(tmp,JSON.stringify({...result,at:Date.now()})+"\n",{flag:"wx",mode:0o600});fs.renameSync(tmp,dest)}
@@ -256,13 +251,17 @@ async function tick(){
  const ci=await githubMainCi(staged.commit);
  if(ci.status!=="success")return {status:"blocked",reason:"main-push-ci",ci:ci.status};
  const p=await waitForHealthyPeer(90000);if(!p.ok)return {status:"blocked",reason:"peer",detail:p.reason};
- const unlock=lock();
+ // Another background OTA or manual update owns this host. Do not race it
+ // or turn the expected EEXIST into a retry/failure alarm.
+ const unlock=tryAcquireLocalRolloutLock(rollState);
+ if(!unlock)return {status:"deferred",reason:"local-rollout-already-in-progress"};
  let lease=null;
  try{
   const dest=candidate(staged.commit);
   const before=await waitForHealthyLocal(live.root,live.sha);
   if(staged.commit!==githubMainSha())throw Error("ROLL_MAIN_MOVED_AFTER_BUILD");
-  if(before.sha!==live.sha||before.root!==live.root)throw Error("ROLL_LOCAL_CHANGED_AFTER_BUILD");
+  if(before.sha!==live.sha||before.root!==live.root)
+   return {status:"deferred",reason:"local-release-changed-during-build",liveSha:before.sha};
   if(!before.healthy)throw Error("ROLL_LOCAL_TEMPORARY_UNHEALTHY_AFTER_BUILD");
   if(!(await waitForHealthyPeer(90000)).ok)throw Error("ROLL_PEER_NOT_READY_AFTER_BUILD");
   await publish(before);

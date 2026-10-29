@@ -65,6 +65,9 @@ export function compileApprovedCodexResume(owner, args, {
   const allowed=[
     "(version 1)","(deny default)","(allow process*)",
     "(allow file-read*)","(allow mach-lookup)","(allow network*)",
+    // Rust guard-page initialization on macOS needs read-only sysctl access.
+    // This does NOT grant additional filesystem writes.
+    "(allow sysctl-read)",
     "(allow file-write* (subpath "+sbQuote(output)+"))",
     ...sessionPaths.map(p=>"(allow file-write* (subpath "+sbQuote(p)+"))"),
     '(allow file-write* (literal "/dev/null"))',
