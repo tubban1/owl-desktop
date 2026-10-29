@@ -58,6 +58,12 @@ export function compileApprovedCodexResume(owner, args, {
   if(!cli.startsWith(path.join(home,".codex/plugins/.plugin-appserver/"))||
      !fs.statSync(cli).isFile())
      reject("MISSION_CODEX_BINARY_UNTRUSTED");
+  // Native Codex app-server opens its installation identity for read/write.
+  // Without this narrowly scoped grant, exec resume fails with EPERM.
+  const installId=path.join(home,".codex","installation_id");
+  const installStat=fs.lstatSync(installId);
+  if(!installStat.isFile()||installStat.isSymbolicLink())
+    reject("MISSION_CODEX_INSTALLATION_ID_UNTRUSTED");
   const sessionPaths=[
     path.join(home,".codex","sessions"),
     path.join(home,".codex","log"),
@@ -69,6 +75,7 @@ export function compileApprovedCodexResume(owner, args, {
     // This does NOT grant additional filesystem writes.
     "(allow sysctl-read)",
     "(allow file-write* (subpath "+sbQuote(output)+"))",
+    "(allow file-write* (literal "+sbQuote(installId)+"))",
     ...sessionPaths.map(p=>"(allow file-write* (subpath "+sbQuote(p)+"))"),
     '(allow file-write* (literal "/dev/null"))',
   ];

@@ -27,6 +27,7 @@ function fixture() {
     'echo shouldfail > "$PWD/.tmp/botanical32-quality/art-directed/r3/unsafe/escape.glb" 2>/dev/null\n'+
     "exit 0\n");
   fs.chmodSync(bin,0o700);
+  fs.writeFileSync(path.join(home,".codex","installation_id"),"fixture-installation-id");
   fs.writeFileSync(path.join(report,"historical.md"),"HISTORICAL");
   const prompt=path.join(report,"CODEX_R3_ART_REWORK_ORDER_20261029.md");
   fs.writeFileSync(prompt,"No edits to production; Garden Rose art R3.");
@@ -50,6 +51,8 @@ describe("Mission-scoped, non-shell Codex continuation",()=>{
     expect(valid.command).toContain(runOptions(f).sandboxExecutable);
     expect(valid.sandbox.policy).toContain("(deny default)");
     expect(valid.sandbox.policy).toContain("(allow sysctl-read)");
+    expect(valid.sandbox.policy).toContain('(allow file-write* (literal "'+path.join(fs.realpathSync(f.home),'.codex','installation_id')+'"))');
+    expect(valid.sandbox.policy).not.toContain('(allow file-write* (subpath "'+path.join(f.home,'.codex')+'"))');
     expect(valid.sandbox.policy).not.toContain("file-write* (subpath "+JSON.stringify(f.root)+")");
     expect(()=>compileApprovedCodexResume({checkpoint:f.owner.checkpoint,workstream:{missionContract:{originalGoal:"other project"}}},f.args,runOptions(f))).toThrow("MISSION_CODEX_PROFILE_NOT_AUTHORIZED");
     expect(()=>compileApprovedCodexResume(f.owner,{...f.args,thread_id:"id;rm -rf /"},runOptions(f))).toThrow("MISSION_CODEX_THREAD_INVALID");
@@ -91,6 +94,20 @@ describe("Mission-scoped, non-shell Codex continuation",()=>{
     });
     expect(started.status,"Actual Codex failed to boot: "+started.stderr).toBe(0);
     expect(started.stdout).toMatch(/codex-cli/);
+    expect(fs.existsSync(path.join(f.root,"public/models/production.glb"))).toBe(false);
+  });
+  it.skipIf(process.platform!=="darwin")("real Codex app-server initializes with installation_id-only write, protected art unchanged",()=>{
+    const bin=path.join(os.homedir(),".codex/plugins/.plugin-appserver/codex-cli/bin/codex");
+    if(!fs.existsSync(bin))return;
+    const f=fixture();
+    const launch=compileApprovedCodexResume(f.owner,f.args,{userHome:os.homedir(),codexBin:bin});
+    const result=spawnSync("/usr/bin/sandbox-exec",[
+      "-p",launch.sandbox.policy,bin,"exec","resume","--json",
+      "00000000-0000-0000-0000-000000000000","diagnostic only",
+    ],{cwd:f.root,encoding:"utf8",timeout:20_000,
+      env:{...process.env,TMPDIR:path.join(f.out,".codex-tmp")+"/"}});
+    expect(result.stderr).not.toContain("failed to initialize in-process app-server client");
+    expect(result.stderr).toContain("Not inside a trusted directory");
     expect(fs.existsSync(path.join(f.root,"public/models/production.glb"))).toBe(false);
   });
   it.skipIf(process.platform!=="darwin")("macOS kernel denies production/historical writes and symlink escape",()=>{
