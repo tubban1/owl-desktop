@@ -45,7 +45,7 @@ describe("Mission-scoped, non-shell Codex continuation",()=>{
     const f=fixture();
     const valid=compileApprovedCodexResume(f.owner,f.args,runOptions(f));
     expect(valid.sandbox.writeDir).toBe(fs.realpathSync(f.out));
-    expect(valid.command).toContain("sandbox-exec");
+    expect(valid.command).toContain(runOptions(f).sandboxExecutable);
     expect(valid.sandbox.policy).toContain("(deny default)");
     expect(valid.sandbox.policy).not.toContain("file-write* (subpath "+JSON.stringify(f.root)+")");
     expect(()=>compileApprovedCodexResume({checkpoint:f.owner.checkpoint,workstream:{missionContract:{originalGoal:"other project"}}},f.args,runOptions(f))).toThrow("MISSION_CODEX_PROFILE_NOT_AUTHORIZED");
