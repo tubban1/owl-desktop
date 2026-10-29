@@ -6,11 +6,36 @@ import {compileApprovedMissionProcess, compileApprovedCodexResume}
 import { createHash, createPublicKey, verify } from "node:crypto";
 import toolPathPolicy from "../../mcp/config/mission-tool-paths.json" with {type:"json"};
 
-export function missionApprovalScope(owner) {
+/**
+ * The on-page permission toggles authorize a signed subset of the planner's
+ * proposed execution permissions. The digest of the FULL proposal is included
+ * so a previously-disabled grant cannot silently change after signing.
+ */
+export function selectMissionExecutionPermissions(scope, permissionIds) {
+  if (!scope || !Array.isArray(permissionIds) || permissionIds.length > 8 ||
+      permissionIds.some(id => typeof id !== "string" || !/^[\w.-]{1,100}$/.test(id)) ||
+      new Set(permissionIds).size !== permissionIds.length) {
+    throw Object.assign(new Error("MISSION_PERMISSION_SELECTION_INVALID"), {code:"MISSION_PERMISSION_SELECTION_INVALID"});
+  }
+  const proposed = scope.executionPermissions ?? [];
+  if (permissionIds.some(id => !proposed.some(grant => grant.id === id))) {
+    throw Object.assign(new Error("MISSION_PERMISSION_NOT_PROPOSED"), {code:"MISSION_PERMISSION_NOT_PROPOSED"});
+  }
+  const selected = proposed.filter(grant => permissionIds.includes(grant.id));
+  const {workspaceRoot, executionPermissions: _ignored, ...base} = scope;
+  return {
+    ...base,
+    ...(selected.length ? {executionPermissions:selected} : {}),
+    executionPermissionProposalDigest:createHash("sha256").update(JSON.stringify(proposed)).digest("hex"),
+    workspaceRoot,
+  };
+}
+
+export function missionApprovalScope(owner, permissionIds = undefined) {
   const mission = owner?.workstream?.missionContract;
   if (!mission || !owner?.workstream?.workstreamId) return null;
   const root = owner?.checkpoint?.workspace?.worktree;
-  return {
+  const base = {
     domain: "OWL_MISSION_APPROVAL_V1",
     workstreamId: owner.workstream.workstreamId,
     originalGoal: mission.originalGoal,
@@ -25,6 +50,11 @@ export function missionApprovalScope(owner) {
     // Never bind to an arbitrary caller-supplied path at execution time.
     workspaceRoot: typeof root === "string" ? path.resolve(root) : null,
   };
+  // A null argument explicitly requests the full proposed scope for UI review.
+  // Undefined reads the stored selection for signature validation. Legacy
+  // approvals with no selected-ID metadata retain their exact old scope.
+  const ids = permissionIds === undefined ? mission.approval?.enabledPermissionIds : permissionIds;
+  return Array.isArray(ids) ? selectMissionExecutionPermissions(base, ids) : base;
 }
 
 export function missionApprovalMessage(scope) {
@@ -37,9 +67,12 @@ export function missionApprovalDigest(scope) {
 
 export function missionApprovalStatus(owner, signerRecordFile, publicKeyOverride = null) {
   const mission = owner?.workstream?.missionContract;
-  const scope = missionApprovalScope(owner);
+  let scope;
+  try {scope = missionApprovalScope(owner);}
+  catch {return {approved:false,reason:"MISSION_PERMISSION_SELECTION_INVALID",scope:missionApprovalScope(owner,null)};}
   if (!scope) return { approved: false, reason: "MISSION_NOT_FOUND" };
   const proof = mission?.approval;
+  if (proof?.revokedAt) return {approved:false,reason:"MISSION_APPROVAL_REVOKED",scope};
   if (!proof || typeof proof?.signature !== "string") {
     return { approved: false, reason: "MISSION_APPROVAL_REQUIRED", scope };
   }
@@ -92,7 +125,7 @@ export function assertMissionAction(owner, signerRecordFile, toolName, args, pub
     err.code = "MISSION_APPROVAL_REQUIRED";
     throw err;
   }
-  const executableGrants = c.executionPermissions ?? [];
+  const executableGrants = status.scope.executionPermissions ?? [];
   // A signed exact-command grant may be used via the cached start_process
   // client. Any changed command byte, cwd or mode fails closed.
   if(toolName==="start_process" && executableGrants.length){

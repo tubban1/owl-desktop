@@ -45,6 +45,34 @@ describe("Mission review over isolated Connection Host", () => {
     expect(call.options.headers.authorization).toBe("Bearer local-host-token");
   });
 
+  it("transmits only selected process IDs and supports immediate revocation", async () => {
+    const calls=[];
+    const client=new ConnectionHostClient({
+      baseUrl:"http://127.0.0.1:8791",token:"local-host-token",
+      fetchImpl:async(url,options)=>{
+        calls.push({url,options});
+        return {ok:true,status:200,json:async()=>({
+          ok:true,result:url.endsWith("/revoke")
+            ? {approved:false,revoked:true}
+            : {approved:true,digest:"signed-scope"},
+        })};
+      },
+    });
+    await expect(client.approveMission("owl-workstream:toggle",{
+      digest:"signed-scope",signature:"local-ed25519",
+      enabledPermissionIds:["single-codex-run"],
+    })).resolves.toMatchObject({approved:true});
+    expect(JSON.parse(calls[0].options.body)).toEqual({
+      digest:"signed-scope",signature:"local-ed25519",
+      enabledPermissionIds:["single-codex-run"],
+    });
+    await expect(client.revokeMission("owl-workstream:toggle"))
+      .resolves.toMatchObject({approved:false,revoked:true});
+    expect(calls[1].url).toContain("/missions/reviews/owl-workstream%3Atoggle/revoke");
+    expect(calls[1].options.method).toBe("POST");
+    expect(calls[1].options.headers.authorization).toBe("Bearer local-host-token");
+  });
+
   it("preserves host refusal of invalid signatures", async () => {
     const client = new ConnectionHostClient({
       baseUrl: "http://127.0.0.1:8791",

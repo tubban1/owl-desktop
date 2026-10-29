@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { TunnelSupervisor } from "../electron/services/tunnel-supervisor.mjs";
 import { PlannerContinuationStore } from "../electron/services/planner-continuation-store.mjs";
-import { missionApprovalScope, missionApprovalDigest } from "../electron/services/mission-approval.mjs";
+import { missionApprovalScope, missionApprovalDigest, selectMissionExecutionPermissions } from "../electron/services/mission-approval.mjs";
 import { createDesktopBridgeRpc } from "./bridge-rpc.mjs";
 import { CloudHttpClient } from "../electron/services/cloud-http-client.mjs";
 import { CloudMcpCallConsumer } from "./cloud-mcp-call-consumer.mjs";
@@ -289,7 +289,7 @@ app.get("/missions/reviews", (_req, res) => {
 
 app.get("/missions/reviews/:workstreamId", (req, res) => {
   const owner = plannerContinuation.get(req.params.workstreamId);
-  const scope = missionApprovalScope(owner);
+  const scope = missionApprovalScope(owner,null);
   if (!owner?.workstream || owner.workstream.status === "completed" || !scope) {
     return res.status(404).json({ ok: false, error: { code: "MISSION_NOT_FOUND" } });
   }
@@ -312,7 +312,14 @@ app.post("/missions/reviews/:workstreamId/approve", (req, res) => {
     return res.status(400).json({ ok: false, error: { code: "MISSION_APPROVAL_PAYLOAD_INVALID" } });
   }
   const owner = plannerContinuation.get(id);
-  const scope = missionApprovalScope(owner);
+  const proposed = missionApprovalScope(owner,null);
+  const ids = req.body?.enabledPermissionIds;
+  let scope;
+  try {
+    scope = ids === undefined ? proposed : selectMissionExecutionPermissions(proposed,ids);
+  } catch (error) {
+    return res.status(400).json({ok:false,error:{code:error?.code||"MISSION_PERMISSION_SELECTION_INVALID"}});
+  }
   if (!owner?.workstream || owner.workstream.status === "completed" ||
       !scope?.workspaceRoot || !scope.allowedRepositories.includes(path.basename(scope.workspaceRoot))) {
     return res.status(409).json({ ok: false, error: { code: "MISSION_SCOPE_INCOMPLETE" } });
@@ -321,13 +328,29 @@ app.post("/missions/reviews/:workstreamId/approve", (req, res) => {
     return res.status(409).json({ ok: false, error: { code: "MISSION_SCOPE_CHANGED_DURING_REVIEW" } });
   }
   try {
-    const result = plannerContinuation.attachMissionApproval(id, signature);
+    const result = plannerContinuation.attachMissionApproval(
+      id,signature,undefined,
+      ids === undefined ? {} : {enabledPermissionIds:ids},
+    );
     record("info", "mission", "Human-signed mission approval verified by Connection Host", {
       workstreamId: id, digest: result.digest,
     });
     res.json({ ok: true, result });
   } catch (error) {
     res.status(409).json({ ok: false, error: { code: error?.code || "MISSION_APPROVAL_REJECTED" } });
+  }
+});
+
+app.post("/missions/reviews/:workstreamId/revoke", (req, res) => {
+  const id=req.params.workstreamId;
+  if(!/^owl-workstream:[\\w-]+$/.test(id))
+    return res.status(400).json({ok:false,error:{code:"MISSION_WORKSTREAM_ID_REQUIRED"}});
+  try{
+    const result=plannerContinuation.revokeMissionApproval(id);
+    record("info","mission","Inline permission switch revoked mission approval",{workstreamId:id});
+    res.json({ok:true,result});
+  }catch(error){
+    res.status(409).json({ok:false,error:{code:error?.code||"MISSION_REVOKE_FAILED"}});
   }
 });
 

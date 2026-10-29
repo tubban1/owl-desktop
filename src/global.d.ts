@@ -49,6 +49,8 @@ declare global {
         label: string | null;
         status: "approved" | "needs_review";
         reason: string;
+        reviewDigest: string;
+        enabledPermissionIds: string[];
         scope: {
           workspaceRoot: string | null;
           allowedRepositories: string[];
@@ -66,10 +68,18 @@ declare global {
         } | null;
         pendingProgressBoundary: boolean;
       }>>;
-      approveMission(workstreamId: string): Promise<{
+      approveMission(workstreamId: string, confirmation: {
+        confirmed: true;
+        reviewDigest: string;
+        enabledPermissionIds: string[];
+      }): Promise<{
         approved: boolean;
-        cancelled?: boolean;
         workstreamId?: string;
+      }>;
+      revokeMission(workstreamId: string): Promise<{
+        approved: false;
+        revoked: boolean;
+        workstreamId: string;
       }>;
       approveRuntimeApproval(approvalId: string): Promise<unknown>;
       denyRuntimeApproval(approvalId: string): Promise<unknown>;

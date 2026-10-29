@@ -5717,3 +5717,74 @@ input:focus { border-color: #41634b; box-shadow: 0 0 0 3px rgba(78,128,92,.08); 
  color:#a1b6ad;font-size:11px;}
 .connected-identities-body .oauth-config-form {grid-template-columns:repeat(auto-fit,minmax(min(100%,155px),1fr));}
 .connected-identities-body .oauth-config-form > div {min-width:0;}
+
+/* Mission permissions: in-page controls, not an OS-native text dialog. */
+.mission-panel { padding-bottom: 16px; }
+.mission-card-list { display:grid; gap:12px; padding:10px 0 16px; }
+.mission-card {
+  border:1px solid #273039; border-radius:12px; background:#101417;
+  color:#ccd2d5; overflow:hidden;
+}
+.mission-card-approved { border-color:rgba(107,157,117,.36); }
+.mission-card-header {
+  display:flex; justify-content:space-between; align-items:flex-start;
+  gap:18px; padding:15px 16px; border-bottom:1px solid #242b30;
+}
+.mission-card-heading { flex:1; min-width:0; }
+.mission-card-title { display:flex; flex-wrap:wrap; align-items:center; gap:9px; }
+.mission-card-title strong { font-size:12px; line-height:1.5; }
+.mission-state {
+  font-size:10px; line-height:20px; padding:0 8px; border-radius:10px;
+  background:#20272d; color:#8d999f;
+}
+.mission-state.active { color:#9ae0ac; background:rgba(77,149,95,.14); }
+.mission-card-heading p {
+  color:#99a4a9; font-size:11px; line-height:1.55; margin:6px 0 0;
+  overflow-wrap:anywhere;
+}
+.mission-control { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+.mission-control > span { font-size:10px; color:#a4adb3; min-width:21px; text-align:right; }
+.mission-toggle:focus-visible { outline:2px solid #9cd6ff; outline-offset:3px; }
+.mission-toggle:disabled { opacity:.45; cursor:not-allowed; }
+.mission-card-body { padding:4px 16px 12px; }
+.mission-permission-line {
+  display:flex; justify-content:space-between; align-items:center; gap:16px;
+  min-height:55px; padding:11px 0; border-bottom:1px solid #21282d;
+}
+.mission-permission-line > div:first-child { display:grid; gap:4px; min-width:0; flex:1; }
+.mission-permission-line strong { font-size:11px; color:#cbd2d5; }
+.mission-permission-line small { font-size:10px; color:#829098; line-height:1.5; overflow-wrap:anywhere; }
+.mission-mode { font-size:10px; color:#849199; }
+.mission-details { margin-top:10px; }
+.mission-details > summary {
+  display:list-item; cursor:pointer; font-size:10px; color:#8ca8ba;
+  padding:7px 0; width:max-content; max-width:100%;
+}
+.mission-details-content {
+  display:grid; gap:7px; padding:12px; border:1px solid #252d34;
+  border-radius:9px; background:#0b0e11; min-width:0;
+}
+.mission-details-content strong { font-size:10px; color:#b9c4ca; }
+.mission-details-content small { font-size:10px; color:#8b9ca5; }
+.mission-details-content code {
+  display:block; overflow-wrap:anywhere; word-break:break-word; white-space:pre-wrap;
+  max-width:100%; font-size:10px; color:#9caeb8; line-height:1.5;
+}
+.mission-details-content ul { margin:0 0 5px; padding-left:18px; }
+.mission-details-content li { font-size:10px; line-height:1.6; color:#92a1aa; }
+.mission-command-details { display:grid; gap:7px; padding-top:10px; border-top:1px solid #242c31; }
+.mission-inline-confirm {
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  margin-top:12px; padding:14px; background:#18232a; border:1px solid #344651; border-radius:9px;
+}
+.mission-inline-confirm strong { font-size:11px; }
+.mission-inline-confirm p { margin:5px 0 0; font-size:10px; color:#b2bfc6; line-height:1.55; }
+.mission-confirm-actions { display:flex; gap:7px; flex-shrink:0; }
+.mission-confirm-actions button { white-space:nowrap; font-size:10px; padding:8px 12px; }
+.mission-approval-hint { color:#86959d; font-size:10px; line-height:1.55; margin:11px 0 3px; }
+.mission-approval-error { color:#e3a1a1; font-size:11px; }
+@media (max-width:720px) {
+ .mission-card-header,.mission-inline-confirm { flex-direction:column; align-items:stretch; }
+ .mission-card-header > .mission-control { align-self:flex-end; }
+ .mission-confirm-actions { justify-content:flex-end; }
+}
