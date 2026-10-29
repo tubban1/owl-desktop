@@ -187,17 +187,13 @@ export async function startOwlMcpHttpServer({
 
   function createTransportSession() {
     const server = createOwlMcpServer({ fileDelivery, browserCompanion, userChromeBridge, mailService, providerOperations, peerRecovery });
-    // Announce the current tool registry to clients that support live
-    // notifications. ChatGPT may still cache connector schemas until its
-    // plugin connection is refreshed; legacy read_multiple_files remains
-    // usable for images while the client catalog catches up.
-    server.server.oninitialized = () => {
-      void server.server.sendToolListChanged().then(() => {
-        onEvent("info", "OWL MCP tool registry change announced", {
-          eventKind:"mcp_tool_surface_announced",
-        });
-      }).catch(() => undefined);
-    };
+    // Tool definitions are immutable for the lifetime of a Connection Host.
+    // tools/list is available immediately after initialize. Announcing
+    // tools/list_changed on EVERY fresh session used to generate one extra
+    // server-to-client notification and telemetry event per MCP transport
+    // (tens of thousands per week on ephemeral ChatGPT connections), even
+    // though no tool changed. Reserve list_changed for genuine live catalog
+    // mutations; an actual host update uses the regular client reconnect.
     const session = {
       server,
       transport: null,

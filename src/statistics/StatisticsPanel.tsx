@@ -37,6 +37,7 @@ export function StatisticsPanel({ stats, deviceLocation }: { stats: UsageStatist
       <div><Clock3 size={19}/><small>Avg. tool response</small><strong>{duration(model.avgDurationMs)}</strong><span>Recorded response durations</span></div>
       <div><AlertTriangle size={19}/><small>External tool fallbacks</small><strong>{fmt(model.total.externalFallbacks)}</strong><span>Only agent-reported departures from OWL, not all external plugin activity</span></div>
       <div><Network size={19}/><small>Session opens</small><strong>{fmt(model.total.sessionOpens)}</strong><span>New MCP transport sessions observed</span></div>
+      <div><Network size={19}/><small>Sessions per tool call</small><strong>{model.transportStartsPerToolCall === null ? "—" : model.transportStartsPerToolCall.toFixed(2) + "×"}</strong><span>Transport churn signal, not a disconnect rate</span></div>
       <div><Network size={19}/><small>Session-cap evictions</small><strong>{fmt(model.total.capEvictions)}</strong><span>Inactive transports reclaimed at capacity</span></div>
       <div><Network size={19}/><small>Idle reclamations</small><strong>{fmt(model.total.idleReclaimed)}</strong><span>Idle transports reclaimed by TTL</span></div>
       <div><Network size={19}/><small>Owner rebind cleanups</small><strong>{fmt(model.total.ownerSuperseded)}</strong><span>Inactive, superseded MCP transports safely released</span></div>
@@ -47,6 +48,12 @@ export function StatisticsPanel({ stats, deviceLocation }: { stats: UsageStatist
         <strong>Recorded OWL fallback reasons: </strong>
         {model.fallbackReasons.map(item=>item.reason+" ("+item.count+")").join(" · ")}
         . External tools used without reporting cannot be counted.
+      </span>
+    </div>}
+    {model.errorCodes.length > 0 && <div className="stats-insights">
+      <AlertTriangle size={16}/><span><strong>Recorded MCP error codes: </strong>
+        {model.errorCodes.slice(0,8).map(x=>x.code+" ("+fmt(x.count)+")").join(" · ")}
+        . Error-code totals are available only for newly recorded events after this update; older errors remain unclassified by cause.
       </span>
     </div>}
     <div className="stats-charts">
@@ -67,6 +74,6 @@ export function StatisticsPanel({ stats, deviceLocation }: { stats: UsageStatist
     </div>
     <div className="stats-insights"><AlertTriangle size={16}/><span><strong>Usage insight: </strong>{frequentErrors ? friendlyTool(frequentErrors.tool)+" had "+frequentErrors.errors+" error response(s). Review related events in Monitor." : busiest ? "Most active recorded day: "+busiest.day+" ("+busiest.calls+" calls). No tool errors recorded in this range." : "Waiting for the first recorded MCP interaction. Open Monitor to see live activity."}</span></div>
     {model.rows.length === 0 && <p className="stats-empty">No recorded data for this period. Charts will populate as OWL runs.</p>}
-    <p className="stats-footnote"><RefreshCw size={12}/> Session reclamation is not an unexpected disconnect or a successful reconnect. Historical reasons are unknown. Counts are local, durable and based on observed events; a response without a request may affect success rate but not call count.</p>
+    <p className="stats-footnote"><RefreshCw size={12}/> Session reclamation is not an unexpected disconnect or a successful reconnect. Sessions per tool call measures churn, not failure or cost. Success rate counts recorded success/error outcomes; user mistakes and deliberately rejected operations may also appear as errors. Historical error-code reasons are unavailable. Counts are local, durable and based on observed events; a response without a request may affect success rate but not call count.</p>
   </section>;
 }

@@ -3,7 +3,7 @@ import path from "node:path";
 
 // Stores only counters and opaque interaction IDs. No prompts, payloads or credentials.
 const MAX_DEDUPE = 100_000;
-const freshDay = () => ({ calls: 0, successes: 0, errors: 0, workstreamOpens: 0, completedWorkstreams: 0, reconnects: 0, sessionOpens: 0, idleReclaimed: 0, capEvictions: 0, unknownReclaimed: 0, ownerSuperseded: 0, durationMs: 0, timedCalls: 0, externalFallbacks: 0, fallbackReasons: {}, tools: {} });
+const freshDay = () => ({ calls: 0, successes: 0, errors: 0, workstreamOpens: 0, completedWorkstreams: 0, reconnects: 0, sessionOpens: 0, idleReclaimed: 0, capEvictions: 0, unknownReclaimed: 0, ownerSuperseded: 0, errorCodes: {}, durationMs: 0, timedCalls: 0, externalFallbacks: 0, fallbackReasons: {}, tools: {} });
 const validDay = (at) => {
   const ms = Date.parse(at ?? "");
   if (!Number.isFinite(ms)) return null;
@@ -74,7 +74,17 @@ export class UsageStatisticsStore {
         toolRow.calls += 1;
         if (tool === "workstream_open") row.workstreamOpens += 1;
       } else {
-        if (meta.status === "error") { row.errors += 1; toolRow.errors += 1; }
+        if (meta.status === "error") {
+          row.errors += 1;
+          toolRow.errors += 1;
+          // Only store protocol error CODE identifiers, never error messages,
+          // raw arguments, file paths, credentials or free-form telemetry.
+          const code = typeof meta.code === "string" &&
+            /^[A-Z][A-Z0-9_]{1,63}$/.test(meta.code)
+              ? meta.code : "UNCLASSIFIED";
+          row.errorCodes ??= {};
+          row.errorCodes[code] = (row.errorCodes[code] ?? 0) + 1;
+        }
         if (meta.status === "success") {
           row.successes += 1;
           if (tool === "workstream_complete") row.completedWorkstreams += 1;
