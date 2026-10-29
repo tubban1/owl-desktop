@@ -3,6 +3,7 @@ import {createNativeAgentExecutor} from "../chrome-agent-native/agent-executor.m
 import {createNativeChromeBridge} from "../connection-host/native-user-chrome-bridge.mjs";
 import {prepareTrustedTextField,checkTrustedTextField,
   locateTrustedTextActivation,inspectTrustedTextControl} from "../chrome-agent-native/trusted-text-field.mjs";
+import {selectTrustedAgentOption} from "../chrome-agent-native/trusted-select.mjs";
 
 const origin="https://ads.google.com",url=origin+"/aw/express/campaigns/18391919022";
 function field({tag="INPUT",role=null,contenteditable=false,type="text",label="Negative keyword themes",value="old"}={}){
@@ -40,7 +41,7 @@ function mount(el){
 }
 afterEach(()=>vi.unstubAllGlobals());
 
-function harness({requiresActivation=false}={}){
+function harness({requiresActivation=false,asSelect=false}={}){
   const state={};const calls=[];let prepareCalls=0;
   const chrome={
     storage:{session:{get:async k=>({[k]:state[k]}),set:async obj=>Object.assign(state,obj)}},
@@ -49,11 +50,16 @@ function harness({requiresActivation=false}={}){
     scripting:{executeScript:async({func,args})=>{
       calls.push(["inject",func.name,args]);
       if(func===prepareTrustedTextField){
+        if(asSelect)return [{result:{error:"TEXT_TARGET_NOT_EDITABLE"}}];
         prepareCalls++;
         return [{result:requiresActivation&&prepareCalls===1
           ?{activationRequired:true,uid:args[0],role:"combobox"}
           :{ready:true,uid:args[0],origin:args[1],kind:"native"}}];
       }
+      if(asSelect && func===selectTrustedAgentOption)
+        return [{result:{selected:true,domVerified:true,websitePersisted:false,uid:args[0]}}];
+      if(asSelect && func.name==="inspect")
+        return [{result:{controls:[{uid:"owl-agent-5",tag:"select"}]}}];
       if(func===locateTrustedTextActivation)return [{result:{valid:true,x:28,y:32,uid:args[0]}}];
       if(func===inspectTrustedTextControl)return [{result:{uid:args[0],tag:"div",nativeInputs:1,diagnosticOnly:true}}];
       if(func===checkTrustedTextField)return [{result:{domVerified:true,websitePersisted:false}}];
@@ -69,6 +75,17 @@ function harness({requiresActivation=false}={}){
 }
 
 describe("Agent Browser custom text fields in owner-isolated Chrome",()=>{
+  it("select fallback uses trusted DOM only when text-preparation rejects select",async()=>{
+    const {agent,calls}=harness({asSelect:true});
+    await agent.run({owner:"user-session",op:"open",args:{url}});
+    const result=await agent.run({owner:"user-session",op:"fill",
+      args:{uid:"owl-agent-5",value:"alpentcm.ch"}});
+    expect(result).toMatchObject({selected:true,domVerified:true,
+      websitePersisted:false,inputMethod:"tab_scoped_native_select"});
+    expect(calls.filter(x=>x[0]==="inject").map(x=>x[1]))
+      .toEqual(["prepareTrustedTextField","inspect","selectTrustedAgentOption"]);
+    expect(calls.filter(x=>x[0]==="attach")).toHaveLength(0);
+  });
   it("fills a framework input using trusted Chromium input and no OS keyboard",async()=>{
     const {agent,calls}=harness();
     await agent.run({owner:"user-session",op:"open",args:{url}});
