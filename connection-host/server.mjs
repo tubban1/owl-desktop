@@ -343,7 +343,7 @@ app.post("/missions/reviews/:workstreamId/approve", (req, res) => {
 
 app.post("/missions/reviews/:workstreamId/revoke", (req, res) => {
   const id=req.params.workstreamId;
-  if(!/^owl-workstream:[\\w-]+$/.test(id))
+  if(!/^owl-workstream:[\w-]+$/.test(id))
     return res.status(400).json({ok:false,error:{code:"MISSION_WORKSTREAM_ID_REQUIRED"}});
   try{
     const result=plannerContinuation.revokeMissionApproval(id);

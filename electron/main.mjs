@@ -1887,7 +1887,7 @@ function registerIpc() {
       ? await connectionHostClient.missionReviews()
       : plannerContinuationStore?.listMissionReviews() ?? []);
   ipcMain.handle("mission:review:approve", async (_event, workstreamId, confirmation) => {
-    if (typeof workstreamId !== "string" || !/^owl-workstream:[\\w-]+$/.test(workstreamId))
+    if (typeof workstreamId !== "string" || !/^owl-workstream:[\w-]+$/.test(workstreamId))
       throw new Error("MISSION_WORKSTREAM_ID_REQUIRED");
     // An inline switch merely stages the decision. This explicit second click
     // authorizes exactly the reviewed digest and selected process grants.
@@ -1937,7 +1937,7 @@ function registerIpc() {
     return result;
   });
   ipcMain.handle("mission:review:revoke", async (_event, workstreamId) => {
-    if (typeof workstreamId !== "string" || !/^owl-workstream:[\\w-]+$/.test(workstreamId))
+    if (typeof workstreamId !== "string" || !/^owl-workstream:[\w-]+$/.test(workstreamId))
       throw new Error("MISSION_WORKSTREAM_ID_REQUIRED");
     const result=externalConnectionHostEnabled
       ? await connectionHostClient.revokeMission(workstreamId)
