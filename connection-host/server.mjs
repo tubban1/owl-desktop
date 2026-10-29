@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 import { TunnelSupervisor } from "../electron/services/tunnel-supervisor.mjs";
 import { PlannerContinuationStore } from "../electron/services/planner-continuation-store.mjs";
+import { missionApprovalScope, missionApprovalDigest } from "../electron/services/mission-approval.mjs";
 import { createDesktopBridgeRpc } from "./bridge-rpc.mjs";
 import { CloudHttpClient } from "../electron/services/cloud-http-client.mjs";
 import { CloudMcpCallConsumer } from "./cloud-mcp-call-consumer.mjs";
@@ -280,6 +281,54 @@ app.get("/health", (_req, res) => {
     },
     eventCursor: eventSequence,
   });
+});
+
+app.get("/missions/reviews", (_req, res) => {
+  res.json({ ok: true, result: plannerContinuation.listMissionReviews() });
+});
+
+app.get("/missions/reviews/:workstreamId", (req, res) => {
+  const owner = plannerContinuation.get(req.params.workstreamId);
+  const scope = missionApprovalScope(owner);
+  if (!owner?.workstream || owner.workstream.status === "completed" || !scope) {
+    return res.status(404).json({ ok: false, error: { code: "MISSION_NOT_FOUND" } });
+  }
+  res.json({ ok: true, result: {
+    workstreamId: req.params.workstreamId,
+    status: owner.workstream.status,
+    scope,
+  } });
+});
+
+app.post("/missions/reviews/:workstreamId/approve", (req, res) => {
+  // Only OWL Desktop may create the OS-protected human signature.
+  // This authenticated endpoint verifies it against the canonical signer record.
+  const id = req.params.workstreamId;
+  const signature = req.body?.signature;
+  const expectedDigest = req.body?.digest;
+  if (!/^owl-workstream:[\w-]+$/.test(id) ||
+      typeof signature !== "string" || !signature ||
+      typeof expectedDigest !== "string") {
+    return res.status(400).json({ ok: false, error: { code: "MISSION_APPROVAL_PAYLOAD_INVALID" } });
+  }
+  const owner = plannerContinuation.get(id);
+  const scope = missionApprovalScope(owner);
+  if (!owner?.workstream || owner.workstream.status === "completed" ||
+      !scope?.workspaceRoot || !scope.allowedRepositories.includes(path.basename(scope.workspaceRoot))) {
+    return res.status(409).json({ ok: false, error: { code: "MISSION_SCOPE_INCOMPLETE" } });
+  }
+  if (expectedDigest !== missionApprovalDigest(scope)) {
+    return res.status(409).json({ ok: false, error: { code: "MISSION_SCOPE_CHANGED_DURING_REVIEW" } });
+  }
+  try {
+    const result = plannerContinuation.attachMissionApproval(id, signature);
+    record("info", "mission", "Human-signed mission approval verified by Connection Host", {
+      workstreamId: id, digest: result.digest,
+    });
+    res.json({ ok: true, result });
+  } catch (error) {
+    res.status(409).json({ ok: false, error: { code: error?.code || "MISSION_APPROVAL_REJECTED" } });
+  }
 });
 
 app.get("/events", (req, res) => {
