@@ -4,8 +4,6 @@ export const TOOL_TAXONOMY_VERSION = 1;
 const explicit = {
   execute_command:["Run Command","Process","sys.exec","run","shell.exec","privileged"],
   start_process:["Start Process","Process","process.manage","start","shell.start"],
-  mission_codex_resume:["Resume Scoped Codex","Process",null,null,"mission.codex.resume","side-effect"],
-  mission_process_start:["Start Approved Mission Process","Process",null,null,"mission.process.start","side-effect"],
   get_process_output:["Get Process Output","Process","process.manage","output","shell.output"],
   list_processes:["List Processes","Process","process.manage","list","shell.processes"],
   send_process_input:["Send Process Input","Process","process.manage","input","shell.input"],

@@ -16,8 +16,8 @@ const cleaners=[];
 afterEach(async()=>{while(cleaners.length)await cleaners.pop()?.();});
 const parse=(r)=>JSON.parse(r.content.filter(p=>p.type==="text").map(p=>p.text).join("\n"));
 
-describe("Desktop-signed mission scope and MCP enforcement",()=>{
- it("rejects forged/unapproved and out-of-root changes, permits only reviewed structured file/Git paths",async()=>{
+describe("Historical mission signatures are audit-only, not an extra execution gate",()=>{
+ it("retains old signed audit history but forwards agent operations to the existing Runtime authority",async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),"owl-mission-guard-"));
   cleaners.push(()=>fs.rmSync(dir,{force:true,recursive:true}));
   const root=path.join(dir,"vibe-monitor");
@@ -68,36 +68,37 @@ describe("Desktop-signed mission scope and MCP enforcement",()=>{
   await client.connect(transport);
   const tool=(name,args)=>client.callTool({name,arguments:{workstream_id:id,...args}});
   const before=invoked.length;
-  expect(parse(await tool("write_file",{path:path.join(root,"file.txt"),content:"safe"})).code)
-    .toBe("MISSION_APPROVAL_REQUIRED");
-  expect(invoked.length).toBe(before);
+  // The user already enabled Runtime capabilities; there is no extra
+  // workstream signature requirement, even when old planning metadata exists.
+  expect((await tool("write_file",{path:path.join(root,"file.txt"),content:"safe"})).isError)
+    .not.toBe(true);
+  expect(invoked.length).toBe(before+1);
+  // Signatures may remain for historical integrity, never as an execution gate.
   expect(store.attachMissionApproval(id,signed)).toMatchObject({approved:true});
   expect(missionApprovalStatus(store.get(id),path.join(dir,"human-approval-signer.json")).reason)
     .toBe("USER_CONFIRMED");
 
-  expect((await tool("write_file",{path:path.join(root,"file.txt"),content:"safe"})).isError).not.toBe(true);
-  const changed=invoked.length;
-  expect(parse(await tool("write_file",{path:path.join(outside,"bad.txt"),content:"not allowed"})).code)
-    .toBe("MISSION_SCOPE_VIOLATION");
-  expect(parse(await tool("write_file",{path:path.join(root,"escape","bad.txt"),content:"symlink"})).code)
-    .toBe("MISSION_SCOPE_VIOLATION");
-  expect(parse(await tool("execute_command",{cwd:root,command:"echo test",workspace_mode:"read"})).code)
-    .toBe("MISSION_OPAQUE_ACTION_BLOCKED");
-  expect(parse(await tool("start_process",{cwd:root,command:"echo test",workspace_mode:"read"})).code)
-    .toBe("MISSION_OPAQUE_ACTION_BLOCKED");
-  expect(parse(await tool("apply_patch",{cwd:root,patch:"*** Begin Patch\n*** End Patch"})).code)
-    .toBe("MISSION_OPAQUE_ACTION_BLOCKED");
-  expect(invoked.length).toBe(changed);
+  // Scope/prohibitedChanges are planner notes, NOT additional OWL access
+  // decisions. Runtime, and the actual OS, remain the enforcement authority.
+  expect((await tool("write_file",{path:path.join(outside,"bad.txt"),content:"delegated to runtime"})).isError)
+    .not.toBe(true);
+  expect((await tool("write_file",{path:path.join(root,"escape","bad.txt"),content:"delegated to runtime"})).isError)
+    .not.toBe(true);
+  expect((await tool("execute_command",{cwd:root,command:"echo test",workspace_mode:"read"})).isError)
+    .not.toBe(true);
+  expect((await tool("start_process",{cwd:root,command:"echo test",workspace_mode:"read"})).isError)
+    .not.toBe(true);
   expect((await tool("runtime_info",{})).isError).not.toBe(true);
 
-  // Changing the mission after approval invalidates the digest, not only UI.
+  // Even an obsolete/tampered historical signature does not lock out an
+  // already authorized current user from their Runtime capabilities.
   const state=store.read();
   state.owners[id].workstream.missionContract.allowedRepositories.push("other-project");
   store.write(state);
   expect(missionApprovalStatus(store.get(id),path.join(dir,"human-approval-signer.json")).reason)
     .toBe("MISSION_SCOPE_CHANGED");
-  expect(parse(await tool("write_file",{path:path.join(root,"a.txt"),content:"no"})).code)
-    .toBe("MISSION_APPROVAL_REQUIRED");
+  expect((await tool("write_file",{path:path.join(root,"a.txt"),content:"no mission gate"})).isError)
+    .not.toBe(true);
 
   const resumed=new PlannerContinuationStore({file:store.file});
   expect(resumed.get(id).checkpoint.goal).toBe("Validate Vibe Monitor 1.0.1");

@@ -1,73 +1,46 @@
-# Mission permissions: configuration, never project-specific code
+# Agent execution permissions — 2026-10-29
 
-OWL code enforces signatures, canonical workspace boundaries and exact command
-matching. It does **not** contain project names, home directories, user session
-IDs, or executable allowlists. No process permission is inferred from prose.
+The additional OWL Mission-by-Mission signing and per-process authorization
+layer is **retired**. It repeatedly blocked existing Codex and other agents
+despite the user already enabling execution in OWL Runtime Settings.
 
-## Two declarative authority sources
+## One authority for normal Agent tools
 
-1. \`mcp/config/mission-tool-paths.json\` describes existing structured tool
-   effects in versioned, code-reviewed data. Path effects remain constrained to
-   the user's signed workspace root; unknown tools default to deny.
-2. \`mission_contract.execution_permissions\` is planner-proposed and is copied
-   verbatim (with schema validation) into the Mission's OS-human-signed scope.
-   A process permission is valid **only after** the user reviews the exact
-   executable, argument list, cwd, writable roots and sandbox evidence.
+The connected OWL Runtime uses the user's existing capability settings
+(**On / Off / Ask**) for Shell, file writes, delete, Git Push and rollback.
+When the user has enabled a capability, agents do **not** need to obtain a
+second Mission or per-process signature. No code-defined worktree, thread,
+app or agent-specific permission whitelist exists in the live MCP dispatch.
 
-A newly added \`execution_permissions\` entry invalidates any old approval
-signature. Existing signed workstreams without entries never gain execution
-rights when OWL is updated.
+workstream_open only records task context, checkpoints and descriptive
+constraints. It does not create or revoke execution rights. Calls such as
+start_process, execute_command, write_file and git_push are sent to
+the same Runtime policy path regardless of planner/workstream/agent.
 
-### Example (placeholder values, not a live permission)
+The duplicate mission_process_start and mission_codex_resume tools
+have been removed. Use the normal start_process tool for Codex and others.
 
-\`\`\`json
-{
-  "allowed_repositories": ["sample-worktree"],
-  "execution_permissions": [{
-    "id": "art-review",
-    "executable": "/ABSOLUTE/PATH/TO/CLI",
-    "cwd": "/ABSOLUTE/PATH/TO/sample-worktree/output",
-    "argv": [
-      "--sandbox", "workspace-write",
-      "-C", "/ABSOLUTE/PATH/TO/sample-worktree/output",
-      "exec", "resume", "--json", "THREAD-ID",
-      "Read this approved task and write only new output."
-    ],
-    "workspace_mode": "write",
-    "writable_roots": [
-      "/ABSOLUTE/PATH/TO/sample-worktree/output"
-    ],
-    "sandbox": {
-      "type": "tool-native",
-      "required_argv_segments": [
-        ["--sandbox", "workspace-write"],
-        ["-C", "/ABSOLUTE/PATH/TO/sample-worktree/output"]
-      ]
-    }
-  }]
-}
-\`\`\`
+The duplicate Mission Control review card was removed from the Settings
+page. The existing Runtime permission switches remain the source of truth.
 
-Execution grants are **exact match**, not wildcard patterns. A valid request
-calls \`mission_process_start(permission_id)\`; a cached client may call
-\`start_process\` only with the exact compiled executable, argv, cwd and mode.
+## Boundaries intentionally unchanged
 
-\`tool-native\` means the target CLI claims its **own** command sandbox.
-The OWL Runtime does **not** claim that configured \`writable_roots\` are
-kernel-enforced. The sandbox behavior must be independently verified before
-running an agent with consequential filesystem permissions. Do not substitute
-a broad, unverified shell command for a restricted process permission.
+- Underlying OS filesystem protections and authenticated device/connection
+  access still apply.
+- OWL Runtime settings still apply: Off is denied, Ask invokes its *own*
+  existing approval mechanism, and On allows that capability.
+- Separate cloud service authentication, user login and third-party API
+  authorization remain intact.
+- Existing Mission signatures and audit history may remain in stored
+  workstream records for provenance but **are never checked in normal MCP
+  execution**. No previously rejected task is silently rerun.
+- This change does not automatically start, retry, deploy or delete anything.
 
-\`mission_codex_resume\` remains a compatibility wrapper. It finds a matching
-thread and instructionFile in **signed data**; it does not include any
-Codex thread ID, repository path or user-home allowlist.
+## Verification requirements
 
-## Non-negotiable checks
-
-- A missing permission, a missing human signature, changed process arguments,
-  or a changed executable scope fails closed.
-- Absolute, canonical cwd and declared write roots must remain inside the
-  signed workspace. Symlinks cannot extend authority.
-- No silent auto-approval, permission upgrades, or recurring re-launch.
-- A runnable CLI alone is not proof of model execution, artifact acceptance,
-  production safety, or successful QA.
+1. An unsigned workstream with a descriptive scope can use start_process,
+   execute_command and write_file when the Runtime policy allows.
+2. A Runtime refusal propagates, never overridden by this compatibility fix.
+3. The Mission review UI is absent; no task-specific approval required.
+4. A manually resumed original Codex session must produce real artifacts;
+   process exit 0 alone is not a completion or artistic acceptance.

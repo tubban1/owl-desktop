@@ -19,7 +19,6 @@ import { StatisticsPanel } from "./statistics/StatisticsPanel";
 import { deviceCopy } from "./deviceCopy";
 import { RuntimePermissionCenter } from "./permissions/RuntimePermissionCenter";
 import { EffectiveFolderAccess } from "./permissions/EffectiveFolderAccess";
-import { MissionReviewPanel } from "./permissions/MissionReviewPanel";
 import { MailAccountsPanel } from "./mail/MailAccountsPanel";
 import type { UsageStatisticsSnapshot } from "./statistics/statisticsModel";
 import {
@@ -1945,7 +1944,6 @@ export default function App() {
             </div>
           </section>
 
-          <MissionReviewPanel />
           <RuntimePermissionCenter approvals={liveApprovals??snapshot?.approvals} access={runtimeAccess}
             endpoint={snapshot?.runtimeEndpoint} onApprove={approveRuntimeApproval}
             onDeny={denyRuntimeApproval} />
