@@ -5,7 +5,7 @@ import {describeTool,suggestToolProfiles,summarizeToolDomains} from "../shared/t
 describe("shared MCP tool presentation governance",()=>{
  it("uses live registered SDK tools as its canonical inventory",()=>{
   const server=createOwlMcpServer();const a=toolRegistrySnapshot(server,{goal:"edit git repository files",includeTools:true});
-  expect(a.count).toBe(162);expect(a.namesSha256).toMatch(/^[0-9a-f]{64}$/);
+  expect(a.count).toBe(163);expect(a.namesSha256).toMatch(/^[0-9a-f]{64}$/);
   expect(a.profileCounts.core).toBeGreaterThan(0);expect(a.executionCoverage.runtimePrimitive).toBeGreaterThan(20);
   expect(a.tools.some(t=>t.id==="git_status")).toBe(true);
   expect(a.tools.every(t=>a.suggestedProfiles.includes(t.profile)||t.profile==="legacy")).toBe(true);

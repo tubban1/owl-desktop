@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "pathTargets": {
+    "write_file": [
+      "path"
+    ],
+    "edit_file": [
+      "path"
+    ],
+    "batch_edit_files": [
+      "edits.*.path"
+    ],
+    "create_directory": [
+      "path"
+    ],
+    "git_add": [
+      "cwd",
+      "paths.*@cwd"
+    ],
+    "git_commit": [
+      "cwd"
+    ],
+    "git_pull": [
+      "cwd"
+    ],
+    "git_push": [
+      "cwd"
+    ]
+  }
+}

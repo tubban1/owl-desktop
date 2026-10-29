@@ -9,7 +9,7 @@ import { z } from "zod";
 import { RuntimeHttpClient } from "../electron/runtime-http-client.mjs";
 import { currentMcpRequestContext } from "./request-context.mjs";
 import { assertMissionAction } from "../electron/services/mission-approval.mjs";
-import { compileApprovedCodexResume } from "./mission-codex-execution.mjs";
+import { compileApprovedMissionProcess, compileApprovedCodexResume } from "./mission-execution-policy.mjs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {versionSnapshot} from "../scripts/lib/version-sync.mjs";
@@ -2725,44 +2725,64 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
     })),
   );
 
+  async function launchApprovedMissionProcess(permissionId) {
+    const context=currentMcpRequestContext();
+    const owner=context.plannerContinuation?.get?.(context.runtimeSessionId);
+    const launch=compileApprovedMissionProcess(owner,{permission_id:permissionId});
+    const found=primitiveResult(await invoke("primitive.call",{
+      primitive:"process.manage",op:"list",args:{},
+    }));
+    const processes=Array.isArray(found)?found:found?.processes??[];
+    if(processes.some(p=>p.running &&
+        p.command===launch.command && p.cwd===launch.cwd)){
+      const error=new Error("An identical approved process is already running.");
+      error.code="MISSION_PROCESS_ALREADY_RUNNING";
+      throw error;
+    }
+    const started=primitiveResult(await invoke("primitive.call",{
+      primitive:"process.manage",op:"start",
+      args:{command:launch.command,cwd:launch.cwd,workspace_mode:launch.workspace_mode},
+    }));
+    return {...started,missionScoped:true,
+      permissionId:launch.permissionId,
+      sandboxType:launch.sandboxType,
+      // Signed intent is not proof of OS-level containment.
+      confinementVerifiedByRuntime:false,
+      declaredWritableRoots:launch.writableRoots};
+  }
+
+  tool(
+    server,
+    "mission_process_start",
+    "Start one exact process declared by ID in the locally human-signed Mission. The executable, arguments, cwd, and sandbox requirements come only from the signed policy; no arbitrary command string is accepted. Native tool sandbox verification remains the caller's responsibility.",
+    {permission_id:z.string().min(1).max(100)},
+    {
+      title:"Start Approved Mission Process",
+      readOnlyHint:false,destructiveHint:true,
+      idempotentHint:false,openWorldHint:true,
+    },
+    async ({permission_id})=>launchApprovedMissionProcess(permission_id),
+  );
+
   tool(
     server,
     "mission_codex_resume",
-    "Resume one human-approved Codex thread in a macOS Seatbelt sandbox with restricted writes. This tool has no arbitrary shell argument and cannot modify production models.",
+    "Compatibility adapter: resume only a thread covered by a matching, locally signed Mission execution permission. No hardcoded thread or executable.",
     {
-      cwd: z.string().min(1),
-      thread_id: z.string().uuid(),
-      instruction_file: z.string().min(1),
+      cwd:z.string().min(1),
+      thread_id:z.string().uuid(),
+      instruction_file:z.string().min(1),
     },
     {
-      title: "Resume Scoped Codex",
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: false,
-      openWorldHint: true,
+      title:"Resume Scoped Codex",
+      readOnlyHint:false,destructiveHint:true,
+      idempotentHint:false,openWorldHint:true,
     },
-    async (args) => {
-      const context = currentMcpRequestContext();
-      const owner = context.plannerContinuation?.get?.(context.runtimeSessionId);
-      const launch = compileApprovedCodexResume(owner, args);
-      const found = primitiveResult(await invoke("primitive.call", {
-        primitive: "process.manage", op: "list", args: {},
-      }));
-      const processes = Array.isArray(found) ? found : found?.processes || [];
-      if (processes.some(p=>p.running && typeof p.command==="string" &&
-          p.command.includes("/usr/bin/sandbox-exec") &&
-          p.command.includes(launch.threadId) && p.cwd===launch.cwd)) {
-        const error=new Error("This Codex thread is already running under this isolated worktree.");
-        error.code="MISSION_CODEX_ALREADY_RUNNING";
-        throw error;
-      }
-      const {command,cwd,workspace_mode}=launch;
-      const started=primitiveResult(await invoke("primitive.call",{
-        primitive:"process.manage",op:"start",args:{command,cwd,workspace_mode},
-      }));
-      return {...started,missionScoped:true,
-        sandbox:"macos-seatbelt-deny-default",
-        allowedArtWrites:launch.sandbox.writeDir,threadId:launch.threadId};
+    async (args)=>{
+      const context=currentMcpRequestContext();
+      const owner=context.plannerContinuation?.get?.(context.runtimeSessionId);
+      const launch=compileApprovedCodexResume(owner,args);
+      return launchApprovedMissionProcess(launch.permissionId);
     },
   );
 
@@ -3385,6 +3405,26 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
         allowed_repositories: z.array(z.string().min(1).max(240)).max(12).optional(),
         prohibited_changes: z.array(z.string().min(1).max(600)).max(20).optional(),
         acceptance_criteria: z.array(z.string().min(1).max(600)).max(20).optional(),
+        // Process grants are planner-proposed and become effective only after
+        // the exact executable/argv/cwd/write roots are signed by the user.
+        execution_permissions: z.array(z.object({
+          id:z.string().regex(/^[\w.-]{1,100}$/),
+          executable:z.string().min(1).max(1200),
+          cwd:z.string().min(1).max(1200),
+          argv:z.array(z.string().min(1).max(2048)).min(1).max(64),
+          workspace_mode:z.enum(["read","write"]),
+          writable_roots:z.array(z.string().min(1).max(1200)).max(12),
+          sandbox:z.object({
+            type:z.literal("tool-native"),
+            required_argv_segments:z.array(
+              z.array(z.string().min(1).max(2048)).min(1).max(8)
+            ).min(1).max(12),
+          }),
+          compatibility:z.object({
+            thread_id:z.string().min(1).max(1200),
+            instruction_file:z.string().min(1).max(1200),
+          }).optional(),
+        })).max(8).optional(),
       }).optional(),
       label: z.string().min(1).max(120).optional(),
       client_kind: z.enum([
@@ -3437,6 +3477,17 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
               allowedRepositories: mission_contract.allowed_repositories,
               prohibitedChanges: mission_contract.prohibited_changes,
               acceptanceCriteria: mission_contract.acceptance_criteria,
+              ...(mission_contract.execution_permissions!==undefined?
+                {executionPermissions:mission_contract.execution_permissions.map(grant=>({
+                  id:grant.id,executable:grant.executable,cwd:grant.cwd,
+                  argv:grant.argv,workspaceMode:grant.workspace_mode,
+                  writableRoots:grant.writable_roots,
+                  sandbox:{type:grant.sandbox.type,
+                    requiredArgvSegments:grant.sandbox.required_argv_segments},
+                  ...(grant.compatibility?{compatibility:{
+                    threadId:grant.compatibility.thread_id,
+                    instructionFile:grant.compatibility.instruction_file}}:{})
+                }))}:{}),
             } } : {}),
             label: label ?? null,
             clientKind,

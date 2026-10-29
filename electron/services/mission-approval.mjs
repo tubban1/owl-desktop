@@ -1,8 +1,10 @@
 /** Canonical, domain-separated Desktop human consent for a single OWL mission. */
 import fs from "node:fs";
 import path from "node:path";
-import { compileApprovedCodexResume } from "../../mcp/mission-codex-execution.mjs";
+import {compileApprovedMissionProcess, compileApprovedCodexResume}
+  from "../../mcp/mission-execution-policy.mjs";
 import { createHash, createPublicKey, verify } from "node:crypto";
+import toolPathPolicy from "../../mcp/config/mission-tool-paths.json" with {type:"json"};
 
 export function missionApprovalScope(owner) {
   const mission = owner?.workstream?.missionContract;
@@ -15,6 +17,11 @@ export function missionApprovalScope(owner) {
     allowedRepositories: mission.allowedRepositories ?? [],
     prohibitedChanges: mission.prohibitedChanges ?? [],
     acceptanceCriteria: mission.acceptanceCriteria ?? [],
+    // Add explicit grants only when present: preserves legacy mission
+    // signatures but never silently upgrades their execution authority.
+    ...(mission.executionPermissions?.length
+      ? {executionPermissions:mission.executionPermissions}
+      : {}),
     // Never bind to an arbitrary caller-supplied path at execution time.
     workspaceRoot: typeof root === "string" ? path.resolve(root) : null,
   };
@@ -85,41 +92,50 @@ export function assertMissionAction(owner, signerRecordFile, toolName, args, pub
     err.code = "MISSION_APPROVAL_REQUIRED";
     throw err;
   }
-  // Backward-compatible bridge for MCP clients with stale tool lists.
-  // An exact, signed, OS-sandboxed Codex command is permitted; all other
-  // start_process/execute_command shell strings remain blocked.
-  if (toolName === "start_process" && args?.workspace_mode === "write" &&
-      typeof args.command === "string" && typeof args.cwd === "string") {
-    const match = args.command.match(/\bexec resume --json '([0-9a-f-]{36})' /i);
-    if (match) {
-      try {
-        const expected = compileApprovedCodexResume(owner, {
-          cwd: args.cwd, thread_id: match[1],
-          instruction_file: path.join(status.scope.workspaceRoot,
-            ".tmp/botanical32-quality/art-directed/reports/CODEX_R3_ART_REWORK_ORDER_20261029.md"),
-        });
-        if (args.command === expected.command && args.cwd === expected.cwd) return;
-      } catch { /* Invalid command is never authorized. */ }
-    }
+  const executableGrants = c.executionPermissions ?? [];
+  // A signed exact-command grant may be used via the cached start_process
+  // client. Any changed command byte, cwd or mode fails closed.
+  if(toolName==="start_process" && executableGrants.length){
+    const matched=executableGrants.some(grant=>{
+      try{
+        const compiled=compileApprovedMissionProcess(owner,{permission_id:grant.id});
+        return args?.command===compiled.command &&
+          args?.cwd===compiled.cwd &&
+          args?.workspace_mode===compiled.workspace_mode;
+      }catch{return false;}
+    });
+    if(matched)return;
   }
-  const root = status.scope.workspaceRoot;
-  const confined = {
-    mission_codex_resume: [args.cwd, args.instruction_file],
-    write_file: [args.path],
-    edit_file: [args.path],
-    batch_edit_files: (args.edits ?? []).map(x => x.path),
-    create_directory: [args.path],
-    git_add: [args.cwd, ...(args.paths ?? []).map(x => path.resolve(args.cwd, x))],
-    git_commit: [args.cwd],
-    git_pull: [args.cwd],
-    git_push: [args.cwd],
-  };
-  if (!Object.hasOwn(confined, toolName)) {
-    const err = new Error("MISSION_OPAQUE_ACTION_BLOCKED: action effects cannot be verified as inside the approved mission. Use structured tools or obtain separate execution authority.");
-    err.code = "MISSION_OPAQUE_ACTION_BLOCKED";
+  if(toolName==="mission_process_start"){
+    compileApprovedMissionProcess(owner,{permission_id:args?.permission_id});
+    return;
+  }
+  if(toolName==="mission_codex_resume"){
+    compileApprovedCodexResume(owner,args);
+    return;
+  }
+  // Structured path effects are declared in a separate versioned policy
+  // manifest, not as repo/tool-specific grants inside executable code.
+  const rules=toolPathPolicy.pathTargets?.[toolName];
+  if(!Array.isArray(rules)||rules.length===0){
+    const err=new Error("MISSION_OPAQUE_ACTION_BLOCKED: no signed execution grant or path-scoped tool policy.");
+    err.code="MISSION_OPAQUE_ACTION_BLOCKED";
     throw err;
   }
-  const targets = confined[toolName];
+  const select=(value,steps)=>{
+    if(!steps.length)return [value];
+    const [key,...rest]=steps;
+    if(key==="*")
+      return Array.isArray(value)?value.flatMap(x=>select(x,rest)):[];
+    return value&&typeof value==="object"?select(value[key],rest):[];
+  };
+  const targets=rules.flatMap(selector=>{
+    const [expression,base]=selector.split("@");
+    return select(args,expression.split("."))
+      .map(value=>base==="cwd"&&typeof value==="string"&&typeof args?.cwd==="string"
+        ? path.resolve(args.cwd,value):value);
+  });
+  const root = status.scope.workspaceRoot;
   if (targets.length === 0 || targets.some(t => !withinMissionRoot(root, t))) {
     const err = new Error("MISSION_SCOPE_VIOLATION: action targets exceed the Desktop-confirmed workspace root.");
     err.code = "MISSION_SCOPE_VIOLATION";

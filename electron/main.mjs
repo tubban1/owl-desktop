@@ -1911,6 +1911,16 @@ function registerIpc() {
       "Prohibited changes: " + (scope.prohibitedChanges.join("; ") || "(none specified)"),
       "Acceptance: " + (scope.acceptanceCriteria.join("; ") || "(not specified)"),
       "",
+      "Process execution permissions: " + (scope.executionPermissions?.length??0),
+      ...(scope.executionPermissions??[]).flatMap(grant=>[
+        "Grant: "+grant.id,
+        "Executable: "+grant.executable,
+        "Working directory: "+grant.cwd,
+        "Exact argv: "+JSON.stringify(grant.argv),
+        "Writable roots declared: "+(grant.writableRoots.join("; ")||"(none)"),
+        "Sandbox: "+grant.sandbox.type+" (tool-owned; kernel containment NOT verified)",
+      ]),
+      "",
       "Reject if these are not exactly what you requested."
     ].join("\n");
     const {response} = await dialog.showMessageBox(mainWindow ?? undefined,{

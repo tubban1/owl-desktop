@@ -1,123 +1,155 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {spawnSync} from "node:child_process";
 import {generateKeyPairSync,sign} from "node:crypto";
-import {assertMissionAction,missionApprovalScope,missionApprovalDigest,missionApprovalMessage} from "../electron/services/mission-approval.mjs";
 import {afterEach,describe,it,expect} from "vitest";
-import {compileApprovedCodexResume} from "../mcp/mission-codex-execution.mjs";
+import {PlannerContinuationStore} from "../electron/services/planner-continuation-store.mjs";
+import {compileApprovedMissionProcess,compileApprovedCodexResume} from "../mcp/mission-execution-policy.mjs";
+import {missionApprovalScope,missionApprovalMessage,missionApprovalStatus,assertMissionAction} from "../electron/services/mission-approval.mjs";
 
-const cleanup=[];
-afterEach(()=>{while(cleanup.length)fs.rmSync(cleanup.pop(),{recursive:true,force:true})});
+const roots=[];
+afterEach(()=>{while(roots.length)fs.rmSync(roots.pop(),{recursive:true,force:true})});
+
 function fixture() {
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"owl-mission-codex-"));
-  cleanup.push(dir);
-  const root=path.join(dir,"project",".tmp","botanical32-assessment-20261028","worktree");
-  const home=path.join(dir,"home");
-  const art=path.join(root,".tmp/botanical32-quality/art-directed");
-  const out=path.join(art,"r3");
-  const report=path.join(art,"reports");
-  const bin=path.join(home,".codex/plugins/.plugin-appserver/codex-cli/bin/codex");
-  for(const p of [path.dirname(bin),path.join(home,".codex/sessions"),path.join(home,".codex/log"),out,path.join(out,".codex-tmp"),report,path.join(root,"public/models")])fs.mkdirSync(p,{recursive:true});
-  fs.writeFileSync(bin,"#!/bin/sh\n# test program, no user Codex\n"+
-    'echo allowed > "$PWD/.tmp/botanical32-quality/art-directed/r3/new.txt"\n'+
-    'echo shouldfail > "$PWD/public/models/production.glb" 2>/dev/null\n'+
-    'echo shouldfail > "$PWD/.tmp/botanical32-quality/art-directed/reports/historical.md" 2>/dev/null\n'+
-    'ln -s "$PWD/public/models" "$PWD/.tmp/botanical32-quality/art-directed/r3/unsafe" 2>/dev/null || true\n'+
-    'echo shouldfail > "$PWD/.tmp/botanical32-quality/art-directed/r3/unsafe/escape.glb" 2>/dev/null\n'+
-    "exit 0\n");
-  fs.chmodSync(bin,0o700);
-  fs.writeFileSync(path.join(home,".codex","installation_id"),"fixture-installation-id");
-  fs.writeFileSync(path.join(report,"historical.md"),"HISTORICAL");
-  const prompt=path.join(report,"CODEX_R3_ART_REWORK_ORDER_20261029.md");
-  fs.writeFileSync(prompt,"No edits to production; Garden Rose art R3.");
-  return {
-    root,home,art,out,prompt,bin,dir,
-    owner:{checkpoint:{workspace:{worktree:root}},workstream:{missionContract:{
-      originalGoal:"Finish Bloomroom botanical32 art-directed QA",
-      prohibitedChanges:["No writes outside .tmp/botanical32-quality/art-directed",
-        "No edits of public/models or production GLBs"],
-    }}},
-    args:{cwd:root,thread_id:"01a184da-0ca6-7d83-b596-0ca602d17b3d",instruction_file:prompt},
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),"owl-signed-execution-"));
+  roots.push(tmp);
+  const root=path.join(tmp,"workspace"),out=path.join(root,"reviewable-art");
+  const report=path.join(root,"reports","instructions.md"),bin=path.join(tmp,"tools","cli");
+  fs.mkdirSync(out,{recursive:true});fs.mkdirSync(path.dirname(report),{recursive:true});
+  fs.mkdirSync(path.dirname(bin),{recursive:true});
+  fs.writeFileSync(report,"Test instructions, not executable.");
+  fs.writeFileSync(bin,"#!/bin/sh\nexit 0\n");fs.chmodSync(bin,0o700);
+  const thread="6dc4bb2c-fb21-4609-a0a6-56b0d73f3dd6";
+  const args=["--sandbox","workspace-write","-C",out,"exec","resume","--json",thread,"Read the signed instructions."];
+  const grant={
+    id:"writer-art-1",
+    executable:bin,cwd:out,argv:args,workspaceMode:"write",
+    writableRoots:[out],
+    sandbox:{type:"tool-native",requiredArgvSegments:[["--sandbox","workspace-write"],["-C",out]]},
+    compatibility:{threadId:thread,instructionFile:report},
   };
+  const store=new PlannerContinuationStore({file:path.join(tmp,"planner-continuation.json")});
+  const opened=store.openWorkstream({
+    goal:"Repair the existing 3D art in an isolated workspace",
+    workspace:{repo:"workspace",worktree:root},
+    missionContract:{
+      allowedRepositories:["workspace"],
+      prohibitedChanges:["No production writes"],
+      acceptanceCriteria:["Existing art sources remain identical"],
+      executionPermissions:[grant],
+    },
+  });
+  const {privateKey,publicKey}=generateKeyPairSync("ed25519");
+  const signer=path.join(tmp,"human-approval-signer.json");
+  fs.writeFileSync(signer,JSON.stringify({
+    publicKeyB64:publicKey.export({format:"der",type:"spki"}).toString("base64")}));
+  const approve=()=>{
+    const current=store.get(opened.ownerId);
+    const scope=missionApprovalScope(current);
+    const signed=sign(null,Buffer.from(missionApprovalMessage(scope)),privateKey).toString("base64");
+    store.attachMissionApproval(opened.ownerId,signed);
+    return store.get(opened.ownerId);
+  };
+  return {tmp,root,out,report,bin,thread,grant,store,owner:store.get(opened.ownerId),signer,approve};
 }
-const runOptions=f=>({userHome:f.home,codexBin:f.bin,platform:"darwin",sandboxExecutable:process.platform==="darwin"?"/usr/bin/sandbox-exec":"/bin/echo"});
 
-describe("Mission-scoped, non-shell Codex continuation",()=>{
-  it("rejects unaudited scope, forged paths and arbitrary instructions",()=>{
+describe("Dynamically signed Mission process permissions",()=>{
+  it("persists executable, args, writable roots and confinement inside immutable signed scope",()=>{
     const f=fixture();
-    const valid=compileApprovedCodexResume(f.owner,f.args,runOptions(f));
-    expect(valid.sandbox.writeDir).toBe(fs.realpathSync(f.out));
-    expect(valid.command).toContain(runOptions(f).sandboxExecutable);
-    expect(valid.sandbox.policy).toContain("(deny default)");
-    expect(valid.sandbox.policy).toContain("(allow sysctl-read)");
-    expect(valid.sandbox.policy).toContain('(allow file-write* (literal "'+path.join(fs.realpathSync(f.home),'.codex','installation_id')+'"))');
-    expect(valid.sandbox.policy).not.toContain('(allow file-write* (subpath "'+path.join(f.home,'.codex')+'"))');
-    expect(valid.sandbox.policy).not.toContain("file-write* (subpath "+JSON.stringify(f.root)+")");
-    expect(()=>compileApprovedCodexResume({checkpoint:f.owner.checkpoint,workstream:{missionContract:{originalGoal:"other project"}}},f.args,runOptions(f))).toThrow("MISSION_CODEX_PROFILE_NOT_AUTHORIZED");
-    expect(()=>compileApprovedCodexResume(f.owner,{...f.args,thread_id:"id;rm -rf /"},runOptions(f))).toThrow("MISSION_CODEX_THREAD_INVALID");
-    const outsider=path.join(f.dir,"outsider.md");
-    fs.writeFileSync(outsider,"No edits to production; Garden Rose art R3");
-    expect(()=>compileApprovedCodexResume(f.owner,{...f.args,instruction_file:outsider},runOptions(f))).toThrow("MISSION_CODEX_INSTRUCTION_OUTSIDE_SCOPE");
-    expect(()=>compileApprovedCodexResume(f.owner,{...f.args,cwd:path.dirname(f.root)},runOptions(f))).toThrow("MISSION_CODEX_WORKTREE_MISMATCH");
+    expect(f.owner.workstream.missionContract.executionPermissions).toEqual([f.grant]);
+    expect(missionApprovalStatus(f.owner,f.signer).approved).toBe(false);
+    expect(()=>assertMissionAction(f.owner,f.signer,"mission_process_start",
+      {permission_id:f.grant.id})).toThrow("MISSION_APPROVAL_REQUIRED");
+    const approved=f.approve();
+    expect(missionApprovalStatus(approved,f.signer).approved).toBe(true);
+    const scope=missionApprovalScope(approved);
+    expect(scope.executionPermissions?.[0]).toEqual(f.grant);
+    const restored=new PlannerContinuationStore({file:f.store.file}).get(approved.ownerId);
+    expect(missionApprovalStatus(restored,f.signer).approved).toBe(true);
   });
-  it.skipIf(process.platform!=="darwin")("permits only the exact signed sandbox command via existing start_process",()=>{
-    const f=fixture();
-    f.owner.workstream.workstreamId="owl-workstream:demo";
-    f.owner.workstream.missionContract.allowedRepositories=["worktree"];
-    const {privateKey,publicKey}=generateKeyPairSync("ed25519");
-    const signer=path.join(f.dir,"human-approval-signer.json");
-    fs.writeFileSync(signer,JSON.stringify({publicKeyB64:publicKey.export({format:"der",type:"spki"}).toString("base64")}));
-    const scope=missionApprovalScope(f.owner);
-    f.owner.workstream.missionContract.approval={
-      digest:missionApprovalDigest(scope),
-      signature:sign(null,Buffer.from(missionApprovalMessage(scope)),privateKey).toString("base64"),
+
+  it("allows only signed exact process invocation and denies altered executable, argv, mode and cwd",()=>{
+    const f=fixture(),owner=f.approve();
+    const x=compileApprovedMissionProcess(owner,{permission_id:f.grant.id});
+    expect(x.executable).toBe(fs.realpathSync(f.bin));
+    expect(x.cwd).toBe(fs.realpathSync(f.out));
+    expect(x.writableRoots).toEqual([fs.realpathSync(f.out)]);
+    expect(x.command).toContain("'--sandbox' 'workspace-write'");
+    expect(x.sandboxType).toBe("tool-native");
+    const allowed={command:x.command,cwd:x.cwd,workspace_mode:"write"};
+    expect(()=>assertMissionAction(owner,f.signer,"mission_process_start",
+      {permission_id:f.grant.id})).not.toThrow();
+    expect(()=>assertMissionAction(owner,f.signer,"start_process",allowed)).not.toThrow();
+    for(const args of [
+      {...allowed,command:x.command+" ; echo unknown"},
+      {...allowed,command:x.command.replace("'workspace-write'","'danger-full-access'")},
+      {...allowed,cwd:f.root},
+      {...allowed,workspace_mode:"read"},
+    ]){
+      expect(()=>assertMissionAction(owner,f.signer,"start_process",args))
+        .toThrow("MISSION_OPAQUE_ACTION_BLOCKED");
+    }
+    expect(()=>assertMissionAction(owner,f.signer,"execute_command",
+      {...allowed,command:x.command})).toThrow("MISSION_OPAQUE_ACTION_BLOCKED");
+    expect(()=>compileApprovedMissionProcess(owner,{permission_id:"not-in-signed-contract"}))
+      .toThrow("MISSION_EXEC_PERMISSION_NOT_GRANTED");
+    expect(compileApprovedCodexResume(owner,{
+      cwd:f.out,thread_id:f.thread,instruction_file:f.report,
+    }).command).toBe(x.command);
+  });
+
+  it("rejects symlink workspace escapes and paths or required flags absent from signed grant",()=>{
+    const f=fixture(),owner=f.approve();
+    const altered=(patch)=>{
+      const clone=structuredClone(owner);
+      Object.assign(clone.workstream.missionContract.executionPermissions[0],patch);
+      return clone;
     };
-    // Use the actual fixed user Codex binary in the bridge, never a fake program.
-    const realBin=path.join(os.homedir(),".codex/plugins/.plugin-appserver/codex-cli/bin/codex");
-    if(!fs.existsSync(realBin))return; // Native CLI unavailable on CI macOS.
-    // The compiler must see an authentic, preverified user-home Codex path.
-    const constructed=compileApprovedCodexResume(f.owner,f.args,{userHome:os.homedir()});
-    const allowed={cwd:constructed.cwd,command:constructed.command,workspace_mode:"write"};
-    expect(()=>assertMissionAction(f.owner,signer,"start_process",allowed)).not.toThrow();
-    expect(()=>assertMissionAction(f.owner,signer,"start_process",{...allowed,command:allowed.command+" ; echo unauthorized"})).toThrow("MISSION_OPAQUE_ACTION_BLOCKED");
-    expect(()=>assertMissionAction(f.owner,signer,"execute_command",allowed)).toThrow("MISSION_OPAQUE_ACTION_BLOCKED");
+    expect(()=>compileApprovedMissionProcess(altered({cwd:f.tmp}),{permission_id:f.grant.id}))
+      .toThrow("MISSION_EXEC_WORKSPACE_VIOLATION");
+    expect(()=>compileApprovedMissionProcess(altered({writableRoots:[f.tmp]}),{permission_id:f.grant.id}))
+      .toThrow("MISSION_EXEC_WRITE_SCOPE_VIOLATION");
+    expect(()=>compileApprovedMissionProcess(altered({argv:["exec","resume","--json",f.thread]}),
+      {permission_id:f.grant.id})).toThrow("MISSION_EXEC_SANDBOX_ARGUMENT_MISSING");
+    const link=path.join(f.out,"outside-link");fs.symlinkSync(f.tmp,link);
+    expect(()=>compileApprovedMissionProcess(altered({cwd:link}),{permission_id:f.grant.id}))
+      .toThrow("MISSION_EXEC_WORKSPACE_VIOLATION");
   });
-  it.skipIf(process.platform!=="darwin")("real Rust Codex boots with restricted sysctl-read but no project-write grant",()=>{
-    const bin=path.join(os.homedir(),".codex/plugins/.plugin-appserver/codex-cli/bin/codex");
-    if(!fs.existsSync(bin))return;
+
+  it("changing any process grant invalidates the human approval, including for file writes",()=>{
+    const f=fixture(),owner=f.approve();
+    const state=f.store.read(),grant=state.owners[owner.ownerId].workstream.missionContract.executionPermissions[0];
+    grant.argv[1]="danger-full-access";f.store.write(state);
+    const changed=f.store.get(owner.ownerId);
+    expect(missionApprovalStatus(changed,f.signer).reason).toBe("MISSION_SCOPE_CHANGED");
+    expect(()=>assertMissionAction(changed,f.signer,"start_process",
+      {command:"irrelevant",cwd:f.out,workspace_mode:"write"}))
+      .toThrow("MISSION_APPROVAL_REQUIRED");
+    expect(()=>assertMissionAction(changed,f.signer,"write_file",
+      {path:path.join(f.root,"safe.txt")})).toThrow("MISSION_APPROVAL_REQUIRED");
+  });
+
+  it("legacy signed workstreams gain no execution permissions retroactively",()=>{
     const f=fixture();
-    const launch=compileApprovedCodexResume(f.owner,f.args,{userHome:os.homedir(),codexBin:bin});
-    const started=spawnSync("/usr/bin/sandbox-exec",["-p",launch.sandbox.policy,bin,"--version"],{
-      cwd:f.root,encoding:"utf8",timeout:20_000,
-      env:{...process.env,TMPDIR:path.join(f.out,".codex-tmp")+"/"},
+    const legacy=f.store.openWorkstream({
+      goal:"Review existing files",
+      workspace:{repo:"workspace",worktree:f.root},
+      missionContract:{allowedRepositories:["workspace"]},
     });
-    expect(started.status,"Actual Codex failed to boot: "+started.stderr).toBe(0);
-    expect(started.stdout).toMatch(/codex-cli/);
-    expect(fs.existsSync(path.join(f.root,"public/models/production.glb"))).toBe(false);
+    const owner=f.store.get(legacy.ownerId);
+    expect(Object.hasOwn(missionApprovalScope(owner),"executionPermissions")).toBe(false);
+    expect(()=>compileApprovedMissionProcess(owner,{permission_id:f.grant.id}))
+      .toThrow("MISSION_EXEC_PERMISSION_NOT_GRANTED");
   });
-  it.skipIf(process.platform!=="darwin")("real Codex app-server initializes with installation_id-only write, protected art unchanged",()=>{
-    const bin=path.join(os.homedir(),".codex/plugins/.plugin-appserver/codex-cli/bin/codex");
-    if(!fs.existsSync(bin))return;
+
+  it("fails closed for duplicate grant IDs and invalid planner-supplied entries",()=>{
     const f=fixture();
-    const launch=compileApprovedCodexResume(f.owner,f.args,{userHome:os.homedir(),codexBin:bin});
-    const result=spawnSync("/usr/bin/sandbox-exec",[
-      "-p",launch.sandbox.policy,bin,"exec","resume","--json",
-      "00000000-0000-0000-0000-000000000000","diagnostic only",
-    ],{cwd:f.root,encoding:"utf8",timeout:20_000,
-      env:{...process.env,TMPDIR:path.join(f.out,".codex-tmp")+"/"}});
-    expect(result.stderr).not.toContain("failed to initialize in-process app-server client");
-    expect(result.stderr).toContain("Not inside a trusted directory");
-    expect(fs.existsSync(path.join(f.root,"public/models/production.glb"))).toBe(false);
-  });
-  it.skipIf(process.platform!=="darwin")("macOS kernel denies production/historical writes and symlink escape",()=>{
-    const f=fixture();
-    const launch=compileApprovedCodexResume(f.owner,f.args,runOptions(f));
-    const proc=spawnSync("/bin/sh",["-c",launch.command],{cwd:f.root,encoding:"utf8",timeout:20_000});
-    expect(proc.status,proc.stderr).toBe(0);
-    expect(fs.readFileSync(path.join(f.out,"new.txt"),"utf8")).toBe("allowed\n");
-    expect(fs.existsSync(path.join(f.root,"public/models/production.glb"))).toBe(false);
-    expect(fs.readFileSync(path.join(f.art,"reports/historical.md"),"utf8")).toBe("HISTORICAL");
-    expect(fs.existsSync(path.join(f.root,"public/models/escape.glb"))).toBe(false);
+    const opts={goal:"Another mission",workspace:{repo:"workspace",worktree:f.root}};
+    expect(()=>f.store.openWorkstream({...opts,missionContract:{
+      allowedRepositories:["workspace"],executionPermissions:[f.grant,{...f.grant}],
+    }})).toThrow("MISSION_EXEC_PERMISSION_INVALID");
+    expect(()=>f.store.openWorkstream({...opts,missionContract:{
+      allowedRepositories:["workspace"],executionPermissions:[{...f.grant,id:"unsafe;echo"}],
+    }})).toThrow("MISSION_EXEC_PERMISSION_INVALID");
   });
 });

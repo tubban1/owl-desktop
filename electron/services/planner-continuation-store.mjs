@@ -51,6 +51,47 @@ function compactStringList(value, maxItems = 20, maxChars = 600) {
     .map((item) => item.trim().slice(0, maxChars));
 }
 
+function compactExecutionPermissions(value) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 8)
+    throw Object.assign(new Error("MISSION_EXEC_PERMISSIONS_INVALID"), {code:"MISSION_EXEC_PERMISSIONS_INVALID"});
+  const ids=new Set();
+  return value.map(grant => {
+    const required=["id","executable","cwd","argv","workspaceMode","writableRoots","sandbox"];
+    if(!grant||typeof grant!=="object"||
+       required.some(key=>!Object.hasOwn(grant,key))||
+       !/^[\w.-]{1,100}$/.test(grant.id)||ids.has(grant.id)||
+       !["read","write"].includes(grant.workspaceMode)||
+       ![grant.executable,grant.cwd].every(v=>typeof v==="string"&&v.length>0&&v.length<=1200)||
+       !Array.isArray(grant.argv)||!grant.argv.length||grant.argv.length>64||
+       !grant.argv.every(v=>typeof v==="string"&&v.length>0&&v.length<=2048)||
+       !Array.isArray(grant.writableRoots)||grant.writableRoots.length>12||
+       !grant.writableRoots.every(v=>typeof v==="string"&&v.length>0&&v.length<=1200)||
+       grant.sandbox?.type!=="tool-native"||
+       !Array.isArray(grant.sandbox?.requiredArgvSegments)||
+       !grant.sandbox.requiredArgvSegments.length||
+       grant.sandbox.requiredArgvSegments.length>12||
+       !grant.sandbox.requiredArgvSegments.every(group=>Array.isArray(group)&&group.length>0&&group.length<=8&&group.every(v=>typeof v==="string"&&v.length>0&&v.length<=2048)))
+      throw Object.assign(new Error("MISSION_EXEC_PERMISSION_INVALID"), {code:"MISSION_EXEC_PERMISSION_INVALID"});
+    ids.add(grant.id);
+    const compatibility=grant.compatibility;
+    if (compatibility!==undefined &&
+        (!compatibility||typeof compatibility!=="object"||
+         ![compatibility.threadId,compatibility.instructionFile].every(v=>typeof v==="string"&&v.length>0&&v.length<=1200)))
+      throw Object.assign(new Error("MISSION_EXEC_COMPATIBILITY_INVALID"), {code:"MISSION_EXEC_COMPATIBILITY_INVALID"});
+    return {
+      id:grant.id,executable:grant.executable,cwd:grant.cwd,
+      argv:[...grant.argv],workspaceMode:grant.workspaceMode,
+      writableRoots:[...grant.writableRoots],
+      sandbox:{type:grant.sandbox.type,
+        requiredArgvSegments:grant.sandbox.requiredArgvSegments.map(group=>[...group])},
+      ...(compatibility?{compatibility:{
+        threadId:compatibility.threadId,
+        instructionFile:compatibility.instructionFile}}:{}),
+    };
+  });
+}
+
 function missionContract(input, now) {
   return {
     version: 1,
@@ -61,6 +102,11 @@ function missionContract(input, now) {
     allowedRepositories: compactStringList(input.missionContract?.allowedRepositories, 12, 240),
     prohibitedChanges: compactStringList(input.missionContract?.prohibitedChanges),
     acceptanceCriteria: compactStringList(input.missionContract?.acceptanceCriteria),
+    // Exact execution grants are planner asserted until signed locally by the user.
+    // No execution rights are inferred from repository access or prose.
+    ...(input.missionContract?.executionPermissions !== undefined
+      ? {executionPermissions:compactExecutionPermissions(input.missionContract.executionPermissions)}
+      : {}),
     createdAt: now,
   };
 }
