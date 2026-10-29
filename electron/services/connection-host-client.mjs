@@ -152,6 +152,23 @@ export class ConnectionHostClient {
     });
   }
 
+  missionReviews(options = {}) {
+    return this.request("/missions/reviews", { ...options, timeoutMs: options.timeoutMs ?? 5_000 });
+  }
+
+  missionReview(workstreamId, options = {}) {
+    return this.request("/missions/reviews/" + encodeURIComponent(workstreamId), {
+      ...options, timeoutMs: options.timeoutMs ?? 5_000,
+    });
+  }
+
+  approveMission(workstreamId, { digest, signature }, options = {}) {
+    return this.request("/missions/reviews/" + encodeURIComponent(workstreamId) + "/approve", {
+      method: "POST", body: { digest, signature },
+      ...options, timeoutMs: options.timeoutMs ?? 5_000,
+    });
+  }
+
   wakeRecheck(options = {}) {
     return this.request("/connectivity/wake-recheck", {
       method: "POST",
