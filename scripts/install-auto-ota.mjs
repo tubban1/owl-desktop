@@ -25,7 +25,8 @@ const copies=[
  ["scripts/lib/device-version-state.mjs","lib/device-version-state.mjs"],
  ...(process.platform==="darwin"?[["scripts/mac-safe-cutover.mjs","mac-safe-cutover.mjs"]]:
  [["scripts/windows/verified-dev-cutover.ps1","windows/verified-dev-cutover.ps1"],
-  ["scripts/windows/ota-post-activation-watch.ps1","windows/ota-post-activation-watch.ps1"]])
+  ["scripts/windows/ota-post-activation-watch.ps1","windows/ota-post-activation-watch.ps1"],
+  ["scripts/windows/hidden-scheduled-task.vbs","windows/hidden-scheduled-task.vbs"]])
 ];
 for(const [source,dest] of copies){
  const target=path.join(stable,dest);
@@ -59,13 +60,16 @@ if(process.platform==="darwin"){
   run("/bin/launchctl",["bootstrap",domain,target]);
  }
 }else if(process.platform==="win32"){
- const node=process.execPath.replaceAll('"',"");
- for(const [name,mode,minutes,script] of [
-  ["OWL-LAB-OTA-Heartbeat","heartbeat",1,task],
-  ["OWL-LAB-OTA-Promote","tick",10,task],
-  ["OWL-LAB-OTA-PostActivation-Watch","",1,path.join(stable,"windows","ota-post-activation-watch.ps1")]]){
-  const action=mode?'"'+node+'" "'+script.replaceAll('"',"")+'" '+mode:
-   'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "'+script.replaceAll('"',"")+'"';
+ // Windows Task Scheduler runs node/powershell in the interactive desktop
+ // and may flash a visible console. WScript hides the full child process
+ // tree while waiting, preserving Task Scheduler's real exit/result code.
+ const wrapper=path.join(stable,"windows","hidden-scheduled-task.vbs");
+ const host=path.join(process.env.SystemRoot||"C:/Windows","System32","wscript.exe");
+ for(const [name,mode,minutes] of [
+  ["OWL-LAB-OTA-Heartbeat","heartbeat",1],
+  ["OWL-LAB-OTA-Promote","promote",10],
+  ["OWL-LAB-OTA-PostActivation-Watch","watch",1]]){
+  const action='"'+host+'" //B //Nologo "'+wrapper+'" '+mode;
   run("schtasks.exe",["/Create","/SC","MINUTE","/MO",String(minutes),"/TN",name,"/TR",action,"/F"]);
  }
 }else throw Error("OTA_INSTALL_UNSUPPORTED_PLATFORM");

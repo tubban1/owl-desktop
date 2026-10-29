@@ -191,10 +191,13 @@ function applyWindows(oldRoot,newRoot,oldSha,newSha){
  if(!fs.existsSync(script))throw Error("ROLL_WIN_GUARD_NOT_INSTALLED");
  const name="OWL-LAB-Rollout-"+newSha.slice(0,12);
  const q=s=>"'"+s.replaceAll("'","''")+"'";
- const line=`-NoProfile -ExecutionPolicy Bypass -File "${script}" -Mode Cutover -OldRoot "${oldRoot}" -NewRoot "${newRoot}" -ExpectedOldSha ${oldSha} -ExpectedNewSha ${newSha}`;
+ const wrapper=path.join(agent,"windows","hidden-scheduled-task.vbs");
+ if(!fs.existsSync(wrapper))throw Error("ROLL_WIN_HEADLESS_LAUNCHER_MISSING");
+ const host=path.join(process.env.SystemRoot||"C:/Windows","System32","wscript.exe");
+ const line=`//B //Nologo "${wrapper}" cutover "${oldRoot}" "${newRoot}" ${oldSha} ${newSha}`;
  const ps='$ErrorActionPreference="Stop";$n='+q(name)+
   ';if(Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue){throw "TASK_EXISTS"};'+
-  '$a=New-ScheduledTaskAction -Execute "powershell.exe" -Argument '+q(line)+
+  '$a=New-ScheduledTaskAction -Execute '+q(host)+' -Argument '+q(line)+
   ' -WorkingDirectory '+q(path.dirname(script))+';'+
   '$t=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(9);'+
   '$p=New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited;'+

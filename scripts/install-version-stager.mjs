@@ -51,8 +51,12 @@ if(process.platform==="darwin"){
   scheduledService:id,source,liveProcessesTouched:false,installation:dest})+"\n");
 }else if(process.platform==="win32"){
  const taskName="OWL-LAB-Version-Stager";
- // Fixed argument vocabulary and quoted paths; run only in the logged-in user's context.
- const command='"'+process.execPath.replace(/"/g,"")+'" "'+script.replace(/"/g,"")+'" stage';
+ // Install a GUI-subsystem WScript wrapper, not a console node.exe action.
+ const wrapper=path.join(agent,"windows","hidden-scheduled-task.vbs");
+ fs.mkdirSync(path.dirname(wrapper),{recursive:true});
+ fs.copyFileSync(path.join(project,"scripts","windows","hidden-scheduled-task.vbs"),wrapper);
+ const host=path.join(process.env.SystemRoot||"C:/Windows","System32","wscript.exe");
+ const command='"'+host+'" //B //Nologo "'+wrapper+'" stage';
  run("schtasks.exe",["/Create","/SC","MINUTE","/MO","30","/TN",taskName,
   "/TR",command,"/F"]);
  process.stdout.write(JSON.stringify({installed:true,platform:"windows",frequencyMinutes:30,
