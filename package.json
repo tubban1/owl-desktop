@@ -59,7 +59,8 @@
     "prepare:runtime-node": "node scripts/prepare-runtime-node-component.mjs",
     "dev:full:status": "node scripts/dev-full-control.mjs status",
     "dev:full:stop": "node scripts/dev-full-control.mjs stop",
-    "verify:windows:dev": "node scripts/windows/verify-dev-qa.mjs"
+    "verify:windows:dev": "node scripts/windows/verify-dev-qa.mjs",
+    "verify:agent-browser-parity": "node scripts/verify-agent-browser-parity.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.31.0",
