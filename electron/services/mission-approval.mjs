@@ -86,6 +86,7 @@ export function assertMissionAction(owner, signerRecordFile, toolName, args, pub
   }
   const root = status.scope.workspaceRoot;
   const confined = {
+    mission_codex_resume: [args.cwd, args.instruction_file],
     write_file: [args.path],
     edit_file: [args.path],
     batch_edit_files: (args.edits ?? []).map(x => x.path),

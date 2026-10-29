@@ -9,6 +9,7 @@ import { z } from "zod";
 import { RuntimeHttpClient } from "../electron/runtime-http-client.mjs";
 import { currentMcpRequestContext } from "./request-context.mjs";
 import { assertMissionAction } from "../electron/services/mission-approval.mjs";
+import { compileApprovedCodexResume } from "./mission-codex-execution.mjs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {versionSnapshot} from "../scripts/lib/version-sync.mjs";
@@ -2722,6 +2723,47 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       op: "start",
       args,
     })),
+  );
+
+  tool(
+    server,
+    "mission_codex_resume",
+    "Resume one human-approved Codex thread in a macOS Seatbelt sandbox with restricted writes. This tool has no arbitrary shell argument and cannot modify production models.",
+    {
+      cwd: z.string().min(1),
+      thread_id: z.string().uuid(),
+      instruction_file: z.string().min(1),
+    },
+    {
+      title: "Resume Scoped Codex",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    async (args) => {
+      const context = currentMcpRequestContext();
+      const owner = context.plannerContinuation?.get?.(context.runtimeSessionId);
+      const launch = compileApprovedCodexResume(owner, args);
+      const found = primitiveResult(await invoke("primitive.call", {
+        primitive: "process.manage", op: "list", args: {},
+      }));
+      const processes = Array.isArray(found) ? found : found?.processes || [];
+      if (processes.some(p=>p.running && typeof p.command==="string" &&
+          p.command.includes("/usr/bin/sandbox-exec") &&
+          p.command.includes(launch.threadId) && p.cwd===launch.cwd)) {
+        const error=new Error("This Codex thread is already running under this isolated worktree.");
+        error.code="MISSION_CODEX_ALREADY_RUNNING";
+        throw error;
+      }
+      const {command,cwd,workspace_mode}=launch;
+      const started=primitiveResult(await invoke("primitive.call",{
+        primitive:"process.manage",op:"start",args:{command,cwd,workspace_mode},
+      }));
+      return {...started,missionScoped:true,
+        sandbox:"macos-seatbelt-deny-default",
+        allowedArtWrites:launch.sandbox.writeDir,threadId:launch.threadId};
+    },
   );
 
   tool(
