@@ -39,7 +39,7 @@ function fakeChrome(initial=[]){
       onEvent,
       attach:async()=>{},
       detach:async()=>{},
-      sendCommand:async(_target,method)=>{events.push(["debugger",method]);return {};}
+      sendCommand:async(_target,method,params)=>{events.push(["debugger",method,params]);return {};}
     }
   };
   return {chrome,tabMap,events,focusEvents};
@@ -106,9 +106,33 @@ describe("Agent Browser foreground control and exact-URL tab reuse",()=>{
       systemMouseUsed:false});
     expect(c.events.some(v=>v[0]==="debugger"&&v[1]==="Input.dispatchMouseEvent")).toBe(true);
     expect(c.focusEvents).toHaveLength(0);
+    // Active Agent tab works without simulated focus and without stealing it.
+    expect(c.events.some(v=>v[1]==="Emulation.setFocusEmulationEnabled")).toBe(false);
     c.tabMap.get(31).active=false;
-    expect((await agent.run({owner:"agent-A",op:"cursor_click",
-      args:{uid:"owl-agent-3"}})).clicked).toBe(true);
+    const background=await agent.run({owner:"agent-A",op:"cursor_click",
+      args:{uid:"owl-agent-3"}});
+    expect(background).toMatchObject({clicked:true,virtualFocusEmulated:true,
+      foregroundUnchanged:true,osPointerMoved:false});
+    const emulation=c.events.filter(v=>v[1]==="Emulation.setFocusEmulationEnabled");
+    expect(emulation.map(v=>v[2]?.enabled)).toEqual([true,false]);
+    expect(c.focusEvents).toHaveLength(0);
+  });
+
+  it("restores tab-local focus emulation when background dispatch fails",async()=>{
+    const c=fakeChrome([{id:78,url:target,active:false}]);
+    const agent=createNativeAgentExecutor(c.chrome,c.chrome.storage.session);
+    await agent.run({owner:"agent-A",op:"open",args:{url:target}});
+    const send=c.chrome.debugger.sendCommand;
+    c.chrome.debugger.sendCommand=async(target,method,params)=>{
+      if(method==="Input.dispatchMouseEvent"&&params?.type==="mousePressed")
+        throw Error("MOUSE_DISPATCH_FAILED");
+      return send(target,method,params);
+    };
+    await expect(agent.run({owner:"agent-A",op:"cursor_click",
+      args:{uid:"owl-agent-3"}})).rejects.toThrow("MOUSE_DISPATCH_FAILED");
+    expect(c.events.filter(v=>v[1]==="Emulation.setFocusEmulationEnabled")
+      .map(v=>v[2]?.enabled)).toEqual([true,false]);
+    expect(c.focusEvents).toHaveLength(0);
   });
 
   it("fails closed when a reused human tab changes origin, but still lets go",async()=>{

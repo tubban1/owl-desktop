@@ -433,7 +433,7 @@ export function createNativeAgentExecutor(chrome,storage){
       // Overlay is page-local and pointer-events:none. It is not the
       // actual OS cursor; browser input goes to this tab only.
       const target={tabId};
-      let attached=false,fileChooserIntercepted=false;
+      let attached=false,fileChooserIntercepted=false,focusEmulated=false;
       const onEvent=(source,method)=>{
         if(source.tabId===tabId&&method==="Page.fileChooserOpened")
           fileChooserIntercepted=true;
@@ -452,6 +452,15 @@ export function createNativeAgentExecutor(chrome,storage){
         const latest=await chrome.tabs.get(tabId);
         if(urlOrigin(latest.url)!==origin)
           throw Error("CURSOR_PAGE_OR_ORIGIN_CHANGED");
+        if(latest.active===false){
+          // CDP input can be ignored by an unfocused background renderer
+          // (observed on Windows). Emulate focus on this debugger TARGET,
+          // never call tabs.update/windows.update or move the OS pointer.
+          // Restore on success AND failure before detaching.
+          await chrome.debugger.sendCommand(target,
+            "Emulation.setFocusEmulationEnabled",{enabled:true});
+          focusEmulated=true;
+        }
         await inject(tabId,showVirtualCursor,[zone.x,zone.y,click?"click":"move"]);
         await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
           type:"mouseMoved",x:zone.x,y:zone.y});
@@ -471,12 +480,16 @@ export function createNativeAgentExecutor(chrome,storage){
         }
         dispatched=true;
       }finally{
+        if(focusEmulated)
+          await chrome.debugger.sendCommand(target,
+            "Emulation.setFocusEmulationEnabled",{enabled:false}).catch(()=>{});
         if(attached)await chrome.debugger.detach(target).catch(()=>{});
         if(click)chrome.debugger.onEvent.removeListener(onEvent);
       }
       return {pageId:tabId,uid:args.uid,x:zone.x,y:zone.y,
         ...(click?{clicked:dispatched,websitePersisted:false}:{moved:dispatched}),
         cursorVisible:true,tabLocal:true,foregroundUnchanged:true,
+        virtualFocusEmulated:focusEmulated,
         osPointerMoved:false,systemMouseUsed:false,
         inputMethod:"tab_scoped_chrome_debugger"};
     }
