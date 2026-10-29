@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OWL LAB Agent Browser",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "Foreground/background Chrome Agent Browser with exact-URL tab reuse through Native Messaging.",
   "permissions": [
     "nativeMessaging",
