@@ -49,6 +49,7 @@ describe("Mission-scoped, non-shell Codex continuation",()=>{
     expect(valid.sandbox.writeDir).toBe(fs.realpathSync(f.out));
     expect(valid.command).toContain(runOptions(f).sandboxExecutable);
     expect(valid.sandbox.policy).toContain("(deny default)");
+    expect(valid.sandbox.policy).toContain("(allow sysctl-read)");
     expect(valid.sandbox.policy).not.toContain("file-write* (subpath "+JSON.stringify(f.root)+")");
     expect(()=>compileApprovedCodexResume({checkpoint:f.owner.checkpoint,workstream:{missionContract:{originalGoal:"other project"}}},f.args,runOptions(f))).toThrow("MISSION_CODEX_PROFILE_NOT_AUTHORIZED");
     expect(()=>compileApprovedCodexResume(f.owner,{...f.args,thread_id:"id;rm -rf /"},runOptions(f))).toThrow("MISSION_CODEX_THREAD_INVALID");
@@ -78,6 +79,19 @@ describe("Mission-scoped, non-shell Codex continuation",()=>{
     expect(()=>assertMissionAction(f.owner,signer,"start_process",allowed)).not.toThrow();
     expect(()=>assertMissionAction(f.owner,signer,"start_process",{...allowed,command:allowed.command+" ; echo unauthorized"})).toThrow("MISSION_OPAQUE_ACTION_BLOCKED");
     expect(()=>assertMissionAction(f.owner,signer,"execute_command",allowed)).toThrow("MISSION_OPAQUE_ACTION_BLOCKED");
+  });
+  it.skipIf(process.platform!=="darwin")("real Rust Codex boots with restricted sysctl-read but no project-write grant",()=>{
+    const bin=path.join(os.homedir(),".codex/plugins/.plugin-appserver/codex-cli/bin/codex");
+    if(!fs.existsSync(bin))return;
+    const f=fixture();
+    const launch=compileApprovedCodexResume(f.owner,f.args,{userHome:os.homedir(),codexBin:bin});
+    const started=spawnSync("/usr/bin/sandbox-exec",["-p",launch.sandbox.policy,bin,"--version"],{
+      cwd:f.root,encoding:"utf8",timeout:20_000,
+      env:{...process.env,TMPDIR:path.join(f.out,".codex-tmp")+"/"},
+    });
+    expect(started.status,"Actual Codex failed to boot: "+started.stderr).toBe(0);
+    expect(started.stdout).toMatch(/codex-cli/);
+    expect(fs.existsSync(path.join(f.root,"public/models/production.glb"))).toBe(false);
   });
   it.skipIf(process.platform!=="darwin")("macOS kernel denies production/historical writes and symlink escape",()=>{
     const f=fixture();
