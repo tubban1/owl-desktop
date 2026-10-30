@@ -10,6 +10,7 @@
     "dev:desktop": "concurrently -k -s first -n renderer,electron \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "dev:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/dev-desktop.ps1",
     "sync:status": "node scripts/sync-dev-checkouts.mjs status",
+    "maintenance:prune-dev-releases": "node scripts/prune-dev-releases.mjs",
     "sync:stage": "node scripts/sync-dev-checkouts.mjs stage",
     "sync:install": "node scripts/install-version-stager.mjs",
     "activation:status": "node scripts/version-activation.mjs status",

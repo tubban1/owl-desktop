@@ -24,6 +24,7 @@ export class LocalMcpExecutor {
     this.lastProofAt = null;
     this.lastLivenessProofAt = null;
     this.lastError = null;
+    this.lastCallTiming = null;
   }
 
   async probe({ signal } = {}) {
@@ -133,6 +134,10 @@ export class LocalMcpExecutor {
     if (!callId || !toolName) {
       throw new Error("Local MCP call requires callId and toolName.");
     }
+    const startedAt = performance.now();
+    let connectedAt = null;
+    let executionCompletedAt = null;
+    let succeeded = false;
     const isolatedOwnerId = ownerId?.trim() || `cloud-call:${callId}`;
     const headers = {
       "x-owl-owner-id": isolatedOwnerId,
@@ -174,17 +179,20 @@ export class LocalMcpExecutor {
           );
         }),
       ]);
-      // Readiness is proven by a real MCP operation, not process liveness.
-      await client.listTools();
-      this.lastProofAt = new Date().toISOString();
-      this.lastError = null;
+      // A real tools/call proves MCP and Runtime readiness. Re-fetching the
+      // 161-tool catalog before EVERY call is redundant and expensive.
+      // Full tools/list conformance remains in probe() at startup/recovery.
+      connectedAt = performance.now();
       const result = await client.callTool(
         { name: toolName, arguments: args },
         undefined,
         { signal: controller.signal },
       );
+      executionCompletedAt = performance.now();
+      succeeded = true;
       this.lastProofAt = new Date().toISOString();
       this.lastLivenessProofAt = this.lastProofAt;
+      this.lastError = null;
       return result;
     } catch (error) {
       this.lastError = {
@@ -201,6 +209,16 @@ export class LocalMcpExecutor {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);
       await transport.close().catch(() => undefined);
+      const finishedAt = performance.now();
+      this.lastCallTiming = {
+        toolName: toolName.slice(0, 100),
+        succeeded,
+        connectMs: connectedAt === null ? null : Math.round(connectedAt - startedAt),
+        toolMs: connectedAt === null ? null
+          : Math.round((executionCompletedAt ?? finishedAt) - connectedAt),
+        totalMs: Math.round(finishedAt - startedAt),
+        measuredAt: new Date().toISOString(),
+      };
     }
   }
 
@@ -209,6 +227,7 @@ export class LocalMcpExecutor {
       lastProofAt: this.lastProofAt,
       lastLivenessProofAt: this.lastLivenessProofAt,
       lastError: this.lastError,
+      lastCallTiming: this.lastCallTiming,
     };
   }
 }

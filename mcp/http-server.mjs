@@ -33,6 +33,24 @@ export async function startOwlMcpHttpServer({
 
   const app = express();
   const sessions = new Map();
+  // Bounded, payload-free local telemetry. Upstream ChatGPT/Tunnel timing is
+  // intentionally NOT inferred from this server-side measurement.
+  const recentMcpCalls = [];
+  const LATENCY_SAMPLE_LIMIT = 128;
+  function latencySummary() {
+    const values = recentMcpCalls.map((row) => row.totalMs).sort((a, b) => a - b);
+    const percentile = (p) => values.length
+      ? values[Math.min(values.length - 1, Math.ceil(values.length * p) - 1)]
+      : null;
+    return {
+      sampleCount: values.length,
+      p50Ms: percentile(0.5),
+      p95Ms: percentile(0.95),
+      maxMs: values.at(-1) ?? null,
+      failedCount: recentMcpCalls.filter((row) => row.status >= 400 || row.status === 0).length,
+      slowCallCount: recentMcpCalls.filter((row) => row.totalMs >= 2000).length,
+    };
+  }
   plannerContinuation?.recoverConnectedTransports?.("mcp_restart");
   const boundedSessionIdleTtlMs = Math.max(Number(sessionIdleTtlMs) || 0, 1_000);
   const boundedOwnerSupersedeGraceMs = Math.max(
@@ -225,6 +243,29 @@ export async function startOwlMcpHttpServer({
   }
 
   app.all("/mcp", requireAuth, async (req, res) => {
+    const requestStarted = performance.now();
+    let preflightCompleted = requestStarted;
+    let recorded = false;
+    const requestedMethod = typeof req.body?.method === "string"
+      ? req.body.method.slice(0, 80) : req.method;
+    const toolName = requestedMethod === "tools/call"
+      && typeof req.body?.params?.name === "string"
+      ? req.body.params.name.slice(0, 100) : null;
+    function recordLatency() {
+      if (recorded) return;
+      recorded = true;
+      const totalMs = Math.round(performance.now() - requestStarted);
+      recentMcpCalls.push({
+        method: requestedMethod,
+        ...(toolName ? { tool: toolName } : {}),
+        status: res.writableFinished ? res.statusCode : 0,
+        totalMs,
+        preflightMs: Math.round(preflightCompleted - requestStarted),
+      });
+      if (recentMcpCalls.length > LATENCY_SAMPLE_LIMIT) recentMcpCalls.shift();
+    }
+    res.once("finish", recordLatency);
+    res.once("close", recordLatency);
     const suppliedSessionId =
       typeof req.headers["mcp-session-id"] === "string"
         ? req.headers["mcp-session-id"]
@@ -337,6 +378,7 @@ export async function startOwlMcpHttpServer({
       active.activeRequestCount =
         Number(active.activeRequestCount ?? 0) + 1;
 
+      preflightCompleted = performance.now();
       try {
         await withMcpRequestContext(
           {
@@ -503,11 +545,15 @@ export async function startOwlMcpHttpServer({
           ownerSupersedeGraceMs: boundedOwnerSupersedeGraceMs,
           maxSessions: boundedMaxSessions,
         },
-        plannerContinuation: plannerContinuation?.summary?.() ?? {
+        // /health is called frequently by readiness monitoring and must
+        // never serialize historical owner/checkpoint payloads.
+        plannerContinuation: plannerContinuation?.healthSummary?.() ?? {
+          ownerCount: 0,
           activeCheckpointCount: 0,
           connectedOwnerCount: 0,
-          latestActive: null,
+          readyHandoffCount: 0,
         },
+        mcpLatency: latencySummary(),
       });
     } catch (error) {
       res.status(503).json({
@@ -536,6 +582,19 @@ export async function startOwlMcpHttpServer({
     runtimeBaseUrl,
   });
 
+  // Detailed owner history is available only on the explicit diagnostics
+  // endpoint. Do not include it in the hot /health readiness path.
+  app.get("/diagnostics", requireAuth, (_req, res) => {
+    res.json({
+      ok: true,
+      service: "owl-mcp",
+      mcpLatency: latencySummary(),
+      recentMcpCalls: recentMcpCalls.slice(-32),
+      transportSessions: sessions.size,
+      plannerContinuation: plannerContinuation?.summary?.() ?? null,
+    });
+  });
+
   function healthSummary() {
     pruneTransportSessions();
     const rows = [...sessions.values()];
@@ -550,6 +609,7 @@ export async function startOwlMcpHttpServer({
         ownerSupersedeGraceMs: boundedOwnerSupersedeGraceMs,
         maxSessions: boundedMaxSessions,
       },
+      mcpLatency: latencySummary(),
       continuation:
         plannerContinuation?.healthSummary?.() ?? {
           ownerCount: 0,
@@ -582,6 +642,7 @@ export async function startOwlMcpHttpServer({
         lastSeenAt: session.lastSeenAt,
         activeRequestCount: Number(session.activeRequestCount ?? 0),
       })),
+      mcpLatency: latencySummary(),
       continuation:
         plannerContinuation?.summary?.() ?? {
           activeCheckpointCount: 0,
