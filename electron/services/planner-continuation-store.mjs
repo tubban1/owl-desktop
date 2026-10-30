@@ -214,6 +214,7 @@ export class PlannerContinuationStore {
     this.implicitIdleTtlMs = Math.max(Number(implicitIdleTtlMs) || 0, 60_000);
     this.archivedRetentionMs = Math.max(Number(archivedRetentionMs) || 0, 0);
     this._getCache = null;
+    this._healthCache = null;
   }
 
   read() {
@@ -240,6 +241,7 @@ export class PlannerContinuationStore {
     writeJsonAtomic(this.file, state);
     // Keep mutation reads fresh: only repeated read-only lookups are cached.
     this._getCache = null;
+    this._healthCache = null;
   }
 
   get(ownerId) {
@@ -1456,6 +1458,16 @@ export class PlannerContinuationStore {
   }
   healthSummary() {
     const nowMs = Date.now();
+    // This store can hold thousands of historical owner/checkpoint records.
+    // A frequent readiness probe must not parse the entire durable snapshot.
+    // The file signature detects writes from other processes immediately;
+    // the short TTL still runs implicit-owner GC without affecting recovery.
+    const signature = snapshotSignature(this.file);
+    if (this._healthCache?.signature === signature &&
+        nowMs - this._healthCache.at < 5_000) {
+      return { ...this._healthCache.result,
+        progressPolicy: { ...this._healthCache.result.progressPolicy } };
+    }
     const { state } = this.garbageCollect(nowMs);
     const owners = Object.values(state.owners);
     const visibleOwners = owners.filter(
@@ -1471,7 +1483,7 @@ export class PlannerContinuationStore {
     const readyHandoffCount = Object.values(state.handoffs ?? {}).filter(
       (handoff) => handoff?.status === "ready",
     ).length;
-    return {
+    const result = {
       ownerCount: visibleOwners.length,
       connectedOwnerCount,
       activeCheckpointCount: activeCheckpoints.length,
@@ -1486,6 +1498,12 @@ export class PlannerContinuationStore {
         recommendedMaxToolStepsWithoutUpdate: 3,
       },
     };
+    this._healthCache = {
+      signature: snapshotSignature(this.file),
+      at: nowMs,
+      result,
+    };
+    return { ...result, progressPolicy: { ...result.progressPolicy } };
   }
 
   summary() {
