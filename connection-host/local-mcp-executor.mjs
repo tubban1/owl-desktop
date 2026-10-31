@@ -129,6 +129,8 @@ export class LocalMcpExecutor {
     ownerId,
     toolName,
     arguments: args = {},
+    traceId,
+    onTiming,
     signal,
   }) {
     if (!callId || !toolName) {
@@ -142,6 +144,7 @@ export class LocalMcpExecutor {
     const headers = {
       "x-owl-owner-id": isolatedOwnerId,
       "x-owl-idempotency-key": `cloud-mcp-call:${callId}`,
+      "x-owl-trace-id": String(traceId || callId).slice(0, 100),
       ...(this.mcpToken ? { authorization: `Bearer ${this.mcpToken}` } : {}),
     };
     const client = new Client({
@@ -219,6 +222,9 @@ export class LocalMcpExecutor {
         totalMs: Math.round(finishedAt - startedAt),
         measuredAt: new Date().toISOString(),
       };
+      // Call-scoped receipt avoids racing on lastCallTiming when multiple
+      // independent workstreams execute concurrently.
+      onTiming?.({ ...this.lastCallTiming });
     }
   }
 

@@ -121,8 +121,17 @@ export function buildFocusedFlow(
         interaction.status === "success" ? "Response received" :
         interaction.status === "progress" ? "Progress checkpoint" :
         interaction.status === "error" ? "Error response" : "Response not observed";
-      detail = interaction.durationMs !== null ? "Tool call duration: " + interaction.durationMs + " ms" :
-        "No completed response yet";
+      detail = interaction.durationMs !== null
+        ? [
+            "MCP: " + interaction.durationMs + " ms",
+            ...(typeof interaction.queueWaitMs === "number"
+              ? ["Queue: " + interaction.queueWaitMs + " ms"] : []),
+            ...(typeof interaction.executionDurationMs === "number"
+              ? ["Execute: " + interaction.executionDurationMs + " ms"] : []),
+            ...(interaction.executionPhase === "admission"
+              ? ["Capacity wait timed out before execution"] : []),
+          ].join(" · ")
+        : "No completed response yet";
       // An expected result is a contract hop, never count it as observed.
       evidence = interaction.status === "running" ? "contract" : "observed";
       state = interaction.status === "running" ? "waiting" :

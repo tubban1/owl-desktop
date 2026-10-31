@@ -53,6 +53,12 @@ export class RuntimeHttpClient {
         error.runtimeResponded = true;
         error.httpStatus = response.status;
         error.requestId = requestId;
+        if (error.code === "SHELL_CAPACITY_BUSY") {
+          error.stage = "admission";
+          error.queueWaitMs = Number(payload?.error?.queueWaitMs) || 0;
+          error.retryAfterMs = Number(payload?.error?.retryAfterMs) || 0;
+          error.capacitySnapshot = payload?.error?.capacitySnapshot ?? null;
+        }
         throw error;
       }
       return payload.result;

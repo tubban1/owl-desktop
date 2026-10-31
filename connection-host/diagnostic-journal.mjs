@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 const SAFE_META_KEYS = new Set([
   "code", "status", "phase", "tool", "workstreamId",
   "taskId", "submissionId", "durationMs", "attempt", "retryCount",
+  "traceId", "queueWaitMs", "executionDurationMs", "executionPhase",
 ]);
 const ID_PATTERN = /^[a-zA-Z0-9:_./-]{1,180}$/;
 

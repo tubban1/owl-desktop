@@ -1,10 +1,13 @@
 import express from "express";
+import os from "node:os";
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { RuntimeHttpClient } from "../electron/runtime-http-client.mjs";
 import { createOwlMcpServer } from "./create-server.mjs";
 import { resolveOwnerIdentity } from "./owner-identity.mjs";
 import { withMcpRequestContext } from "./request-context.mjs";
+import { createCallTimingJournal, safeTraceId } from "./call-timing-journal.mjs";
 
 export async function startOwlMcpHttpServer({
   port = 8790,
@@ -26,6 +29,7 @@ export async function startOwlMcpHttpServer({
   ownerSupersedeGraceMs = 60_000,
   maxSessions = 128,
   monotonicNow = () => performance.now(),
+  timingJournal = null,
 } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error(`Invalid OWL MCP port: ${port}`);
@@ -36,6 +40,11 @@ export async function startOwlMcpHttpServer({
   // Bounded, payload-free local telemetry. Upstream ChatGPT/Tunnel timing is
   // intentionally NOT inferred from this server-side measurement.
   const recentMcpCalls = [];
+  const callTimings = timingJournal ?? createCallTimingJournal({
+    root: process.env.OWL_MCP_TIMINGS_ROOT ||
+      path.join(process.env.OWL_DESKTOP_USER_DATA_DIR ||
+        path.join(os.homedir(), ".owl-lab"), "connectivity"),
+  });
   const LATENCY_SAMPLE_LIMIT = 128;
   function latencySummary() {
     const values = recentMcpCalls.map((row) => row.totalMs).sort((a, b) => a - b);
@@ -246,6 +255,9 @@ export async function startOwlMcpHttpServer({
     const requestStarted = performance.now();
     let preflightCompleted = requestStarted;
     let recorded = false;
+    const traceId = safeTraceId(req.headers["x-owl-trace-id"]) ?? randomUUID();
+    const receivedAt = new Date().toISOString();
+    res.setHeader("x-owl-trace-id", traceId);
     const requestedMethod = typeof req.body?.method === "string"
       ? req.body.method.slice(0, 80) : req.method;
     const toolName = requestedMethod === "tools/call"
@@ -255,7 +267,14 @@ export async function startOwlMcpHttpServer({
       if (recorded) return;
       recorded = true;
       const totalMs = Math.round(performance.now() - requestStarted);
+      callTimings.record({
+        traceId, phase: "mcp_response", method: requestedMethod,
+        ...(toolName ? { tool: toolName } : {}),
+        status: res.writableFinished ? res.statusCode : 0,
+        totalMs, preflightMs: Math.round(preflightCompleted - requestStarted),
+      });
       recentMcpCalls.push({
+        traceId, receivedAt,
         method: requestedMethod,
         ...(toolName ? { tool: toolName } : {}),
         status: res.writableFinished ? res.statusCode : 0,
@@ -391,6 +410,7 @@ export async function startOwlMcpHttpServer({
             clientLabel: identity.clientLabel ?? null,
             transportSessionId,
             runtimeRequestId,
+            traceId,
             logicalRequestId:
               body?.id !== undefined ? String(body.id) : runtimeRequestId,
             clientIdempotencyKey: suppliedIdempotencyKey || undefined,

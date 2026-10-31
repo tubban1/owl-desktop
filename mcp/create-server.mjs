@@ -44,6 +44,11 @@ function fail(error) {
         error: error instanceof Error ? error.message : String(error),
         ...(error?.code ? { code: error.code } : {}),
         ...(error?.causeCode ? { causeCode: error.causeCode } : {}),
+        ...(error?.code === "SHELL_CAPACITY_BUSY" ? {
+          executionPhase: "admission",
+          queueWaitMs: Number(error?.queueWaitMs) || 0,
+          retryAfterMs: Number(error?.retryAfterMs) || 0,
+        } : {}),
         ...(error?.progressBoundary
           ? { progressBoundary: error.progressBoundary }
           : {}),
@@ -826,6 +831,7 @@ function tool(server, name, description, schema, annotations, handler) {
       const interactionMeta = {
         eventKind: "mcp_interaction",
         interactionId,
+        traceId: context.traceId ?? null,
         tool: name,
         transportSessionId: context.transportSessionId,
         runtimeSessionId: context.runtimeSessionId,
@@ -885,6 +891,10 @@ function tool(server, name, description, schema, annotations, handler) {
           phase: "response",
           status: "success",
           durationMs,
+          ...(typeof value?.concurrencyWaitMs === "number"
+            ? { queueWaitMs: value.concurrencyWaitMs } : {}),
+          ...(typeof value?.executionDurationMs === "number"
+            ? { executionDurationMs: value.executionDurationMs } : {}),
           payload: responseTelemetry.preview,
         });
         context.onEvent?.("info", `MCP ${name} completed`, {
@@ -950,6 +960,9 @@ function tool(server, name, description, schema, annotations, handler) {
             status: progressBoundary ? "progress_required" : "error",
             durationMs,
             code: error?.code ?? null,
+            ...(error?.code === "SHELL_CAPACITY_BUSY"
+              ? { queueWaitMs: Number(error?.queueWaitMs) || 0,
+                  executionPhase: "admission" } : {}),
             payload: errorTelemetry.preview,
           },
         );

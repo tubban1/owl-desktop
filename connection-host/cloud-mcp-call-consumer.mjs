@@ -1,3 +1,4 @@
+import { CloudMcpWakeListener } from "./cloud-mcp-wake-listener.mjs";
 import { randomUUID } from "node:crypto";
 
 function bounded(value, fallback, minimum, maximum) {
@@ -41,6 +42,8 @@ export class CloudMcpCallConsumer {
     setIntervalImpl = setInterval,
     clearIntervalImpl = clearInterval,
     completionStore = null,
+    timingJournal = null,
+    maxConcurrentCalls = 3,
     onEvent = () => {},
   } = {}) {
     if (!cloudClient) throw new Error("CloudMcpCallConsumer requires cloudClient.");
@@ -57,7 +60,22 @@ export class CloudMcpCallConsumer {
     this.setIntervalImpl = setIntervalImpl;
     this.clearIntervalImpl = clearIntervalImpl;
     this.completionStore = completionStore;
+    this.timingJournal = timingJournal;
+    this.maxConcurrentCalls = bounded(maxConcurrentCalls, 3, 1, 8);
+    this.activeCalls = new Set();
+    this.runningBatches = 0;
     this.onEvent = onEvent;
+    this.wakeListener = new CloudMcpWakeListener({
+      cloudClient,
+      onWake: () => this.wake(),
+      onDisconnected: () => {
+        if (this.timer) this.clearTimeoutImpl(this.timer);
+        this.timer = null;
+        this.schedule();
+      },
+      onEvent,
+    });
+    this.wakePending = false;
     this.running = false;
     this.timer = null;
     this.tickPromise = null;
@@ -88,12 +106,16 @@ export class CloudMcpCallConsumer {
     this.running = true;
     // A successful durable queue read is the readiness proof.
     await this.tick();
-    if (this.running) this.schedule();
+    if (this.running) {
+      this.wakeListener.start();
+      this.schedule();
+    }
     return this.snapshot();
   }
 
   async stop() {
     this.running = false;
+    this.wakeListener.stop();
     if (this.timer) this.clearTimeoutImpl(this.timer);
     this.timer = null;
     await this.tickPromise?.catch(() => undefined);
@@ -102,10 +124,12 @@ export class CloudMcpCallConsumer {
 
   schedule() {
     if (!this.running || this.timer) return;
+    const baseline = this.wakeListener.connected
+      ? Math.max(60_000, this.pollIntervalMs) : this.pollIntervalMs;
     const base =
       this.failureCount > 0
-        ? Math.min(60_000, this.pollIntervalMs * 2 ** Math.min(this.failureCount, 6))
-        : this.pollIntervalMs;
+        ? Math.min(60_000, baseline * 2 ** Math.min(this.failureCount, 6))
+        : baseline;
     const jitter = this.failureCount > 0
       ? 0.75 + Math.max(0, Math.min(1, Number(this.random()) || 0)) * 0.5
       : 1;
@@ -147,6 +171,10 @@ export class CloudMcpCallConsumer {
     const run = this.runTick();
     this.tickPromise = run.finally(() => {
       this.tickPromise = null;
+      if (this.running && this.wakePending) {
+        this.wakePending = false;
+        queueMicrotask(() => this.wake());
+      }
     });
     return this.tickPromise;
   }
@@ -167,10 +195,7 @@ export class CloudMcpCallConsumer {
       this.failureCount = 0;
       this.lastError = null;
       this.lastSuccessAt = new Date().toISOString();
-      for (const call of calls) {
-        if (!this.running && this.timer !== null) break;
-        await this.processCall(call);
-      }
+      await this.processBatches(calls);
       return this.snapshot();
     } catch (error) {
       this.failureCount += 1;
@@ -214,12 +239,89 @@ export class CloudMcpCallConsumer {
     this.lastExecutorProbeAt = new Date().toISOString();
   }
 
+  // Explicit workstream IDs partition independent queues. Missing or invalid
+  // identity is conservatively serialized as one legacy stream, so unrelated
+  // calls cannot bypass the historical order/authorization contract.
+  workstreamKey(call) {
+    const value = call?.arguments?.workstream_id ??
+      call?.arguments?.workstreamId ?? call?.workstreamId;
+    return typeof value === "string" &&
+      /^owl-workstream:[a-zA-Z0-9_-]{8,100}$/.test(value)
+      ? value : "__legacy_sequential__";
+  }
+
+  async processBatches(calls) {
+    const groups = new Map();
+    for (const call of calls) {
+      if (!call?.callId || !call?.toolName) continue;
+      const key = this.workstreamKey(call);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(call);
+    }
+    const queues = [...groups.values()];
+    let next = 0;
+    const failures = [];
+    const workers = Array.from({ length: Math.min(this.maxConcurrentCalls, queues.length) }, async () => {
+      while (next < queues.length) {
+        const queue = queues[next++];
+        for (const call of queue) {
+          try { await this.processCall(call); }
+          catch (error) {
+            failures.push(error);
+            this.onEvent("warn", "Cloud MCP workstream call failed", {
+              code: String(error?.code || error?.name || "CLOUD_CALL_FAILED").slice(0, 100),
+              traceId: call.callId,
+            });
+            // Do not jump over an unacknowledged call in the same workstream.
+            // A later poll will retry it with its original idempotency key.
+            break;
+          }
+        }
+      }
+    });
+    await Promise.all(workers);
+    if (failures.length) throw failures[0];
+  }
+
+  // An authenticated online notification can wake this consumer without
+  // changing its periodic fault-recovery schedule. A missed hint is safe:
+  // the next scheduled poll still retrieves the durable queue.
+  wake() {
+    if (!this.running) return false;
+    if (this.tickPromise) {
+      this.wakePending = true;
+      return true;
+    }
+    if (this.timer !== null) {
+      this.clearTimeoutImpl(this.timer);
+      this.timer = null;
+    }
+    if (!this.tickPromise) {
+      void this.tick().catch(() => undefined).finally(() => this.schedule());
+    } else {
+      this.schedule();
+    }
+    return true;
+  }
+
   async processCall(call) {
     if (!call?.callId || !call?.toolName) return;
+    const traceStarted = performance.now();
+    const traceId = call.callId;
+    const recordTiming = (phase, extra = {}) => this.timingJournal?.record({
+      traceId, phase, tool: call.toolName,
+      ...extra,
+    });
+    let claimDoneAt = traceStarted;
     try {
-      await this.cloudClient.claimMcpCall(call.callId, {
+      const claimReceipt = await this.cloudClient.claimMcpCall(call.callId, {
         claimantId: this.claimantId,
         leaseMs: this.leaseMs,
+      });
+      claimDoneAt = performance.now();
+      recordTiming("cloud_claimed", {
+        queueMs: call.createdAt ? Math.max(0, Date.now() - Date.parse(call.createdAt)) : undefined,
+        totalMs: Math.round(claimDoneAt - traceStarted),
       });
     } catch (error) {
       if (error?.code === "CONFLICT" || error?.status === 409) return;
@@ -227,6 +329,7 @@ export class CloudMcpCallConsumer {
     }
 
     this.activeCallId = call.callId;
+    this.activeCalls.add(call.callId);
     try {
       const replay = await this.completionStore?.get?.(call.callId);
       if (replay?.payload) {
@@ -282,6 +385,8 @@ export class CloudMcpCallConsumer {
 
       let result;
       let executionError = null;
+      let localTiming = null;
+      const executionStart = performance.now();
       try {
         result = await this.executor.execute({
           callId: call.callId,
@@ -289,21 +394,37 @@ export class CloudMcpCallConsumer {
           toolName: call.toolName,
           arguments: call.arguments ?? {},
           signal: controller.signal,
+          traceId,
+          onTiming: (timing) => { localTiming = timing; },
         });
         executionError = mcpToolResultError(result);
       } catch (error) {
         executionError = error;
       } finally {
         this.clearIntervalImpl(leaseTimer);
+        recordTiming("local_execution_finished", {
+          executeMs: performance.now() - executionStart,
+        });
       }
 
       if (controller.signal.aborted && controller.signal.reason?.code === "MCP_CLAIM_LEASE_UNSAFE") {
         throw controller.signal.reason;
       }
 
+      const executionTiming = {
+        connectMs: Math.max(0, Math.round(localTiming?.connectMs ??
+          performance.now() - executionStart)),
+        executeMs: Math.max(0, Math.round(localTiming?.toolMs ??
+          performance.now() - executionStart)),
+        deviceQueueMs: Math.max(0, Math.round(executionStart - claimDoneAt)),
+      };
+      // Cloud validates upper bounds and accepts only durations.
+      for (const key of Object.keys(executionTiming)) {
+        executionTiming[key] = Math.min(600_000, executionTiming[key]);
+      }
       const completionPayload = executionError
-        ? { error: sanitizedError(executionError) }
-        : { result };
+        ? { error: sanitizedError(executionError), executionTiming }
+        : { result, executionTiming };
 
       const containsNativeImage = !executionError &&
         Array.isArray(result?.content) &&
@@ -335,6 +456,9 @@ export class CloudMcpCallConsumer {
           ...completionPayload,
         });
         await this.completionStore?.delete?.(call.callId);
+        recordTiming("cloud_completion_acknowledged", {
+          totalMs: performance.now() - traceStarted,
+        });
         if (!executionError) {
           this.processed += 1;
           this.onEvent("info", "Cloud MCP durable call completed", {
@@ -350,7 +474,8 @@ export class CloudMcpCallConsumer {
         throw completionError;
       }
     } finally {
-      this.activeCallId = null;
+      this.activeCalls.delete(call.callId);
+      this.activeCallId = this.activeCalls.values().next().value ?? null;
     }
   }
 
@@ -379,6 +504,9 @@ export class CloudMcpCallConsumer {
       lastError: this.lastError,
       failureCount: this.failureCount,
       activeCallId: this.activeCallId,
+      activeCallIds: [...this.activeCalls],
+      maxConcurrentCalls: this.maxConcurrentCalls,
+      wakeChannel: this.wakeListener.snapshot(),
       processed: this.processed,
       executorReady,
       lastExecutorProbeAt: this.lastExecutorProbeAt,

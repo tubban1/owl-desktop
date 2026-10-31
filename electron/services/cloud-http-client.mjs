@@ -301,6 +301,12 @@ export class CloudHttpClient {
     );
   }
 
+  getMcpWakeTicket() {
+    return this.request("/device/v1/mcp-wake-ticket", {
+      auth: "device", method: "POST",
+    });
+  }
+
   pullMcpCalls(limit = 25) {
     const bounded = Math.min(Math.max(Number(limit) || 25, 1), 100);
     return this.request(`/device/v1/mcp-calls?limit=${bounded}`, {

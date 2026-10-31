@@ -164,9 +164,14 @@ describe("CloudMcpCallConsumer parity", () => {
     consumer.running = true;
     await expect(consumer.tick()).resolves.toMatchObject({ state: "degraded" });
     expect(sideEffects.size).toBe(1);
-    expect(cloudClient.completeMcpCall.mock.calls[0][1]).toEqual({
+    expect(cloudClient.completeMcpCall.mock.calls[0][1]).toMatchObject({
       claimantId: "host-a",
       result: { content: [{ type: "text", text: "same-result" }] },
+      executionTiming: {
+        connectMs: expect.any(Number),
+        executeMs: expect.any(Number),
+        deviceQueueMs: expect.any(Number),
+      },
     });
     expect(cloudClient.completeMcpCall.mock.calls[0][1]).not.toHaveProperty("error");
     consumer.running = false;
@@ -350,4 +355,80 @@ it("does not report durable MCP ready until the local executor is proven reachab
     executorReady: true,
   });
   await consumer.stop();
+});
+
+describe("Cloud MCP workstream fairness and wakeup", () => {
+  it("runs independent workstreams concurrently and serializes calls of the same stream", async () => {
+    const started = [];
+    const finished = [];
+    let releaseFirst;
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    let firstStarted;
+    const firstStart = new Promise((resolve) => { firstStarted = resolve; });
+    const calls = [
+      { ...call("mcp_a1"), arguments: { workstream_id: "owl-workstream:alpha1234" } },
+      { ...call("mcp_a2"), arguments: { workstream_id: "owl-workstream:alpha1234" } },
+      { ...call("mcp_b1"), arguments: { workstream_id: "owl-workstream:beta1234" } },
+    ];
+    const executor = { execute: vi.fn(async ({ callId }) => {
+      started.push(callId);
+      if (callId === "mcp_a1") { firstStarted(); await firstGate; }
+      finished.push(callId);
+      return { content: [{ type:"text", text: "ok" }] };
+    }), snapshot: () => null };
+    const cloudClient = {
+      pullMcpCalls: vi.fn(async () => ({ calls })),
+      claimMcpCall: vi.fn(async () => ({})),
+      completeMcpCall: vi.fn(async () => ({})),
+    };
+    const consumer = new CloudMcpCallConsumer({
+      cloudClient, executor, maxConcurrentCalls: 2,
+    });
+    const run = consumer.tick();
+    await firstStart;
+    // Separate workstream must be able to finish while a1 is held.
+    await vi.waitFor(() => expect(finished).toContain("mcp_b1"));
+    expect(started).not.toContain("mcp_a2");
+    releaseFirst();
+    await run;
+    expect(finished.indexOf("mcp_a1")).toBeLessThan(finished.indexOf("mcp_a2"));
+    expect(cloudClient.completeMcpCall).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not execute subsequent calls of a stream after an unacknowledged completion", async () => {
+    const calls = [
+      { ...call("mcp_a1"), arguments: { workstream_id: "owl-workstream:alpha1234" } },
+      { ...call("mcp_a2"), arguments: { workstream_id: "owl-workstream:alpha1234" } },
+    ];
+    const executor = { execute: vi.fn(async () => ({ content: [] })), snapshot: () => null };
+    const consumer = new CloudMcpCallConsumer({
+      cloudClient: {
+        pullMcpCalls: vi.fn(async () => ({ calls })),
+        claimMcpCall: vi.fn(async () => ({})),
+        completeMcpCall: vi.fn(async () => { throw new Error("cloud offline"); }),
+      },
+      executor,
+    });
+    await expect(consumer.tick()).rejects.toThrow("cloud offline");
+    expect(executor.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows an online wake to cancel a future poll while preserving normal fallback", async () => {
+    let scheduled;
+    let removed;
+    const pull = vi.fn(async () => ({ calls: [] }));
+    const consumer = new CloudMcpCallConsumer({
+      cloudClient: { pullMcpCalls: pull },
+      executor: { snapshot: () => null },
+      setTimeoutImpl: (fn) => { scheduled = fn; return { unref() {} }; },
+      clearTimeoutImpl: () => { removed = true; },
+    });
+    await consumer.start();
+    expect(pull).toHaveBeenCalledTimes(1);
+    expect(consumer.wake()).toBe(true);
+    await vi.waitFor(() => expect(pull).toHaveBeenCalledTimes(2));
+    expect(removed).toBe(true);
+    expect(scheduled).toBeTypeOf("function");
+    await consumer.stop();
+  });
 });

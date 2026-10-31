@@ -15,6 +15,10 @@ export type McpInteraction = {
   requestPreview: string | null;
   responsePreview: string | null;
   errorCode: string | null;
+  traceId?: string | null;
+  queueWaitMs?: number | null;
+  executionDurationMs?: number | null;
+  executionPhase?: string | null;
 };
 
 function text(value: unknown): string | null {
@@ -85,6 +89,7 @@ export function buildMcpInteractionFeed(
     existing.runtimeSessionId =
       text(meta.runtimeSessionId) ?? existing.runtimeSessionId;
     existing.workstreamId = text(meta.workstreamId) ?? existing.workstreamId;
+    existing.traceId = text(meta.traceId) ?? existing.traceId ?? null;
 
     if (phase === "request") {
       existing.startedAt = entry.at;
@@ -94,6 +99,11 @@ export function buildMcpInteractionFeed(
       existing.responsePreview = text(meta.payload);
       existing.durationMs =
         typeof meta.durationMs === "number" ? meta.durationMs : null;
+      existing.queueWaitMs =
+        typeof meta.queueWaitMs === "number" ? meta.queueWaitMs : null;
+      existing.executionDurationMs =
+        typeof meta.executionDurationMs === "number" ? meta.executionDurationMs : null;
+      existing.executionPhase = text(meta.executionPhase);
       existing.status =
         meta.status === "error"
           ? "error"

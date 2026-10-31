@@ -9,6 +9,7 @@ import { missionApprovalScope, missionApprovalDigest, selectMissionExecutionPerm
 import { createDesktopBridgeRpc } from "./bridge-rpc.mjs";
 import { CloudHttpClient } from "../electron/services/cloud-http-client.mjs";
 import { CloudMcpCallConsumer } from "./cloud-mcp-call-consumer.mjs";
+import { createCallTimingJournal } from "../mcp/call-timing-journal.mjs";
 import { recheckConnectivityAfterWake } from "./recheck-after-wake.mjs";
 import { CloudMcpCompletionStore } from "./cloud-mcp-completion-store.mjs";
 import { LocalMcpExecutor } from "./local-mcp-executor.mjs";
@@ -200,6 +201,9 @@ const tunnelSupervisor = new TunnelSupervisor({
   },
 });
 
+const cloudCallTimings = createCallTimingJournal({
+  root: path.join(userDataRoot, "connectivity", "cloud-call-timings"),
+});
 const cloudMcpCompletionStore = new CloudMcpCompletionStore({
   root: path.join(userDataRoot, "connectivity", "cloud-mcp-completions"),
 });
@@ -237,6 +241,7 @@ async function configureCloudMcpConsumer(config = {}) {
     cloudClient: client,
     executor: cloudMcpExecutor,
     completionStore: cloudMcpCompletionStore,
+    timingJournal: cloudCallTimings,
     pollIntervalMs: config.pollIntervalMs,
     leaseMs: config.leaseMs,
     onEvent(level, message, meta) {
@@ -459,6 +464,10 @@ app.post("/cloud-mcp/configure", async (req, res) => {
       },
     });
   }
+});
+
+app.post("/cloud-mcp/wake", (_req, res) => {
+  res.json({ ok: true, accepted: cloudMcpConsumer?.wake() ?? false });
 });
 
 app.post("/cloud-mcp/stop", async (_req, res) => {
