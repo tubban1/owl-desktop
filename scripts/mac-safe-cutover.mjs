@@ -10,7 +10,7 @@ import http from "node:http";
 import {spawnSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {retireSupersededMacCurrentJobs} from "./lib/mac-release-startup.mjs";
-import {macDesktopMainPresent,postActivationRecoveryAction} from "./lib/mac-postactivation-health.mjs";
+import {macDesktopMainPresent,macWatchdogDecision} from "./lib/mac-postactivation-health.mjs";
 
 const [mode,oldRoot,newRoot,oldSha,newSha]=process.argv.slice(2);
 const sha=/^[a-f0-9]{40}$/;
@@ -65,6 +65,51 @@ async function health(port){
   const data=await res.json();
   return data.ok===true;
  }catch{return false}
+}
+// Independent, bounded evidence for *local* process/HTTP health. Network
+// reachability of Cloud is not allowed to initiate a local process rollback.
+async function componentHttp(port){
+ const started=performance.now();
+ try{
+  const res=await fetch("http://127.0.0.1:"+port+"/health",{signal:AbortSignal.timeout(3500)});
+  const payload=res.ok?await res.json():null;
+  return {ok:res.ok&&payload?.ok===true,code:res.status,
+   elapsedMs:Math.round(performance.now()-started),
+   reason:!res.ok?"http-status":payload?.ok===true?null:"invalid-health-payload"};
+ }catch(e){
+  return {ok:false,code:null,elapsedMs:Math.round(performance.now()-started),
+   reason:e?.name==="TimeoutError"?"timeout":"unreachable"};
+ }
+}
+async function componentProbe(dir){
+ const supervisor=exactSupervisor(dir);
+ const [mcp,runtime]=await Promise.all([componentHttp(8790),componentHttp(18788)]);
+ return {at:new Date().toISOString(),supervisorPresent:Boolean(supervisor),
+  supervisorPid:supervisor?.pid??null,
+  desktopMainPresent:desktopMainRunning(dir),ownerVerified:ownerMatches(dir),
+  mcp,runtime};
+}
+function localProbeHealthy(p){
+ return p.supervisorPresent&&p.ownerVerified&&p.desktopMainPresent&&p.mcp.ok&&p.runtime.ok;
+}
+function watchdogEvidence(entry){
+ const file=path.join(state,"mac-watchdog-evidence.jsonl");
+ fs.mkdirSync(state,{recursive:true,mode:0o700});
+ const lines=fs.existsSync(file)?fs.readFileSync(file,"utf8").trim().split("\n").filter(Boolean):[];
+ lines.push(JSON.stringify({at:new Date().toISOString(),newSha,...entry}));
+ const temp=file+"."+randomUUID()+".tmp";
+ try{fs.writeFileSync(temp,lines.slice(-120).join("\n")+"\n",{flag:"wx",mode:0o600});fs.renameSync(temp,file)}
+ finally{try{fs.unlinkSync(temp)}catch{}}
+}
+function readTracker(file){try{return JSON.parse(fs.readFileSync(file,"utf8"))}catch{return null}}
+function saveTracker(file,record){
+ const tmp=file+"."+randomUUID()+".tmp";
+ try{fs.writeFileSync(tmp,JSON.stringify(record)+"\n",{flag:"wx",mode:0o600});fs.renameSync(tmp,file)}
+ finally{try{fs.unlinkSync(tmp)}catch{}}
+}
+async function localRecovered(dir){
+ await healMissingOwner(dir);
+ return localProbeHealthy(await componentProbe(dir));
 }
 async function tunnelReady(root){
  const proc=run("/usr/bin/pgrep",["-fl","tunnel-client-runtime"],{allowError:true});
@@ -178,15 +223,36 @@ function provision(){
  loadJob(ids.old);loadJob(ids.next);loadJob(ids.watch);
 }
 async function rollback(reason){
- try{drop(ids.next)}catch{}
- const free=await waitFor(portsFree,30000);
- let recovered=await healthy(oldRoot);
+ watchdogEvidence({event:"rollback-started",reason,probe:await componentProbe(newRoot)});
+ try{drop(ids.next)}catch(e){watchdogEvidence({event:"new-job-unload-failed",reason:String(e.message??e)})}
+ const free=await waitFor(portsFree,45000);
+ let recovered=await localRecovered(oldRoot);
  if(free&&!recovered){
-  try{loadJob(ids.old);kick(ids.old)}catch(e){reason+=":kickstart-failed"}
-  recovered=await waitFor(()=>healthy(oldRoot),120000);
+  try{loadJob(ids.old);kick(ids.old)}
+  catch(e){reason+=":kickstart-failed";watchdogEvidence({event:"fallback-kick-failed",reason:String(e.message??e)})}
+  recovered=await waitFor(()=>localRecovered(oldRoot),150000);
  }
- journal({phase:recovered?"rolled-back":"rollback-failed",oldRoot,newRoot,oldSha,newSha,reason,recovered});
+ const phase=recovered?"rolled-back":"rollback-pending";
+ journal({phase,oldRoot,newRoot,oldSha,newSha,reason,recovered,
+  ...(recovered?{recoveredAt:new Date().toISOString()}:{lastAttemptAt:new Date().toISOString()})});
+ watchdogEvidence({event:phase,reason,portsFreed:free,recovered});
  return recovered;
+}
+async function reconcileRollback(tx){
+ if(await localRecovered(oldRoot)){
+  journal({...tx,phase:"rolled-back",recovered:true,
+   recoveredAt:new Date().toISOString(),lateRecoveryConfirmed:true});
+  watchdogEvidence({event:"late-fallback-recovery-confirmed"});
+  return;
+ }
+ if(exactSupervisor(newRoot))return; // do not start competing owners
+ const last=Date.parse(tx.lastAttemptAt??tx.updatedAt??"");
+ if(!Number.isFinite(last)||Date.now()-last<30_000)return;
+ if(!(await portsFree()))return;
+ try{loadJob(ids.old);kick(ids.old);
+  journal({...tx,phase:"rollback-pending",lastAttemptAt:new Date().toISOString()});
+  watchdogEvidence({event:"fallback-retry"});
+ }catch(e){watchdogEvidence({event:"fallback-retry-error",reason:String(e.message??e)})}
 }
 async function check(){
  verifyDir(oldRoot,oldSha);verifyDir(newRoot,newSha);
@@ -202,26 +268,70 @@ if(mode==="check"){
 }
 if(mode==="watch"){
  const tx=readTx();
- if(tx?.phase==="started"&&tx.oldSha===oldSha&&tx.newSha===newSha&&
-  Date.now()-Date.parse(tx.updatedAt)>210000){
-   if(!(await healthy(newRoot))){await rollback("watchdog-activation-timeout")}
-   else journal({...tx,phase:"activated",watchdogConfirmed:true});
+ if(tx?.oldSha!==oldSha||tx?.newSha!==newSha)process.exit(0);
+ if(tx.phase==="rollback-pending"||tx.phase==="rollback-failed"){
+  await reconcileRollback(tx);
+  process.exit(0);
  }
- if(tx?.phase==="activated"&&tx.oldSha===oldSha&&tx.newSha===newSha){
+ if(tx.phase==="started"&&Date.now()-Date.parse(tx.updatedAt)>210000){
+  const probe=await componentProbe(newRoot);
+  if(!localProbeHealthy(probe)){
+   watchdogEvidence({event:"activation-timeout",probe});
+   await rollback("watchdog-activation-timeout");
+  }else journal({...tx,phase:"activated",watchdogConfirmed:true});
+  process.exit(0);
+ }
+ if(tx.phase==="activated"){
   const tracker=path.join(state,"mac-watchdog-failures.json");
-  // A missing bookkeeping file alone must never roll back a healthy server.
+  // Recover a verifiably unique supervisor owner receipt independently
+  // from transient UI state. Never guess another supervisor's identity.
   await healMissingOwner(newRoot);
-  const localOK=Boolean(exactSupervisor(newRoot))&&desktopMainRunning(newRoot)&&await health(8790)&&await health(18788);
-  if(localOK){
-   try{fs.unlinkSync(tracker)}catch{}
-  }else{
-   let failed=null;try{failed=JSON.parse(fs.readFileSync(tracker,"utf8"))}catch{}
-   if(!failed||failed.newSha!==newSha){
-    fs.writeFileSync(tracker,JSON.stringify({newSha,firstSeenAt:new Date().toISOString()})+"\n",{mode:0o600});
+  const probe=await componentProbe(newRoot);
+  const coreOK=probe.supervisorPresent&&probe.mcp.ok&&probe.runtime.ok;
+  const previous=readTracker(tracker);
+  if(coreOK){
+   if(previous?.newSha===newSha){
+    watchdogEvidence({event:"core-recovered",previousReason:previous.lastReason,probe});
+    try{fs.unlinkSync(tracker)}catch{}
+   }
+   if(!probe.desktopMainPresent||!probe.ownerVerified){
+    // GUI-only/receipt issues are visible but never stop a healthy MCP.
+    const diagnostics=path.join(state,"mac-watchdog-degradation.json");
+    const existing=readTracker(diagnostics);
+    const reason=!probe.desktopMainPresent?"desktop-only-unhealthy":"owner-receipt-uncertain";
+    if(existing?.reason!==reason||Date.now()-Date.parse(existing.at??0)>300000){
+     saveTracker(diagnostics,{at:new Date().toISOString(),reason,newSha,probe});
+     watchdogEvidence({event:"degraded-no-rollback",reason,probe});
+    }
    }else{
-    const action=postActivationRecoveryAction({healthy:localOK,firstSeenAt:failed.firstSeenAt,supervisorPresent:expectedSupervisorRunning(newRoot)});
-    if(action==="restart"){try{kick(ids.next)}catch{}}
-    if(action==="rollback"){await rollback("watchdog-post-activation-local-health-failed")}
+    try{fs.unlinkSync(path.join(state,"mac-watchdog-degradation.json"))}catch{}
+   }
+  }else{
+   const now=Date.now();
+   const continuation=previous?.newSha===newSha&&Number.isFinite(Date.parse(previous.lastObservedAt??""))
+       &&now-Date.parse(previous.lastObservedAt)<90_000;
+   const consecutiveFailures=continuation?(previous.consecutiveFailures??1)+1:1;
+   const firstSeenAt=continuation?previous.firstSeenAt:new Date(now).toISOString();
+   const decision=macWatchdogDecision({probe,firstSeenAt,consecutiveFailures,now});
+   saveTracker(tracker,{newSha,firstSeenAt,lastObservedAt:new Date(now).toISOString(),
+    consecutiveFailures,lastReason:decision.reason,lastAction:decision.action,probe});
+   watchdogEvidence({event:"unhealthy-probe",action:decision.action,
+    reason:decision.reason,consecutiveFailures,probe});
+   if(decision.action==="restart"){
+    // Don't start a competing supervisor if either existing local service is
+    // still listening. This is an ownership question, not an outage proof.
+    if(await portsFree()){
+     try{loadJob(ids.next);kick(ids.next)}
+     catch(e){watchdogEvidence({event:"supervisor-restart-error",reason:String(e.message??e)})}
+    }else watchdogEvidence({event:"supervisor-restart-skipped",reason:"owned-ports-not-free"});
+   }
+   if(decision.action==="rollback"){
+    // Re-probe immediately before destructive transition.
+    const confirm=await componentProbe(newRoot);
+    if((!confirm.mcp.ok||!confirm.runtime.ok)&&
+       (confirm.supervisorPresent||!(confirm.mcp.ok&&confirm.runtime.ok))){
+     await rollback("watchdog-persistent-core-failure");
+    }else watchdogEvidence({event:"recovered-before-rollback",probe:confirm});
    }
   }
  }
