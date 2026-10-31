@@ -9,6 +9,13 @@ export type UsageDay = {
 export type UsageStatisticsSnapshot = { since: string; days: UsageDay[] };
 export type StatisticsRange = 7 | 30 | 90 | "all";
 
+// The daily graph must use the same weighted duration numerator and timed
+// response denominator as the summary. Missing timing data is not zero latency.
+export function dailyAvgDurationMs(day: Pick<UsageDay, "durationMs" | "timedCalls">): number | null {
+  return day.timedCalls > 0 && Number.isFinite(day.durationMs) && day.durationMs >= 0
+    ? Math.round(day.durationMs / day.timedCalls) : null;
+}
+
 export function summarizeUsage(snapshot: UsageStatisticsSnapshot | null, range: StatisticsRange, today = new Date()) {
   const day = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   if (range !== "all") day.setDate(day.getDate() - range + 1);
@@ -37,5 +44,5 @@ export function summarizeUsage(snapshot: UsageStatisticsSnapshot | null, range: 
     errorCodes:[...errorCodes].map(([code,count])=>({code,count})).sort((a,b)=>b.count-a.count || a.code.localeCompare(b.code)),
     transportStartsPerToolCall:total.calls ? Math.round(total.sessionOpens * 100 / total.calls)/100 : null,
     successRate: total.successes + total.errors ? Math.round(total.successes * 1000/(total.successes+total.errors))/10 : null,
-    avgDurationMs: total.timedCalls ? Math.round(total.durationMs / total.timedCalls) : null };
+    avgDurationMs: dailyAvgDurationMs(total) };
 }

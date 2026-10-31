@@ -301,3 +301,28 @@ nav button.active { background: #e2f3e7 !important; color: #176239 !important; f
   .live-graph-node.active-node, .live-graph-port.active { animation: none !important; }
   .live-graph-packet, .live-graph-return-packet { display: none; }
 }
+
+
+/* Usage Statistics: keep actionable signals prominent; diagnostic counters
+   remain in the persistent store and Monitor, not as dashboard tiles. */
+.stats-key-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stats-key-charts { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+.stats-key-charts .stats-top-tools { grid-column: auto; max-height: none; }
+.stats-chart-hint { font-size: 11px; color: #657a6b; line-height: 1.4; margin: -4px 0 10px; }
+.stats-latency-bars { height: 150px; gap: 6px; }
+.stats-latency-bars button { min-width: 43px; }
+.stats-latency-bars button i { background: #69bc86; }
+.stats-latency-bars button i[style*="height: 0"] { visibility: hidden; }
+.stats-key-charts .stats-tool-row { grid-template-columns: minmax(100px,1.2fr) 1fr 48px; }
+@media (max-width: 1350px) {
+  .stats-key-metrics { grid-template-columns: repeat(4, minmax(0,1fr)); }
+  .stats-key-charts { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .stats-key-charts .stats-top-tools { grid-column: auto; }
+}
+@media (max-width: 1090px) {
+  .stats-key-metrics { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .stats-key-charts { grid-template-columns: 1fr; }
+}
+@media (max-width: 550px) {
+  .stats-key-metrics { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}

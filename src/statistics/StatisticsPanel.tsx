@@ -1,79 +1,108 @@
 import { useMemo, useState } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Clock3, GitBranch, Network, RefreshCw } from "lucide-react";
-import { summarizeUsage, type StatisticsRange, type UsageStatisticsSnapshot } from "./statisticsModel";
-import {describeTool,summarizeToolDomains} from "../../shared/tool-taxonomy.mjs";
+import { Activity, CheckCircle2, Clock3, GitBranch } from "lucide-react";
+import {
+  dailyAvgDurationMs, summarizeUsage, type StatisticsRange, type UsageStatisticsSnapshot,
+} from "./statisticsModel";
+import { describeTool } from "../../shared/tool-taxonomy.mjs";
 
 const fmt = (n: number) => new Intl.NumberFormat().format(n);
-const duration = (ms: number | null) => ms === null ? "—" : ms < 1000 ? Math.round(ms) + " ms" : (ms/1000).toFixed(1) + " s";
-const friendlyTool = (tool: string) => describeTool(tool).title;
+const duration = (ms: number | null) => ms === null ? "—" :
+  ms < 1000 ? Math.round(ms) + " ms" : (ms / 1000).toFixed(1) + " s";
 
-export function StatisticsPanel({ stats, deviceLocation }: { stats: UsageStatisticsSnapshot | null; deviceLocation: string }) {
+export function StatisticsPanel({
+  stats, deviceLocation,
+}: { stats: UsageStatisticsSnapshot | null; deviceLocation: string }) {
   const [range, setRange] = useState<StatisticsRange>(7);
-  const [day, setDay] = useState("");
+  const [selectedDay, setSelectedDay] = useState("");
   const model = useMemo(() => summarizeUsage(stats, range), [stats, range]);
-  const selected = model.rows.find((row) => row.day === day);
-  const displayedTools = selected?.tools ? [...selected.tools].sort((a,b) => b.calls-a.calls) : model.tools;
-  const maxCalls = Math.max(1, ...model.rows.map((row) => row.calls));
-  const maxTasks = Math.max(1, ...model.rows.map((row) => row.workstreamOpens));
-  const maxTools = Math.max(1, ...displayedTools.map((tool) => tool.calls));
-  const byCategory=summarizeToolDomains(displayedTools);
-  const maxCategory=Math.max(1,...byCategory.map(x=>x.calls));
-  const busiest = model.rows.reduce<(typeof model.rows)[number] | null>((best, row) => !best || row.calls > best.calls ? row : best, null);
-  const frequentErrors = model.tools.filter((tool) => tool.errors > 0).sort((a,b) => b.errors-a.errors)[0];
+  const selected = model.rows.find((row) => row.day === selectedDay);
+  const tools = (selected
+    ? [...(selected.tools ?? [])].sort((a, b) => b.calls - a.calls)
+    : model.tools).slice(0, 5);
+  const highestToolCount = Math.max(1, ...tools.map((tool) => tool.calls));
+  const maxDailyDuration = Math.max(1, ...model.rows.map((row) => dailyAvgDurationMs(row) ?? 0));
+
   return <section className="usage-statistics panel" aria-label="OWL usage statistics">
     <div className="panel-heading stats-heading">
-      <div><span className="eyebrow">USAGE STATISTICS</span><h3>How you use OWL LAB</h3>
-        <p>Daily activity and tool usage recorded on {deviceLocation} {stats?.since ? "since " + new Date(stats.since).toLocaleDateString() : ""}. Historical activity before tracking began is not included.</p>
+      <div>
+        <span className="eyebrow">USAGE STATISTICS</span>
+        <h3>Tool performance</h3>
+        <p>Activity recorded on {deviceLocation}{stats?.since ? " since " + new Date(stats.since).toLocaleDateString() : ""}. Figures reflect the selected period; older calls remain in the average until they leave the range.</p>
       </div>
       <div className="stats-range" role="group" aria-label="Statistics time range">
-        {([7,30,90,"all"] as StatisticsRange[]).map((value) => <button key={value} className={range === value ? "active" : ""} onClick={() => {setRange(value);setDay("");}} aria-pressed={range === value}>{value === "all" ? "All recorded" : value + " days"}</button>)}
+        {([7, 30, 90, "all"] as StatisticsRange[]).map((value) =>
+          <button key={value} className={range === value ? "active" : ""}
+            onClick={() => { setRange(value); setSelectedDay(""); }}
+            aria-pressed={range === value}>
+            {value === "all" ? "All recorded" : value + " days"}
+          </button>)}
       </div>
     </div>
-    <div className="stats-metrics">
-      <div><GitBranch size={19}/><small>Workstream opens</small><strong>{fmt(model.total.workstreamOpens)}</strong><span>New work requests, not Runtime task completions</span></div>
-      <div><CheckCircle2 size={19}/><small>Completed workstreams</small><strong>{fmt(model.total.completedWorkstreams)}</strong><span>Successful workstream_complete calls</span></div>
-      <div><Activity size={19}/><small>MCP tool calls</small><strong>{fmt(model.total.calls)}</strong><span>Request events seen</span></div>
-      <div><CheckCircle2 size={19}/><small>Tool response success</small><strong>{model.successRate === null ? "—" : model.successRate + "%"}</strong><span>Responses with a known outcome</span></div>
-      <div><Clock3 size={19}/><small>Avg. tool response</small><strong>{duration(model.avgDurationMs)}</strong><span>Recorded response durations</span></div>
-      <div><AlertTriangle size={19}/><small>External tool fallbacks</small><strong>{fmt(model.total.externalFallbacks)}</strong><span>Only agent-reported departures from OWL, not all external plugin activity</span></div>
-      <div><Network size={19}/><small>Session opens</small><strong>{fmt(model.total.sessionOpens)}</strong><span>New MCP transport sessions observed</span></div>
-      <div><Network size={19}/><small>Sessions per tool call</small><strong>{model.transportStartsPerToolCall === null ? "—" : model.transportStartsPerToolCall.toFixed(2) + "×"}</strong><span>Transport churn signal, not a disconnect rate</span></div>
-      <div><Network size={19}/><small>Session-cap evictions</small><strong>{fmt(model.total.capEvictions)}</strong><span>Inactive transports reclaimed at capacity</span></div>
-      <div><Network size={19}/><small>Idle reclamations</small><strong>{fmt(model.total.idleReclaimed)}</strong><span>Idle transports reclaimed by TTL</span></div>
-      <div><Network size={19}/><small>Owner rebind cleanups</small><strong>{fmt(model.total.ownerSuperseded)}</strong><span>Inactive, superseded MCP transports safely released</span></div>
-      {model.total.reconnects > 0 && <div><Network size={19}/><small>Legacy reclamations</small><strong>{fmt(model.total.reconnects)}</strong><span>Historical events previously labeled reconnections; causes unavailable</span></div>}
+
+    <div className="stats-metrics stats-key-metrics">
+      <div>
+        <Clock3 size={19} aria-hidden="true"/>
+        <small>Avg. tool response</small>
+        <strong>{duration(model.avgDurationMs)}</strong>
+        <span>MCP tool processing; excludes ChatGPT transport</span>
+      </div>
+      <div>
+        <CheckCircle2 size={19} aria-hidden="true"/>
+        <small>Tool success</small>
+        <strong>{model.successRate === null ? "—" : model.successRate + "%"}</strong>
+        <span>Responses with a known outcome</span>
+      </div>
+      <div>
+        <Activity size={19} aria-hidden="true"/>
+        <small>Tool calls</small>
+        <strong>{fmt(model.total.calls)}</strong>
+        <span>Recorded tool requests</span>
+      </div>
+      <div>
+        <GitBranch size={19} aria-hidden="true"/>
+        <small>Completed workstreams</small>
+        <strong>{fmt(model.total.completedWorkstreams)}</strong>
+        <span>Successful workstream completions</span>
+      </div>
     </div>
-    {model.fallbackReasons.length > 0 && <div className="stats-insights">
-      <AlertTriangle size={16}/><span>
-        <strong>Recorded OWL fallback reasons: </strong>
-        {model.fallbackReasons.map(item=>item.reason+" ("+item.count+")").join(" · ")}
-        . External tools used without reporting cannot be counted.
-      </span>
-    </div>}
-    {model.errorCodes.length > 0 && <div className="stats-insights">
-      <AlertTriangle size={16}/><span><strong>Recorded MCP error codes: </strong>
-        {model.errorCodes.slice(0,8).map(x=>x.code+" ("+fmt(x.count)+")").join(" · ")}
-        . Error-code totals are available only for newly recorded events after this update; older errors remain unclassified by cause.
-      </span>
-    </div>}
-    <div className="stats-charts">
+
+    <div className="stats-charts stats-key-charts">
       <div className="stats-chart">
-        <h4>Tool calls by day</h4>
-        <div className="stats-bars">{model.rows.map((row) => <button key={row.day} title={row.day+": "+row.calls+" calls"} onClick={() => setDay(day === row.day ? "" : row.day)} className={day === row.day ? "selected" : ""}><b>{row.calls}</b><i style={{height:Math.max(3,row.calls/maxCalls*100)+"%"}}/><small>{row.day.slice(5)}</small></button>)}</div>
+        <h4>Daily average response time</h4>
+        <p className="stats-chart-hint">Compare days with recorded responses. Select a day to inspect its tools.</p>
+        <div className="stats-bars stats-latency-bars" aria-label="Daily tool response durations">
+          {model.rows.map((row) => {
+            const average = dailyAvgDurationMs(row);
+            const active = row.day === selectedDay;
+            return <button key={row.day} type="button" className={active ? "selected" : ""}
+              aria-pressed={active}
+              aria-label={row.day + ": " + (average === null ? "No timed responses" : duration(average) + " average, " + row.timedCalls + " timed responses")}
+              title={row.day + " · " + duration(average) + " · " + fmt(row.calls) + " calls"}
+              onClick={() => setSelectedDay(active ? "" : row.day)}>
+              <b>{duration(average)}</b>
+              <i style={{ height: average === null ? "0" : Math.max(3, average / maxDailyDuration * 100) + "%" }}/>
+              <small>{row.day.slice(5)}</small>
+            </button>;
+          })}
+        </div>
+        {model.rows.length === 0 && <p className="stats-empty">No response data in this period.</p>}
       </div>
-      <div className="stats-chart task-chart">
-        <h4>Workstream opens by day</h4>
-        <div className="stats-bars">{model.rows.map((row) => <button key={row.day} title={row.day+": "+row.workstreamOpens+" opens"} onClick={() => setDay(day === row.day ? "" : row.day)} className={day === row.day ? "selected" : ""}><b>{row.workstreamOpens}</b><i style={{height:Math.max(3,row.workstreamOpens/maxTasks*100)+"%"}}/><small>{row.day.slice(5)}</small></button>)}</div>
-      </div>
+
       <div className="stats-chart stats-top-tools">
-        <div className="stats-tool-head"><h4>{selected ? "Tools · "+selected.day : "Most used tools"}</h4>{selected && <button onClick={() => setDay("")}>Clear date</button>}</div>
-        {displayedTools.map((tool) => <div className="stats-tool-row" key={tool.tool} title={[tool.tool,describeTool(tool.tool).category,describeTool(tool.tool).primitive ? describeTool(tool.tool).primitive+"("+describeTool(tool.tool).op+") → "+describeTool(tool.tool).action:"adapter/control plane",tool.errors+" errors"].join(" · ")}><span>{friendlyTool(tool.tool)}</span><div className="stats-tool-track"><i style={{width:tool.calls/maxTools*100+"%"}}/></div><strong>{tool.calls}</strong></div>)}
-        {displayedTools.length === 0 && <p className="stats-empty">No tool calls recorded in this period.</p>}
+        <div className="stats-tool-head">
+          <h4>{selected ? "Top tools · " + selected.day : "Most used tools"}</h4>
+          {selected && <button type="button" onClick={() => setSelectedDay("")}>All days</button>}
+        </div>
+        {tools.map((tool) =>
+          <div className="stats-tool-row" key={tool.tool}
+            title={tool.tool + " · " + tool.calls + " calls · " + tool.errors + " errors"}>
+            <span>{describeTool(tool.tool).title}</span>
+            <div className="stats-tool-track"><i style={{ width: tool.calls / highestToolCount * 100 + "%" }}/></div>
+            <strong>{fmt(tool.calls)}</strong>
+          </div>)}
+        {tools.length === 0 && <p className="stats-empty">No tools recorded in this period.</p>}
       </div>
-      <div className="stats-chart stats-top-tools" aria-label="Tool calls by capability category"><h4>Capability categories</h4>{byCategory.map(category=><div className="stats-tool-row" key={category.category}><span>{category.category}</span><div className="stats-tool-track"><i style={{width:category.calls/maxCategory*100+"%"}}/></div><strong>{fmt(category.calls)}</strong></div>)}</div>
     </div>
-    <div className="stats-insights"><AlertTriangle size={16}/><span><strong>Usage insight: </strong>{frequentErrors ? friendlyTool(frequentErrors.tool)+" had "+frequentErrors.errors+" error response(s). Review related events in Monitor." : busiest ? "Most active recorded day: "+busiest.day+" ("+busiest.calls+" calls). No tool errors recorded in this range." : "Waiting for the first recorded MCP interaction. Open Monitor to see live activity."}</span></div>
-    {model.rows.length === 0 && <p className="stats-empty">No recorded data for this period. Charts will populate as OWL runs.</p>}
-    <p className="stats-footnote"><RefreshCw size={12}/> Session reclamation is not an unexpected disconnect or a successful reconnect. Sessions per tool call measures churn, not failure or cost. Success rate counts recorded success/error outcomes; user mistakes and deliberately rejected operations may also appear as errors. Historical error-code reasons are unavailable. Counts are local, durable and based on observed events; a response without a request may affect success rate but not call count.</p>
+    <p className="stats-footnote">Detailed traces, queue waits, retries, session cleanup and error codes remain in Monitor and diagnostic logs. These averages are not full ChatGPT round-trip times.</p>
   </section>;
 }
