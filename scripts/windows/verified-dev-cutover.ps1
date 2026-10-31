@@ -269,9 +269,31 @@ $preflight=[ordered]@{mode=$Mode;oldRoot=$OldRoot;newRoot=$NewRoot;
  guardianRoot=$null;ready=$false}
 $guard=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if($guard){$preflight.guardianRoot=[string]$guard.Actions[0].WorkingDirectory}
+# A previously failed rollback can leave the guardian task pinned to an older,
+# idle, immutable release while Electron is healthy from a different release.
+# Only allow this stale binding when its task and executable are verified, no
+# other Electron main is running from the guardian root, and the independent
+# Computer MCP remains reachable. On success install the new guardian; on
+# failure restore the actual old Electron owner's guardian, not the stale pin.
+$preflight.guardianRecoverable=$false
+if($guard -and $guard.State -eq 'Running' -and
+   [string]$guard.Actions[0].Execute -ieq 'powershell.exe' -and
+   [string]$guard.Actions[0].WorkingDirectory -eq $OldRoot){
+ $preflight.guardianRecoverable=$true
+} elseif($guard -and $guard.State -eq 'Running' -and
+         [string]$guard.Actions[0].Execute -ieq 'powershell.exe'){
+ $guardianRoot=[string]$guard.Actions[0].WorkingDirectory
+ $scriptPath=Join-Path $guardianRoot 'scripts\windows\dev-guardian.ps1'
+ if($guardianRoot.StartsWith($workspace+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -and
+    (Test-Path -LiteralPath $scriptPath -PathType Leaf) -and
+    [string]$guard.Actions[0].Arguments -like ('*'+$scriptPath+'*') -and
+    -not (MainProcess $guardianRoot)){
+   $preflight.guardianRecoverable=$true
+ }
+}
 $preflight.ready=[bool]($original -and -not $preflight.newMainPresent -and
  $preflight.computerMcpBackup -and $preflight.runtimeHealthy -and $preflight.tunnelHealthy -and
- $preflight.guardianRoot -eq $OldRoot)
+ $preflight.guardianRecoverable)
 if($Mode -eq 'Check'){$preflight|ConvertTo-Json -Depth 4;exit 0}
 if(-not $preflight.ready){throw 'CUTOVER_PREFLIGHT_BLOCKED'}
 # Windows Computer MCP is the local independent fallback. A remote caller must
@@ -332,7 +354,7 @@ try{
    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $g -Mode Install | Out-Null
   }catch{}
  }elseif($hadGuardian){
-  try{Start-ScheduledTask -TaskName $taskName -ErrorAction Stop}catch{}
+  try{Restore-OldGuardian}catch{$reason+=':guardian-restore-failed'}
  }
  (Write-Receipt 'rolled-back-or-blocked' $reason $restored)|ConvertTo-Json -Compress
  if($restored){Remove-Watchdog}
