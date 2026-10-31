@@ -10,7 +10,7 @@ import http from "node:http";
 import {spawnSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {retireSupersededMacCurrentJobs} from "./lib/mac-release-startup.mjs";
-import {macDesktopMainPresent,macWatchdogDecision} from "./lib/mac-postactivation-health.mjs";
+import {macDesktopMainPresent,macProcessTable,macWatchdogDecision} from "./lib/mac-postactivation-health.mjs";
 
 const [mode,oldRoot,newRoot,oldSha,newSha]=process.argv.slice(2);
 const sha=/^[a-f0-9]{40}$/;
@@ -132,10 +132,9 @@ async function tunnelReady(root){
 
 function exactSupervisor(dir){
  const expected=path.join(dir,"scripts","dev-full.mjs");
- const found=run("/bin/ps",["-axo","pid=,command="],{allowError:true});
- if(found.status!==0)return null;
+ const found=macProcessTable(); // throws on ENOBUFS, not "missing supervisor"
  const matches=[];
- for(const line of found.stdout.split("\n")){
+ for(const line of found.split("\n")){
   const match=line.trim().match(/^(\d+)\s+(\S+)\s+(\S+)$/);
   if(match&&match[3]===expected&&path.basename(match[2])==="node")matches.push(Number(match[1]));
  }
@@ -146,8 +145,7 @@ function exactSupervisor(dir){
 }
 function expectedSupervisorRunning(dir){return Boolean(exactSupervisor(dir))}
 function desktopMainRunning(dir){
- const ps=run("/bin/ps",["-axo","pid=,command="],{allowError:true});
- return ps.status===0&&macDesktopMainPresent(dir,ps.stdout);
+ return macDesktopMainPresent(dir,macProcessTable());
 }
 async function healMissingOwner(dir){
  if(ownerMatches(dir))return true;
@@ -256,9 +254,15 @@ async function reconcileRollback(tx){
 }
 async function check(){
  verifyDir(oldRoot,oldSha);verifyDir(newRoot,newSha);
- return {oldRoot,newRoot,oldSha,newSha,oldRunning:await healthy(oldRoot),
-  nextRunning:await healthy(newRoot),ports:[8790,8791,18788,5173],
-  oldOwnerVerified:ownerMatches(oldRoot),watchdogAvailable:true,
+ const oldComponents=await componentProbe(oldRoot);
+ const nextComponents=await componentProbe(newRoot);
+ const oldTunnelReady=await tunnelReady(oldRoot);
+ return {oldRoot,newRoot,oldSha,newSha,
+  oldRunning:localProbeHealthy(oldComponents)&&oldTunnelReady,
+  nextRunning:localProbeHealthy(nextComponents)&&await tunnelReady(newRoot),
+  oldComponents,nextComponents,oldTunnelReady,
+  ports:[8790,8791,18788,5173],
+  oldOwnerVerified:oldComponents.ownerVerified,watchdogAvailable:true,
   liveServiceChanged:false};
 }
 if(!["check","apply","watch"].includes(mode))throw Error("Usage: mac-cutover.mjs check|apply|watch OLD NEW SHA SHA");

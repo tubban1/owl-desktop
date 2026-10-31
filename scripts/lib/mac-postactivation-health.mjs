@@ -1,4 +1,18 @@
 import path from "node:path";
+import {spawnSync} from "node:child_process";
+
+// macOS process tables can exceed 128 KiB on active development machines.
+ // ENOBUFS/timeout must be UNKNOWN, never falsely interpreted as process death.
+export function macProcessTable(spawn = spawnSync) {
+  const result = spawn("/bin/ps", ["-axo", "pid=,command="], {
+    timeout: 9000, encoding: "utf8", maxBuffer: 4 * 1024 * 1024,
+  });
+  if (result.status !== 0 || result.error) {
+    throw new Error("MAC_PROCESS_ENUMERATION_UNAVAILABLE:" +
+      String(result.error?.code ?? result.status));
+  }
+  return result.stdout;
+}
 
 // DEV releases run exactly one Electron main process with 'electron .'.
 // Electron helpers / a process from another checkout do not count.

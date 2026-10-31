@@ -1,7 +1,7 @@
 import { it } from "vitest";
 import assert from "node:assert/strict";
 import path from "node:path";
-import {macDesktopMainPresent,macWatchdogDecision,postActivationRecoveryAction}
+import {macDesktopMainPresent,macProcessTable,macWatchdogDecision,postActivationRecoveryAction}
   from "../scripts/lib/mac-postactivation-health.mjs";
 
 it("macOS watchdog verifies the exact Electron GUI, not a helper or another checkout", () => {
@@ -71,4 +71,28 @@ it("legacy recovery action uses a five-minute core outage threshold",()=>{
  assert.equal(postActivationRecoveryAction({healthy:false,firstSeenAt:mark(70),now,supervisorPresent:false}),"restart");
  assert.equal(postActivationRecoveryAction({healthy:false,firstSeenAt:mark(151),now,supervisorPresent:true}),"wait");
  assert.equal(postActivationRecoveryAction({healthy:false,firstSeenAt:mark(301),now,supervisorPresent:true}),"rollback");
+});
+
+
+it("watchdog reads process tables larger than the old 128 KiB ceiling",()=>{
+ const longTable="3000 /usr/bin/other "+("x".repeat(195_000))+"\n"+
+    "4000 /usr/bin/node /Users/example/dev-full.mjs";
+ let captured=null;
+ const output=macProcessTable((command,args,options)=>{
+   captured={command,args,options};
+   if(options.maxBuffer<Buffer.byteLength(longTable))
+     return {status:null,error:{code:"ENOBUFS"},stdout:longTable.slice(0,131072)};
+   return {status:0,stdout:longTable};
+ });
+ assert.ok(output.length>128*1024);
+ assert.ok(output.includes("dev-full.mjs"));
+ assert.equal(captured.command,"/bin/ps");
+ assert.ok(captured.options.maxBuffer>=4*1024*1024);
+});
+
+it("process enumeration errors never masquerade as missing running processes",()=>{
+ assert.throws(()=>macProcessTable(()=>({status:null,error:{code:"ENOBUFS"}})),
+   /MAC_PROCESS_ENUMERATION_UNAVAILABLE:ENOBUFS/);
+ assert.throws(()=>macProcessTable(()=>({status:1,stderr:"permission denied"})),
+   /MAC_PROCESS_ENUMERATION_UNAVAILABLE:1/);
 });
