@@ -172,9 +172,18 @@ if($Mode -eq 'Install') {
     $PSCommandPath + '" -Mode Run -IntervalSeconds ' + $IntervalSeconds
   $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $args -WorkingDirectory $project
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
+  # When the long-running guardian exits without a Scheduler failure, an
+  # AtLogOn trigger alone cannot bring it back until the next sign-in.
+  # IgnoreNew ensures the five-minute recovery trigger never starts a second
+  # guardian while the original process is healthy.
+  $recoveryTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
   $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
-  $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
+  # Windows defaults stop scheduled tasks on battery. That terminates this
+  # long-running tunnel guardian on an unplug/sleep transition, leaving
+  # remote tools unavailable without a self-healing rearm trigger.
+  # Always keep the signed-in user's guardian alive on AC *and* battery.
+  $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($trigger, $recoveryTrigger) -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
   Write-GuardianEvent 'installed' 'logon_user_session_only'
   # Start now instead of waiting for the next interactive sign-in.
   Start-ScheduledTask -TaskName $taskName

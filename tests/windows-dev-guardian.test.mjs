@@ -12,6 +12,15 @@ describe("Windows DEV self-healing guardian",()=>{
   expect(body).not.toContain("-UserId 'SYSTEM'");
   expect(body).not.toContain("LocalSystem");
  });
+ it("does not lose remote OWL access on battery power transitions",async()=>{
+  const body=await readFile(source,"utf8");
+  expect(body).toContain("-AllowStartIfOnBatteries");
+  expect(body).toContain("-DontStopIfGoingOnBatteries");
+  expect(body).toContain("-RestartCount 3");
+  expect(body).toContain("-MultipleInstances IgnoreNew");
+  expect(body).toContain("-RepetitionInterval (New-TimeSpan -Minutes 5)");
+  expect(body).toContain("-Trigger @($trigger, $recoveryTrigger)");
+ });
  it("only manages the dedicated official tunnel, never the legacy Computer MCP",async()=>{
   const body=await readFile(source,"utf8");
   expect(body).toContain("Read-TunnelId");
