@@ -215,6 +215,20 @@ export class PlannerContinuationStore {
     this.archivedRetentionMs = Math.max(Number(archivedRetentionMs) || 0, 0);
     this._getCache = null;
     this._healthCache = null;
+    this._hotCache = null;
+    this._hotSignature = null;
+  }
+
+  // Only the Connection Host mutates this snapshot synchronously. Revalidate
+  // the inode/mtime/size on each use so another writer or atomic replacement
+  // is observed immediately; never rely on a time-based stale-cache TTL.
+  hotSnapshot() {
+    const signature = snapshotSignature(this.file);
+    if (!this._hotCache || this._hotSignature !== signature) {
+      this._hotCache = this.read();
+      this._hotSignature = signature;
+    }
+    return this._hotCache;
   }
 
   read() {
@@ -238,9 +252,23 @@ export class PlannerContinuationStore {
   }
 
   write(state) {
-    writeJsonAtomic(this.file, state);
-    // Keep mutation reads fresh: only repeated read-only lookups are cached.
-    this._getCache = null;
+    try {
+      writeJsonAtomic(this.file, state);
+    } catch (error) {
+      // A failed atomic write must never leave mutated, uncommitted data
+      // visible through the warm cache on the next request.
+      this._hotCache = null;
+      this._hotSignature = null;
+      this._getCache = null;
+      this._healthCache = null;
+      throw error;
+    }
+    // The atomic rename is the commit boundary. No async/debounced writes:
+    // a returned MCP tool result is already recoverable after a crash.
+    const signature = snapshotSignature(this.file);
+    this._hotCache = state;
+    this._hotSignature = signature;
+    this._getCache = { signature, owners: state.owners };
     this._healthCache = null;
   }
 
@@ -344,7 +372,7 @@ export class PlannerContinuationStore {
     if (!ownerId) {
       throw new Error("Implicit OWL workstream requires a stable owner.");
     }
-    const state = this.read();
+    const state = this.hotSnapshot();
     const owner = ownerRecord(state, ownerId);
     if (
       owner.workstream &&
@@ -731,38 +759,8 @@ export class PlannerContinuationStore {
     return compactOwner(owner);
   }
 
-  recordWorkstreamToolStep(
-    ownerId,
-    input,
-    now = new Date().toISOString(),
-  ) {
-    const state = this.read();
-    const owner = state.owners[ownerId];
-    if (!owner?.workstream || owner.workstream.status === "completed") {
-      return null;
-    }
-    const recentTools = [
-      ...(Array.isArray(owner.workstream.recentTools)
-        ? owner.workstream.recentTools
-        : []),
-      {
-        at: now,
-        tool: String(input.tool ?? "unknown").slice(0, 120),
-        outcome: input.outcome === "error" ? "error" : "success",
-        durationMs: Math.max(0, Number(input.durationMs ?? 0)),
-      },
-    ].slice(-12);
-    owner.workstream = {
-      ...owner.workstream,
-      updatedAt: now,
-      toolStepsSinceProgress:
-        Number(owner.workstream.toolStepsSinceProgress ?? 0) + 1,
-      totalToolSteps: Number(owner.workstream.totalToolSteps ?? 0) + 1,
-      recentTools,
-    };
-    owner.updatedAt = now;
-    this.write(state);
-    return compactOwner(owner);
+  recordWorkstreamToolStep(ownerId, input, now = new Date().toISOString()) {
+    return this.recordToolObservation(ownerId, { step: input }, now)?.owner ?? null;
   }
 
   completeWorkstream(ownerId, input = {}, now = new Date().toISOString()) {
@@ -847,7 +845,7 @@ export class PlannerContinuationStore {
     metadata = {},
   ) {
     if (!ownerId || !transportSessionId) return null;
-    const state = this.read();
+    const state = this.hotSnapshot();
     const owner = ownerRecord(state, ownerId);
     const previous = owner.transports[transportSessionId];
     owner.transports[transportSessionId] = {
@@ -919,63 +917,93 @@ export class PlannerContinuationStore {
     return changed;
   }
 
-  recordConversationTraffic(
-    ownerId,
-    input,
-    now = new Date().toISOString(),
-  ) {
-    if (!ownerId) return null;
-    const state = this.read();
+  recordConversationTraffic(ownerId, input, now = new Date().toISOString()) {
+    return this.recordToolObservation(ownerId, { traffic: input }, now)?.continuity ?? null;
+  }
+
+  // One tool's execution step + traffic meter are a single durable change.
+  // A 18MB planner snapshot previously incurred two JSON parses and two full
+  // atomic rewrites per tool. All historical fields and crash consistency
+  // remain exactly as before, without hiding or sampling telemetry.
+  recordToolObservation(ownerId, { step = null, traffic = null } = {}, now = new Date().toISOString()) {
+    if (!ownerId || (!step && !traffic)) return null;
+    const state = this.hotSnapshot();
     const owner = state.owners[ownerId];
-    if (!owner?.workstream || owner.workstream.status === "completed") {
-      return null;
+    if (!owner?.workstream || owner.workstream.status === "completed") return null;
+    if (step) {
+      const input = step;
+      const recentTools = [
+        ...(Array.isArray(owner.workstream.recentTools)
+          ? owner.workstream.recentTools
+          : []),
+        {
+          at: now,
+          tool: String(input.tool ?? "unknown").slice(0, 120),
+          outcome: input.outcome === "error" ? "error" : "success",
+          durationMs: Math.max(0, Number(input.durationMs ?? 0)),
+        },
+      ].slice(-12);
+      owner.workstream = {
+        ...owner.workstream,
+        updatedAt: now,
+        toolStepsSinceProgress:
+          Number(owner.workstream.toolStepsSinceProgress ?? 0) + 1,
+        totalToolSteps: Number(owner.workstream.totalToolSteps ?? 0) + 1,
+        recentTools,
+      };
+      owner.updatedAt = now;
     }
+    if (traffic) {
+      const input = traffic;
+      const requestChars = Math.max(0, Number(input.requestChars ?? 0));
+      const responseChars = Math.max(0, Number(input.responseChars ?? 0));
+      const requestDigest =
+        typeof input.requestDigest === "string" ? input.requestDigest : null;
+      const responseDigest =
+        typeof input.responseDigest === "string" ? input.responseDigest : null;
+      const recent = Array.isArray(owner.continuity?.recentTraffic)
+        ? owner.continuity.recentTraffic
+        : [];
 
-    const requestChars = Math.max(0, Number(input.requestChars ?? 0));
-    const responseChars = Math.max(0, Number(input.responseChars ?? 0));
-    const requestDigest =
-      typeof input.requestDigest === "string" ? input.requestDigest : null;
-    const responseDigest =
-      typeof input.responseDigest === "string" ? input.responseDigest : null;
-    const recent = Array.isArray(owner.continuity?.recentTraffic)
-      ? owner.continuity.recentTraffic
-      : [];
+      const duplicateRequest =
+        requestChars > 0 &&
+        requestDigest &&
+        recent.some((item) => item.requestDigest === requestDigest);
+      const duplicateResponse =
+        responseChars > 0 &&
+        responseDigest &&
+        recent.some((item) => item.responseDigest === responseDigest);
+      const duplicateChars =
+        (duplicateRequest ? requestChars : 0) +
+        (duplicateResponse ? responseChars : 0);
 
-    const duplicateRequest =
-      requestChars > 0 &&
-      requestDigest &&
-      recent.some((item) => item.requestDigest === requestDigest);
-    const duplicateResponse =
-      responseChars > 0 &&
-      responseDigest &&
-      recent.some((item) => item.responseDigest === responseDigest);
-    const duplicateChars =
-      (duplicateRequest ? requestChars : 0) +
-      (duplicateResponse ? responseChars : 0);
-
-    const sample = {
-      at: now,
-      tool: String(input.tool ?? "unknown").slice(0, 120),
-      requestChars,
-      responseChars,
-      duplicateChars,
-      requestDigest,
-      responseDigest,
-    };
-    owner.continuity = {
-      ...(owner.continuity ?? {}),
-      observedChars:
-        Math.max(0, Number(owner.continuity?.observedChars ?? 0)) +
-        requestChars +
+      const sample = {
+        at: now,
+        tool: String(input.tool ?? "unknown").slice(0, 120),
+        requestChars,
         responseChars,
-      duplicateChars:
-        Math.max(0, Number(owner.continuity?.duplicateChars ?? 0)) +
         duplicateChars,
-      recentTraffic: [...recent, sample].slice(-96),
-    };
-    owner.updatedAt = now;
+        requestDigest,
+        responseDigest,
+      };
+      owner.continuity = {
+        ...(owner.continuity ?? {}),
+        observedChars:
+          Math.max(0, Number(owner.continuity?.observedChars ?? 0)) +
+          requestChars +
+          responseChars,
+        duplicateChars:
+          Math.max(0, Number(owner.continuity?.duplicateChars ?? 0)) +
+          duplicateChars,
+        recentTraffic: [...recent, sample].slice(-96),
+      };
+      owner.updatedAt = now;
+    }
     this.write(state);
-    return this.continuityStatus(ownerId, Date.parse(now));
+    return {
+      owner: compactOwner(owner),
+      continuity: traffic ? this.continuityStatus(ownerId, Date.parse(now), state) : null,
+    };
   }
 
   continuityStatus(ownerId, nowMs = Date.now(), stateOverride = null) {

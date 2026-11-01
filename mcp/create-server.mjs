@@ -604,17 +604,24 @@ function recordConversationContinuity(
   toolName,
   requestTelemetry,
   responseTelemetry,
+  step = null,
 ) {
-  const status = context.plannerContinuation?.recordConversationTraffic?.(
-    context.runtimeSessionId,
-    {
-      tool: toolName,
-      requestChars: requestTelemetry.chars,
-      responseChars: responseTelemetry.chars,
-      requestDigest: requestTelemetry.digest,
-      responseDigest: responseTelemetry.digest,
-    },
-  );
+  const store = context.plannerContinuation;
+  const traffic = {
+    tool: toolName,
+    requestChars: requestTelemetry.chars,
+    responseChars: responseTelemetry.chars,
+    requestDigest: requestTelemetry.digest,
+    responseDigest: responseTelemetry.digest,
+  };
+  // Preserve the two legacy APIs for other stores, but take the single-write
+  // path for the Connection Host's durable PlannerContinuationStore.
+  const status = typeof store?.recordToolObservation === "function"
+    ? store.recordToolObservation(context.runtimeSessionId, { step, traffic })?.continuity
+    : (() => {
+      if (step) store?.recordWorkstreamToolStep?.(context.runtimeSessionId, step);
+      return store?.recordConversationTraffic?.(context.runtimeSessionId, traffic);
+    })();
   return ensureContinuityHandoff(context, status);
 }
 
@@ -861,22 +868,15 @@ function tool(server, name, description, schema, annotations, handler) {
           isProgressSafeRead(name, args) &&
           context.plannerContinuation?.get?.(context.runtimeSessionId)
             ?.workstream?.progressBoundary?.pending === true;
-        if (!WORKSTREAM_META_TOOLS.has(name) && !pendingRecoveryRead) {
-          context.plannerContinuation?.recordWorkstreamToolStep?.(
-            context.runtimeSessionId,
-            {
-              tool: name,
-              outcome: "success",
-              durationMs,
-            },
-          );
-        }
+        const step = !WORKSTREAM_META_TOOLS.has(name) && !pendingRecoveryRead
+          ? { tool: name, outcome: "success", durationMs } : null;
         const responseTelemetry = interactionTelemetry(value instanceof NativeMcpResult ? value.safeTelemetry : value);
         const continuityStatus = recordConversationContinuity(
           context,
           name,
           requestTelemetry,
           responseTelemetry,
+          step,
         );
         context.onEvent?.("info", "MCP interaction response", {
           ...interactionMeta,
@@ -912,22 +912,13 @@ function tool(server, name, description, schema, annotations, handler) {
         return ok(addProgressAdvisory(context, name, value));
       } catch (error) {
         const durationMs = Date.now() - started;
-        if (
+        const step =
           !WORKSTREAM_META_TOOLS.has(name) &&
           !(isProgressSafeRead(name, args) &&
             context.plannerContinuation?.get?.(context.runtimeSessionId)
               ?.workstream?.progressBoundary?.pending === true) &&
           error?.code !== "PROGRESS_UPDATE_REQUIRED"
-        ) {
-          context.plannerContinuation?.recordWorkstreamToolStep?.(
-            context.runtimeSessionId,
-            {
-              tool: name,
-              outcome: "error",
-              durationMs,
-            },
-          );
-        }
+            ? { tool: name, outcome: "error", durationMs } : null;
         const progressBoundary =
           error?.code === "PROGRESS_UPDATE_REQUIRED";
         const errorTelemetry = interactionTelemetry({
@@ -942,6 +933,7 @@ function tool(server, name, description, schema, annotations, handler) {
           name,
           requestTelemetry,
           errorTelemetry,
+          step,
         );
         context.onEvent?.(
           progressBoundary ? "info" : "error",
