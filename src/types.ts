@@ -213,9 +213,11 @@ export type CloudEntitlement = {
   entitlementId: string;
   userId: string;
   organizationId: string;
-  plan: "trial" | "credit" | "pro" | "business";
+  plan: "trial" | "credit" | "pro" | "business" | "developer";
   status:
     | "trial_active"
+    | "developer_active"
+    | "developer_expired"
     | "active"
     | "trial_expired"
     | "payment_required"
@@ -224,6 +226,7 @@ export type CloudEntitlement = {
   trialStartedAt: string;
   trialEndsAt: string;
   trialExtensionDays: number;
+  developerExpiresAt?: string | null;
   subscriptionEndsAt: string | null;
   suspendedAt: string | null;
   walletBalanceMinor: number;
