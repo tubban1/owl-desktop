@@ -4,6 +4,7 @@ import path from "node:path";
 import {constants as flags} from "node:fs";
 import {createHash,randomBytes,randomUUID} from "node:crypto";
 import {currentUploadScope} from "./agent-upload-policy.mjs";
+import {getUploadConsent} from "../shared/agent-upload-consent.mjs";
 import {secureUploadStagingRoot} from "./private-upload-staging.mjs";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -45,14 +46,15 @@ export function createAgentUploadBroker({
   allowedRoots,
   allowedOrigins,
   scopeReader=currentUploadScope,
+  consentReader=getUploadConsent,
   tempRoot=path.join(os.tmpdir(),"owl-lab-agent-uploads-"+(process.getuid?.()??"user")),
   now=()=>Date.now(),
   ttlMs=TTL_MS
 }={}) {
   const tickets=new Map();
   const uploads=new Map();
-  const currentOrigins=()=>allowedOrigins ?? String(scopeReader("OWL_AGENT_UPLOAD_ORIGINS")||"").split(/[;,]/).filter(Boolean);
-  const currentRoots=()=>allowedRoots ?? String(scopeReader("OWL_AGENT_UPLOAD_ROOTS")||"").split(path.delimiter).filter(Boolean);
+  const currentOrigins=()=>allowedOrigins ?? [...new Set([...String(scopeReader("OWL_AGENT_UPLOAD_ORIGINS")||"").split(/[;,]/).filter(Boolean),...consentReader().origins])];
+  const currentRoots=()=>allowedRoots ?? [...new Set([...String(scopeReader("OWL_AGENT_UPLOAD_ROOTS")||"").split(path.delimiter).filter(Boolean),...consentReader().roots])];
   const isSiteApproved=site=>new Set(currentOrigins().map(originOf).filter(Boolean)).has(site);
   async function approvedRoots(){
     return Promise.all(currentRoots().map(async x=>{
@@ -130,7 +132,7 @@ export function createAgentUploadBroker({
         if(count!==stat.size)throw Error("UPLOAD_SOURCE_CHANGED");
       }finally{await dest.close();}
       const ticket=randomBytes(24).toString("hex");
-      const entry={owner,site,stage,dir,basename,size:stat.size,mime:MIME[ext],
+      const entry={owner,site,stage,dir,source,basename,size:stat.size,mime:MIME[ext],
         digest:sha.digest("hex"),expiresAt:now()+ttlMs,consumed:false};
       tickets.set(ticket,entry);
       return {file_ticket:ticket,filename:basename,bytes:stat.size,mime:entry.mime,
@@ -143,6 +145,7 @@ export function createAgentUploadBroker({
   }
   async function resolve({owner,ticketIds,origin}) {
     await sweep();
+    const roots=await approvedRoots();
     const site=originOf(origin);
     if(!site)throw Error("UPLOAD_ORIGIN_INVALID");
     if(!Array.isArray(ticketIds)||ticketIds.length<1||ticketIds.length>MAX_FILES_PER_UPLOAD ||
@@ -151,6 +154,7 @@ export function createAgentUploadBroker({
       const t=tickets.get(key);
       if(!t||t.consumed||t.owner!==owner||t.site!==site)throw Error("UPLOAD_TICKET_NOT_AUTHORIZED");
       if(!isSiteApproved(site))throw Error("UPLOAD_DESTINATION_NOT_APPROVED");
+      if(!roots.some(root=>inside(root,t.source)))throw Error("UPLOAD_ROOT_REVOKED");
       return {ticket:key,stagedPath:t.stage,filename:t.basename,size:t.size,mime:t.mime};
     });
   }
