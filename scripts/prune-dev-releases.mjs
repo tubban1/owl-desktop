@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import {inspectMacNativeHostPin} from "./lib/mac-native-host-protection.mjs";
 
 const apply = process.argv.includes("--apply");
 const root = path.resolve(import.meta.dirname, "../../_releases");
@@ -43,6 +44,11 @@ const agentFiles = fs.readdirSync(agentsRoot)
 // Keep latest 3 snapshots, active-process references, and any service
 // currently running, with its direct fallback/watchdog for safe rollback.
 const retained = new Set(folders.slice(0, 3).map(entry => entry.name));
+// A Chrome Native Messaging wrapper is a persistent release consumer even
+// when Chrome is closed. Never prune the script it references. Fail closed
+// on a dangling/malformed registration until explicit reconciliation.
+const nativeHost=inspectMacNativeHostPin();
+if(nativeHost.sourceRoot)retained.add(path.basename(nativeHost.sourceRoot));
 for (const entry of folders) if (running.includes(entry.root)) retained.add(entry.name);
 const currentLabels = new Set([...loaded.entries()]
   .filter(([, pid]) => pid !== "-").map(([label]) => label));
@@ -81,8 +87,11 @@ console.log(JSON.stringify({
   retained: [...retained].sort(),
   plannedRetireAgentCount: retiringAgents.length,
   plannedRemove: deletable.map(({ name }) => name),
+  nativeHost: {configured:nativeHost.configured,safeToPrune:nativeHost.safeToPrune,
+    reason:nativeHost.reason??null,pinnedRelease:nativeHost.sourceRoot?path.basename(nativeHost.sourceRoot):null},
 }, null, 2));
 if (!apply) process.exit(0);
+if(!nativeHost.safeToPrune)throw Error("PRUNE_BLOCKED_"+nativeHost.reason);
 
 fs.mkdirSync(archiveRoot, { recursive: true, mode: 0o700 });
 const safelyRetired = [];

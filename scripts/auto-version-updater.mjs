@@ -14,6 +14,7 @@ import {otaRoot,platform,initIdentity,configure,heartbeat,acquire,release,peerSt
 import {isRetryablePeerFailure,shouldBackoffFailedRelease} from "./lib/ota-retry-policy.mjs";
 import {parseOtaReceipt} from "./lib/ota-receipt.mjs";
 import {tryAcquireLocalRolloutLock} from "./lib/ota-local-rollout-lock.mjs";
+import {syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
 
 const device=platform,peer=device==="mac"?"windows":"mac";
 if(!device)throw Error("ROLL_UNSUPPORTED_OS");
@@ -294,7 +295,15 @@ async function tick(){
 if(mode==="init"){const identity=initIdentity();console.log(JSON.stringify(identity));}
 else if(mode==="configure"){console.log(JSON.stringify(configure(process.argv[3])));}
 else if(mode==="heartbeat"){
- const l=await liveStatus();await publish(l,fs.existsSync(path.join(rollState,"rollout.lock")));console.log(JSON.stringify({device,sha:l.sha,healthy:l.healthy}));
+ const l=await liveStatus();await publish(l,fs.existsSync(path.join(rollState,"rollout.lock")));
+ // Heartbeat is already a RunAtLoad launchd task; recover a stale Native Host
+ // after a cold reboot without restarting Chrome or reading profile data.
+ let nativeHost=null;
+ if(device==="mac"&&l.healthy){
+  try{nativeHost=syncMacNativeHostForLive({activeRoot:l.root,expectedSha:l.sha});}
+  catch(e){nativeHost={status:"degraded",reason:String(e.message??e).slice(0,130)};}
+ }
+ console.log(JSON.stringify({device,sha:l.sha,healthy:l.healthy,nativeHost}));
 }else if(mode==="status"){
  console.log(JSON.stringify({device,live:await liveStatus(),peer:await remoteHealth(),
   stage:readVerifiedStage(stageRoot),onlineActivationWithCloudLease:true,requiresMainPushCi:true}));

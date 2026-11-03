@@ -11,6 +11,7 @@ import {spawnSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {retireSupersededMacCurrentJobs} from "./lib/mac-release-startup.mjs";
 import {macDesktopMainPresent,macProcessTable,macWatchdogDecision} from "./lib/mac-postactivation-health.mjs";
+import {syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
 
 const [mode,oldRoot,newRoot,oldSha,newSha]=process.argv.slice(2);
 const sha=/^[a-f0-9]{40}$/;
@@ -230,6 +231,11 @@ async function rollback(reason){
   catch(e){reason+=":kickstart-failed";watchdogEvidence({event:"fallback-kick-failed",reason:String(e.message??e)})}
   recovered=await waitFor(()=>localRecovered(oldRoot),150000);
  }
+ if(recovered){
+  try{syncMacNativeHostForLive({activeRoot:oldRoot,expectedSha:oldSha});}
+  catch(error){watchdogEvidence({event:"native-host-rollback-rebind-failed",
+   reason:String(error.message??error)});}
+ }
  const phase=recovered?"rolled-back":"rollback-pending";
  journal({phase,oldRoot,newRoot,oldSha,newSha,reason,recovered,
   ...(recovered?{recoveredAt:new Date().toISOString()}:{lastAttemptAt:new Date().toISOString()})});
@@ -238,6 +244,9 @@ async function rollback(reason){
 }
 async function reconcileRollback(tx){
  if(await localRecovered(oldRoot)){
+  try{syncMacNativeHostForLive({activeRoot:oldRoot,expectedSha:oldSha});}
+  catch(error){watchdogEvidence({event:"native-host-late-rebind-failed",
+   reason:String(error.message??error)});}
   journal({...tx,phase:"rolled-back",recovered:true,
    recoveredAt:new Date().toISOString(),lateRecoveryConfirmed:true});
   watchdogEvidence({event:"late-fallback-recovery-confirmed"});
@@ -353,6 +362,10 @@ try{
  if(process.env.OWL_QA_FAIL_AFTER_STOP==="1")throw Error("INJECTED_QA_FAILURE_AFTER_STOP");
  kick(ids.next);
  if(!await waitFor(()=>healthy(newRoot),150000))throw Error("NEW_MCP_AND_RUNTIME_NOT_HEALTHY");
+ // Chrome Native Host must follow the new verified release before success.
+ // Do not mark activated if Chrome would still point to a retired release.
+ const nativeHost=syncMacNativeHostForLive({activeRoot:newRoot,expectedSha:newSha});
+ console.log("MAC_NATIVE_HOST_SYNC="+nativeHost.status);
  journal({phase:"activated",oldRoot,newRoot,oldSha,newSha,activatedAt:new Date().toISOString()});
  try{
   const retired=retireSupersededMacCurrentJobs({agents,activeLabel:ids.next});
