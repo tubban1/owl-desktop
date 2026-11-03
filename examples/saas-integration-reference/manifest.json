@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "OWL LAB | Local SaaS Bridge Example",
+  "version": "1.0.0",
+  "description": "Synthetic local-only, human-approved SaaS integration demonstration",
+  "host_permissions": [
+    "http://127.0.0.1:8765/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1:8765/*"
+      ],
+      "js": [
+        "lib/context-guard.cjs",
+        "extension/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

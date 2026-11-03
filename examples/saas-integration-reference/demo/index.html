@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Synthetic Demo — Example Clinic App</title>
+  <style>
+    body{max-width:780px;margin:65px auto;padding:0 20px;background:#f8fafc;font:16px/1.65 system-ui;color:#172338}
+    h1{font-size:28px} label{display:block;margin-top:14px;font-weight:650}
+    input,textarea{font:inherit;width:100%;box-sizing:border-box;padding:9px;border:1px solid #abb7c6;border-radius:6px;background:white}
+    textarea{min-height:130px} button{padding:11px 18px;border:0;border-radius:6px;background:#1e40af;color:white;font-weight:bold;cursor:pointer;margin-top:18px}
+    .warning{padding:12px;border-radius:7px;background:#fff4db;border:1px solid #fbbf24}
+    #receipt{margin-top:15px}
+  </style>
+</head>
+<body>
+  <h1>Example Clinic — Synthetic Record</h1>
+  <p class="warning"><strong>DEMO ONLY.</strong> All identifiers and notes are fictional. No real patient information or AI is involved.</p>
+  <form id="noteForm">
+    <label>Patient ID <input name="patientId" data-demo-field="patientId" value="DEMO-PAT-001" required /></label>
+    <label>Visit ID <input name="visitId" data-demo-field="visitId" value="DEMO-VIS-001" required /></label>
+    <label>Clinician ID <input name="clinicianId" data-demo-field="clinicianId" value="DEMO-CLN-001" required /></label>
+    <label>Clinician's note <textarea name="note" data-demo-field="note" placeholder="Clinician reviewed note"></textarea></label>
+    <button type="submit">Save note (operator action)</button>
+  </form>
+  <p id="receipt" role="status" aria-live="polite">No note saved.</p>
+  <script src="/client.js"></script>
+</body>
+</html>

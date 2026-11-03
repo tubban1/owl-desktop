@@ -1,0 +1,16 @@
+node_modules/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.key
+*.sqlite
+*.db
+coverage/
+data/
+auth/
+playwright/.auth/
+*cookies*
+*session*
