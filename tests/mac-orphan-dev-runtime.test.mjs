@@ -4,10 +4,10 @@ import path from "node:path";
 import {qualifyOrphanDevRuntime,recoverOrphanedMacDevRuntime} from "../scripts/lib/mac-orphan-dev-runtime.mjs";
 const root="/Users/example/Projects/owl-runtime";
 const listener={pid:102,uid:501,ppid:101,birth:"Wed Nov  4 10:33:22 2026",
- command:"/usr/bin/node --require "+path.join(root,"node_modules/tsx/dist/preflight.cjs")+
- " --import file://"+path.join(root,"node_modules/tsx/dist/loader.mjs")+" src/server.ts"};
+ command:"/usr/bin/node --require "+path.posix.join(root,"node_modules/tsx/dist/preflight.cjs")+
+ " --import file://"+path.posix.join(root,"node_modules/tsx/dist/loader.mjs")+" src/server.ts"};
 const parent={pid:101,uid:501,ppid:1,birth:"Wed Nov  4 10:33:20 2026",
- command:"/usr/bin/node "+path.join(root,"node_modules/tsx/dist/cli.mjs")+" src/server.ts"};
+ command:"/usr/bin/node "+path.posix.join(root,"node_modules/tsx/dist/cli.mjs")+" src/server.ts"};
 const valid={listener,parent,runtimeRoot:root,currentUid:501};
 
 it("identifies only the exact orphaned isolated DEV Runtime process tree",()=>{
