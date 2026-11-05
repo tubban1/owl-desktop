@@ -33,10 +33,10 @@ export function qualifyOrphanDevRuntime({listener,parent,runtimeRoot,currentUid,
  if(listener.pid===parent.pid||listener.ppid!==parent.pid||parent.ppid!==1)return "NOT_ORPHAN_TREE";
  if(!Number.isSafeInteger(listener.pid)||!Number.isSafeInteger(parent.pid)||listener.pid<=1||parent.pid<=1)return "INVALID_PID";
  if(!listener.birth||!parent.birth)return "MISSING_BIRTH";
- const root=path.resolve(runtimeRoot);
- const cli=path.join(root,"node_modules","tsx","dist","cli.mjs");
- const preload=path.join(root,"node_modules","tsx","dist","preflight.cjs");
- const loader=path.join(root,"node_modules","tsx","dist","loader.mjs");
+ const root=path.posix.resolve(runtimeRoot);
+ const cli=path.posix.join(root,"node_modules","tsx","dist","cli.mjs");
+ const preload=path.posix.join(root,"node_modules","tsx","dist","preflight.cjs");
+ const loader=path.posix.join(root,"node_modules","tsx","dist","loader.mjs");
  // Strictly match the known two-process tsx runtime launched by dev-full.
  if(!parent.command.includes(cli+" src/server.ts"))return "PARENT_NOT_DEV_RUNTIME";
  if(!listener.command.includes(preload)||!listener.command.includes(loader)||
