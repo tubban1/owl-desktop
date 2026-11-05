@@ -12,6 +12,8 @@ import {randomUUID} from "node:crypto";
 import {retireSupersededMacCurrentJobs} from "./lib/mac-release-startup.mjs";
 import {macDesktopMainPresent,macProcessTable,macWatchdogDecision} from "./lib/mac-postactivation-health.mjs";
 import {syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
+import {recoverOrphanedMacDevRuntime} from "./lib/mac-orphan-dev-runtime.mjs";
+import {selectMacReleaseOnNextLogin} from "./lib/mac-release-startup-selection.mjs";
 
 const [mode,oldRoot,newRoot,oldSha,newSha]=process.argv.slice(2);
 const sha=/^[a-f0-9]{40}$/;
@@ -174,6 +176,25 @@ async function portsFree(){
  for(const port of [8790,8791,18788,5173])if(await portUp(port))return false;
  return true;
 }
+async function reclaimVerifiedOrphanForRollback(){
+ // A stalled isolated Runtime may outlive a crashed dev-full supervisor.
+ // Only an orphan *whose exact process ancestry and listener match* is signalled.
+ // Never reclaim unknown listeners or a Runtime with an active release supervisor.
+ if(exactSupervisor(oldRoot)||exactSupervisor(newRoot))return false;
+ const result=await recoverOrphanedMacDevRuntime({
+  runtimeRoot,hasSupervisor:()=>Boolean(exactSupervisor(oldRoot)||exactSupervisor(newRoot)),
+  isRuntimeHealthy:()=>health(18788)
+ });
+ watchdogEvidence({event:"orphan-runtime-recovery",...result});
+ return result.status==="signalled"&&await waitFor(portsFree,10_000);
+}
+function persistVerifiedStartup(selected){
+ const result=selectMacReleaseOnNextLogin({
+  agents,currentLabel:ids.next,fallbackLabel:ids.old,selected
+ });
+ watchdogEvidence({event:"startup-selection-updated",...result});
+ return result;
+}
 async function waitFor(test,timeoutMs){
  const deadline=Date.now()+timeoutMs;
  while(Date.now()<deadline){if(await test())return true;await new Promise(resolve=>setTimeout(resolve,1200))}
@@ -224,7 +245,8 @@ function provision(){
 async function rollback(reason){
  watchdogEvidence({event:"rollback-started",reason,probe:await componentProbe(newRoot)});
  try{drop(ids.next)}catch(e){watchdogEvidence({event:"new-job-unload-failed",reason:String(e.message??e)})}
- const free=await waitFor(portsFree,45000);
+ let free=await waitFor(portsFree,45000);
+ if(!free)free=await reclaimVerifiedOrphanForRollback();
  let recovered=await localRecovered(oldRoot);
  if(free&&!recovered){
   try{loadJob(ids.old);kick(ids.old)}
@@ -232,6 +254,8 @@ async function rollback(reason){
   recovered=await waitFor(()=>localRecovered(oldRoot),150000);
  }
  if(recovered){
+  try{persistVerifiedStartup("fallback");}
+  catch(error){watchdogEvidence({event:"rollback-startup-selection-failed",reason:String(error?.message??error)});}
   try{syncMacNativeHostForLive({activeRoot:oldRoot,expectedSha:oldSha});}
   catch(error){watchdogEvidence({event:"native-host-rollback-rebind-failed",
    reason:String(error.message??error)});}
@@ -244,6 +268,8 @@ async function rollback(reason){
 }
 async function reconcileRollback(tx){
  if(await localRecovered(oldRoot)){
+  try{persistVerifiedStartup("fallback");}
+  catch(error){watchdogEvidence({event:"rollback-startup-selection-failed",reason:String(error?.message??error)});}
   try{syncMacNativeHostForLive({activeRoot:oldRoot,expectedSha:oldSha});}
   catch(error){watchdogEvidence({event:"native-host-late-rebind-failed",
    reason:String(error.message??error)});}
@@ -255,7 +281,7 @@ async function reconcileRollback(tx){
  if(exactSupervisor(newRoot))return; // do not start competing owners
  const last=Date.parse(tx.lastAttemptAt??tx.updatedAt??"");
  if(!Number.isFinite(last)||Date.now()-last<30_000)return;
- if(!(await portsFree()))return;
+ if(!(await portsFree())&&!(await reclaimVerifiedOrphanForRollback()))return;
  try{loadJob(ids.old);kick(ids.old);
   journal({...tx,phase:"rollback-pending",lastAttemptAt:new Date().toISOString()});
   watchdogEvidence({event:"fallback-retry"});
@@ -366,6 +392,7 @@ try{
  // Do not mark activated if Chrome would still point to a retired release.
  const nativeHost=syncMacNativeHostForLive({activeRoot:newRoot,expectedSha:newSha});
  console.log("MAC_NATIVE_HOST_SYNC="+nativeHost.status);
+ persistVerifiedStartup("current");
  journal({phase:"activated",oldRoot,newRoot,oldSha,newSha,activatedAt:new Date().toISOString()});
  try{
   const retired=retireSupersededMacCurrentJobs({agents,activeLabel:ids.next});
