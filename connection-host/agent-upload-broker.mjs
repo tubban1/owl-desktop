@@ -7,7 +7,9 @@ import {currentUploadScope} from "./agent-upload-policy.mjs";
 import {getUploadConsent} from "../shared/agent-upload-consent.mjs";
 import {secureUploadStagingRoot} from "./private-upload-staging.mjs";
 
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+// Browser file size is governed by the destination platform and available
+// private staging space, not an arbitrary 25 MiB host cap.
+const MIN_FREE_STAGING_BYTES = 64 * 1024 * 1024;
 const MAX_FILES_PER_UPLOAD = 5;
 const TTL_MS = 15 * 60_000;
 const ALLOWED_SUFFIX = new Set([
@@ -47,6 +49,7 @@ export function createAgentUploadBroker({
   allowedOrigins,
   scopeReader=currentUploadScope,
   consentReader=getUploadConsent,
+  statfsReader=fs.statfs,
   tempRoot=path.join(os.tmpdir(),"owl-lab-agent-uploads-"+(process.getuid?.()??"user")),
   now=()=>Date.now(),
   ttlMs=TTL_MS
@@ -101,11 +104,18 @@ export function createAgentUploadBroker({
     let dir;
     try {
       const stat=await h.stat();
-      if(!stat.isFile()||stat.size<=0||stat.size>MAX_FILE_BYTES)throw Error("UPLOAD_FILE_SIZE_OR_TYPE_INVALID");
+      if(!stat.isFile()||!Number.isSafeInteger(stat.size)||stat.size<=0)
+        throw Error("UPLOAD_FILE_SIZE_OR_TYPE_INVALID");
       if(!stagingReady){
         await secureUploadStagingRoot(tempRoot);
         stagingReady=true;
       }
+      // A private immutable snapshot protects the browser from source-file
+      // replacement. Refuse staging if it would exhaust the local volume.
+      const volume=await statfsReader(tempRoot);
+      const freeBytes=Number(volume.bavail)*Number(volume.bsize);
+      if(!Number.isSafeInteger(freeBytes)||freeBytes-stat.size<MIN_FREE_STAGING_BYTES)
+        throw Error("UPLOAD_STAGING_SPACE_INSUFFICIENT");
       // Unique private directory retains exact basename for browser file input.
       dir=await fs.mkdtemp(path.join(tempRoot,"file-"));
       await fs.chmod(dir,0o700);
@@ -120,7 +130,7 @@ export function createAgentUploadBroker({
           const {bytesRead}=await h.read(buffer,0,buffer.length,null);
           if(!bytesRead)break;
           count+=bytesRead;
-          if(count>MAX_FILE_BYTES||count>stat.size)throw Error("UPLOAD_SOURCE_CHANGED");
+          if(count>stat.size)throw Error("UPLOAD_SOURCE_CHANGED");
           sha.update(buffer.subarray(0,bytesRead));
           let written=0;
           while(written<bytesRead){
@@ -130,6 +140,9 @@ export function createAgentUploadBroker({
           }
         }
         if(count!==stat.size)throw Error("UPLOAD_SOURCE_CHANGED");
+        const after=await h.stat();
+        if(after.size!==stat.size||after.mtimeMs!==stat.mtimeMs||after.ctimeMs!==stat.ctimeMs)
+          throw Error("UPLOAD_SOURCE_CHANGED");
       }finally{await dest.close();}
       const ticket=randomBytes(24).toString("hex");
       const entry={owner,site,stage,dir,source,basename,size:stat.size,mime:MIME[ext],
@@ -213,5 +226,6 @@ export function createAgentUploadBroker({
   return {prepare,resolve,recordSelection,recordDrop,status,release,sweep,close,
     capabilities:()=>({uploadFile:true,rootsConfigured:currentRoots().length>0,
       destinationsConfigured:currentOrigins().length>0,
-      supportedExtensions:[...ALLOWED_SUFFIX],maxFileBytes:MAX_FILE_BYTES,maxFilesPerUpload:MAX_FILES_PER_UPLOAD})};
+      supportedExtensions:[...ALLOWED_SUFFIX],maxFileBytes:null,
+      fileSizePolicy:"destination_and_available_disk",maxFilesPerUpload:MAX_FILES_PER_UPLOAD})};
 }

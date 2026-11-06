@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StatisticsPanel } from "../src/statistics/StatisticsPanel";
@@ -27,7 +27,10 @@ const snapshot: UsageStatisticsSnapshot = {
 };
 
 describe("focused usage statistics dashboard", () => {
+  afterEach(() => vi.useRealTimers());
   it("shows four primary metrics and leaves transport and error details out of the overview", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-31T12:00:00Z"));
     const html = renderToStaticMarkup(createElement(StatisticsPanel, {
       stats: snapshot, deviceLocation: "Mac",
     }));

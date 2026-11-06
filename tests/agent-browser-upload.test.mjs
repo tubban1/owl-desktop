@@ -20,6 +20,35 @@ const fixtures=async(fn)=>{
   finally{await broker.close();await fs.rm(base,{recursive:true,force:true});}
 };
 describe("secure local upload staging",()=>{
+ it("stages a video above the former 25 MiB ceiling without memory-sized reads",async()=>{
+  await fixtures(async({allowed,broker})=>{
+    const large=path.join(allowed,"long-video.mp4");
+    const bytes=26*1024*1024+123;
+    const handle=await fs.open(large,"w");
+    try{await handle.truncate(bytes);}finally{await handle.close();}
+    const prepared=await broker.prepare({owner:OWNER,filePath:large,origin:SITE});
+    expect(prepared).toMatchObject({filename:"long-video.mp4",bytes,mime:"video/mp4"});
+    const staged=await broker.resolve({owner:OWNER,ticketIds:[prepared.file_ticket],origin:SITE});
+    expect((await fs.stat(staged[0].stagedPath)).size).toBe(bytes);
+    expect(broker.capabilities()).toMatchObject({
+      maxFileBytes:null,fileSizePolicy:"destination_and_available_disk",
+      rootsConfigured:true,destinationsConfigured:true
+    });
+  });
+ });
+ it("refuses oversized staging when the volume lacks free space",async()=>{
+   await fixtures(async({allowed,base,file})=>{
+     const broker=createAgentUploadBroker({
+       allowedRoots:[allowed],allowedOrigins:[SITE],
+       tempRoot:path.join(base,"low-space-stage"),
+       statfsReader:async()=>({bavail:1,bsize:4096})
+     });
+     try{
+       await expect(broker.prepare({owner:OWNER,filePath:file,origin:SITE}))
+         .rejects.toThrow("UPLOAD_STAGING_SPACE_INSUFFICIENT");
+     }finally{await broker.close();}
+   });
+ });
  it("permits exact authorized roots, preserves filename, hashes bytes and denies foreign owner/site",async()=>{
   await fixtures(async({file,broker})=>{
     const prep=await broker.prepare({owner:OWNER,filePath:file,origin:SITE+"/upload"});
