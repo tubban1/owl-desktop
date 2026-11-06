@@ -39,14 +39,34 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
   };
   if(!belongs(hit))return {error:"CURSOR_TARGET_OCCLUDED"};
   const label=[el.getAttribute("aria-label"),el.getAttribute("title"),
-    el.getAttribute("name"),el.textContent].filter(Boolean).join(" ").slice(0,500);
+    el.getAttribute("name"),el.getAttribute("placeholder"),el.textContent]
+    .filter(Boolean).join(" ").slice(0,500);
   if(mode==="click"){
     const danger=/delete|destroy|logout|log.?out|sign.?out|purchase|payment|pay|checkout|unsubscribe|remove|erase|security|password|credential|approve|reject|confirm|submit|publish|post|share|vote|follow|send|order|transfer|upload|select file|choose file|browse files|删除|注销|付款|确认|提交|发布|上传|发送|选择文件/i;
-    const tag=el.tagName.toLowerCase(),type=(el.getAttribute("type")||"").toLowerCase();
-    if(danger.test(label)||el.closest("form")||el.hasAttribute("onclick")||
+    const tag=el.tagName.toLowerCase(),type=(el.getAttribute("type")||"text").toLowerCase();
+    // Read-only text inputs are often a site's custom select opener. Permit
+    // ONLY the first pointer click for an explicitly labelled choice; all
+    // submission, file-picker and security controls remain human-gated.
+    const choiceHint=[el.getAttribute("role"),el.getAttribute("aria-haspopup"),
+      el.getAttribute("placeholder")].filter(Boolean).join(" ");
+    const safeChoiceOpener=tag==="input"&&type==="text"&&el.readOnly===true&&
+      /combobox|listbox|请选择|select (?:an? )?option/i.test(choiceHint)&&
+      !/file|upload|attachment|login|password|credential|token|payment|pay|submit|publish|send|文件|上传|登录|密码|付款|提交|发布|发送/i.test(label);
+    const classLabel=typeof el.className==="string"?el.className:"";
+    const insideChoiceList=tag==="li"&&!!el.closest('[class*="select-option"]');
+    const safeChoiceOption=(el.getAttribute("role")==="option"||
+      /(?:select-option|select-item|dropdown-option)/i.test(classLabel)||
+      insideChoiceList)&&
+      ["div","li","span"].includes(tag)&&label.trim().length>0&&
+      label.length<150;
+    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption)&&
+       (el.closest("form")||el.hasAttribute("onclick")))||
        el.getAttribute("aria-disabled")==="true"||el.disabled)
       return {error:"CURSOR_ACTION_REQUIRES_HUMAN"};
-    if(tag==="a"){
+    if(safeChoiceOpener||safeChoiceOption){
+      // Only an observed, benign choice opener/option can be clicked here.
+      // Submits, uploads, approvals and ambiguous controls stay human-gated.
+    }else if(tag==="a"){
       if(el.hasAttribute("download")||el.target&&el.target!=="_self")
         return {error:"CURSOR_ACTION_REQUIRES_HUMAN"};
       let url;try{url=new URL(el.href);}catch{return {error:"CURSOR_UNSAFE_LINK"};}
