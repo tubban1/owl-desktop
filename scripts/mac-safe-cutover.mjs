@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import net from "node:net";
+import {canBindLoopbackIpv4} from "./lib/mac-port-availability.mjs";
 import http from "node:http";
 import {spawnSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
@@ -52,14 +52,6 @@ function ownerMatches(dir){
  const got=run("/bin/ps",["-p",String(record.pid),"-o","lstart="],{allowError:true});
  const cmd=run("/bin/ps",["-p",String(record.pid),"-o","command="],{allowError:true});
  return got.status===0&&got.stdout.trim()===record.birth&&cmd.status===0&&cmd.stdout.includes(path.join(dir,"scripts","dev-full.mjs"));
-}
-function portUp(port){
- return new Promise(resolve=>{
-  const s=net.connect({host:"127.0.0.1",port});
-  let done=false;
-  const finish=v=>{if(done)return;done=true;s.destroy();resolve(v)};
-  s.once("connect",()=>finish(true));s.once("error",()=>finish(false));s.setTimeout(750,()=>finish(false));
- });
 }
 async function health(port){
  try{
@@ -173,7 +165,11 @@ async function healthy(dir){
  return Boolean(exactSupervisor(dir))&&desktopMainRunning(dir)&&await health(8790)&&await health(18788)&&await tunnelReady(dir);
 }
 async function portsFree(){
- for(const port of [8790,8791,18788,5173])if(await portUp(port))return false;
+ // Vite binds IPv4 127.0.0.1. An unrelated IPv6-only wildcard listener
+ // may accept a TCP connect to this port yet not block OWL's own socket.
+ // Probe the exact bind address; keep fail-closed behavior on real conflicts.
+ for(const port of [8790,8791,18788,5173])
+  if(!(await canBindLoopbackIpv4(port)))return false;
  return true;
 }
 async function reclaimVerifiedOrphanForRollback(){

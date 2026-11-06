@@ -24,6 +24,7 @@ const copies=[
  ["scripts/lib/mac-release-startup-selection.mjs","lib/mac-release-startup-selection.mjs"],
  ["scripts/lib/mac-orphan-dev-runtime.mjs","lib/mac-orphan-dev-runtime.mjs"],
  ["scripts/lib/mac-postactivation-health.mjs","lib/mac-postactivation-health.mjs"],
+ ["scripts/lib/mac-port-availability.mjs","lib/mac-port-availability.mjs"],
  ["scripts/lib/version-sync.mjs","lib/version-sync.mjs"],
  ["scripts/lib/device-version-state.mjs","lib/device-version-state.mjs"],
  ...(process.platform==="darwin"?[["scripts/mac-safe-cutover.mjs","mac-safe-cutover.mjs"]]:
