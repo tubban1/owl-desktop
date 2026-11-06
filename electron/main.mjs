@@ -9,7 +9,7 @@ import { configureOwlDesktopStorage } from "./storage-layout.mjs";
 import { installStdioEpipeGuard } from "../scripts/lib/stdio-epipe-guard.mjs";
 import { assessConnectivityRecovery } from "./services/connectivity-recovery-result.mjs";
 import { DesktopStore } from "./store.mjs";
-import {getUploadConsent,changeUploadConsent,normalizeUploadOrigin} from "../shared/agent-upload-consent.mjs";
+import {getUploadConsent,changeUploadConsent} from "../shared/agent-upload-consent.mjs";
 import { createScopedProviderOperations } from "./services/provider-operations.mjs";
 import { createGoDaddyRequester } from "./services/godaddy-domains.mjs";
 import {createWindowsPeerRecovery} from "./services/windows-peer-recovery.mjs";
@@ -2545,24 +2545,13 @@ Only this single action will be approved.`,
     const {response}=await dialog.showMessageBox(mainWindow ?? undefined,{
       type:"warning",title:"Allow agent file uploads?",
       message:"Allow OWL agents to upload files from this folder?",
-      detail:folder+"\n\nOnly files in this folder may be selected, and only to separately approved websites. Revoke any time in Settings.",
+      detail:folder+"\n\nOnly files in this folder may be selected. OWL agents may upload those files to any HTTPS website. Revoke access any time in Settings.",
       buttons:["Cancel","Allow this folder"],defaultId:0,cancelId:0,noLink:true,
     });
     return response===1?changeUploadConsent({addRoot:folder}):getUploadConsent();
   });
-  ipcMain.handle("agent-upload:add-origin", async (_event, value) => {
-    const origin=normalizeUploadOrigin(value);
-    const {response}=await dialog.showMessageBox(mainWindow ?? undefined,{
-      type:"warning",title:"Allow uploads to website?",
-      message:"Allow OWL agents to upload files to this website?",
-      detail:origin+"\n\nThis approves this exact HTTPS origin only (not other subdomains). Files must also be in a separately approved folder. Revoke any time in Settings.",
-      buttons:["Cancel","Allow this website"],defaultId:0,cancelId:0,noLink:true,
-    });
-    return response===1?changeUploadConsent({addOrigin:origin}):getUploadConsent();
-  });
   ipcMain.handle("agent-upload:revoke", (_event, kind, value) => {
     if(kind==="folder")return changeUploadConsent({removeRoot:value});
-    if(kind==="website")return changeUploadConsent({removeOrigin:value});
     throw Error("UPLOAD_REVOKE_INVALID");
   });
   ipcMain.handle("settings:get", () => store.getSettings());

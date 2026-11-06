@@ -148,7 +148,6 @@ contextBridge.exposeInMainWorld("owlDesktop", {
   applyRuntimePermissions: () => ipcRenderer.invoke("runtime-permissions:apply"),
   getUploadConsent: () => ipcRenderer.invoke("agent-upload:status"),
   addUploadFolder: () => ipcRenderer.invoke("agent-upload:add-folder"),
-  addUploadWebsite: (origin) => ipcRenderer.invoke("agent-upload:add-origin",origin),
   revokeUploadConsent: (kind,value) => ipcRenderer.invoke("agent-upload:revoke",kind,value),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   pickAllowedFolders: () => ipcRenderer.invoke("settings:pick-folders"),

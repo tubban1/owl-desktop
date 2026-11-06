@@ -6,39 +6,45 @@ import {createAgentUploadBroker} from "../connection-host/agent-upload-broker.mj
 import {readWindowsUserUploadSetting,currentUploadScope} from "../connection-host/agent-upload-policy.mjs";
 import {isNativeAbsoluteStagePath} from "../chrome-agent-native/agent-executor.mjs";
 
-describe("Windows owner-approved file upload policy",()=>{
-  it("reads exact HKCU values without making an agent-editable policy",()=>{
+describe("Windows owner-approved upload folder policy",()=>{
+  it("reads exact HKCU folder scope and ignores removed website scope",()=>{
     const fake=(bin,args)=>{
       expect(bin).toBe("reg.exe");
-      expect(args).toEqual(["query","HKCU\\Environment","/v","OWL_AGENT_UPLOAD_ORIGINS"]);
-      return "\r\n    OWL_AGENT_UPLOAD_ORIGINS    REG_SZ    https://creator.douyin.com,https://careers.axpo.com\r\n";
+      expect(args).toEqual(["query","HKCU\\Environment","/v","OWL_AGENT_UPLOAD_ROOTS"]);
+      return "\r\n    OWL_AGENT_UPLOAD_ROOTS    REG_SZ    C:\\Users\\i95i\\Documents\r\n";
     };
+    expect(readWindowsUserUploadSetting("OWL_AGENT_UPLOAD_ROOTS",{
+      platform:"win32",runner:fake
+    })).toBe("C:\\Users\\i95i\\Documents");
     expect(readWindowsUserUploadSetting("OWL_AGENT_UPLOAD_ORIGINS",{
       platform:"win32",runner:fake
-    })).toBe("https://creator.douyin.com,https://careers.axpo.com");
-    expect(readWindowsUserUploadSetting("UNSAFE_CUSTOM_NAME",{platform:"win32",runner:fake})).toBeUndefined();
-    expect(currentUploadScope("OWL_AGENT_UPLOAD_ORIGINS",{platform:"win32",env:{},
-      readRegistry:()=> "https://careers.axpo.com"})).toBe("https://careers.axpo.com");
+    })).toBeUndefined();
+    expect(currentUploadScope("OWL_AGENT_UPLOAD_ROOTS",{platform:"win32",env:{},
+      readRegistry:()=> "D:\\Movies"})).toBe("D:\\Movies");
   });
-  it("updates exact site approvals without restarting Host and revokes outstanding tickets",async()=>{
+  it("accepts any HTTPS destination, but never cross-uses owner-bound, origin-bound tickets",async()=>{
     const base=await fs.mkdtemp(path.join(os.tmpdir(),"owl-registry-scope-"));
     const root=path.join(base,"authorized");await fs.mkdir(root);
-    const file=path.join(root,"cv.pdf");await fs.writeFile(file,"fake PDF fixture");
-    const temp=path.join(base,"stage");
-    let origins="https://creator.douyin.com";
-    const read=name=>name==="OWL_AGENT_UPLOAD_ORIGINS"?origins:root;
-    const broker=createAgentUploadBroker({scopeReader:read,tempRoot:temp});
+    const file=path.join(root,"clip.mp4");await fs.writeFile(file,"fake video fixture");
+    const broker=createAgentUploadBroker({
+      scopeReader:name=>name==="OWL_AGENT_UPLOAD_ROOTS"?root:"",
+      tempRoot:path.join(base,"stage")
+    });
     try{
-      await expect(broker.prepare({owner:"job-agent",filePath:file,origin:"https://careers.axpo.com"}))
-        .rejects.toThrow("UPLOAD_DESTINATION_NOT_APPROVED");
-      origins+=",https://careers.axpo.com";
-      const prepared=await broker.prepare({owner:"job-agent",filePath:file,
-        origin:"https://careers.axpo.com/jobs/8585631"});
-      expect(prepared.filename).toBe("cv.pdf");
-      expect(broker.capabilities()).toMatchObject({rootsConfigured:true,destinationsConfigured:true});
-      origins="https://creator.douyin.com";
-      await expect(broker.resolve({owner:"job-agent",ticketIds:[prepared.file_ticket],
-        origin:"https://careers.axpo.com"})).rejects.toThrow("UPLOAD_DESTINATION_NOT_APPROVED");
+      const one=await broker.prepare({owner:"job-agent",filePath:file,
+        origin:"https://creator.douyin.com/upload"});
+      const two=await broker.prepare({owner:"job-agent",filePath:file,
+        origin:"https://creator.xiaohongshu.com/publish"});
+      expect(one.destination_origin).toBe("https://creator.douyin.com");
+      expect(two.destination_origin).toBe("https://creator.xiaohongshu.com");
+      expect(broker.capabilities()).toMatchObject({rootsConfigured:true,destinationsConfigured:true,
+        destinationPolicy:"any_https"});
+      await expect(broker.resolve({owner:"job-agent",ticketIds:[one.file_ticket],
+        origin:two.destination_origin})).rejects.toThrow("UPLOAD_TICKET_NOT_AUTHORIZED");
+      await expect(broker.resolve({owner:"another-agent",ticketIds:[one.file_ticket],
+        origin:one.destination_origin})).rejects.toThrow("UPLOAD_TICKET_NOT_AUTHORIZED");
+      expect((await broker.resolve({owner:"job-agent",ticketIds:[two.file_ticket],
+        origin:two.destination_origin}))[0].filename).toBe("clip.mp4");
     }finally{await broker.close();await fs.rm(base,{recursive:true,force:true});}
   });
   it("accepts Windows drive paths and POSIX paths but rejects relative/UNC paths",()=>{

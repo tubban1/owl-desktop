@@ -27,7 +27,7 @@ const MIME = {".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",
   ".mp4":"video/mp4",".mov":"video/quicktime",".svg":"image/svg+xml"};
 
 function originOf(value) {
-  try {const u=new URL(value);if(!["https:","http:"].includes(u.protocol))return null;return u.origin;}
+  try {const u=new URL(value);if(u.protocol!=="https:"||u.username||u.password||!u.hostname)return null;return u.origin;}
   catch{return null;}
 }
 function inside(root,file) {
@@ -42,11 +42,11 @@ function sourceAllowed(full) {
 }
 
 // This service runs on the device where the source file exists, not in OWL Cloud.
-// Files cannot be prepared unless the local Host was explicitly configured with
-// authorized upload roots. An Agent cannot add new roots through the MCP API.
+// Files cannot be prepared unless the local Host has an owner-approved source
+// folder. HTTPS upload destinations need no site whitelist, but tickets are
+// bound to the selected owner and destination origin. MCP cannot add roots.
 export function createAgentUploadBroker({
   allowedRoots,
-  allowedOrigins,
   scopeReader=currentUploadScope,
   consentReader=getUploadConsent,
   statfsReader=fs.statfs,
@@ -56,9 +56,7 @@ export function createAgentUploadBroker({
 }={}) {
   const tickets=new Map();
   const uploads=new Map();
-  const currentOrigins=()=>allowedOrigins ?? [...new Set([...String(scopeReader("OWL_AGENT_UPLOAD_ORIGINS")||"").split(/[;,]/).filter(Boolean),...consentReader().origins])];
   const currentRoots=()=>allowedRoots ?? [...new Set([...String(scopeReader("OWL_AGENT_UPLOAD_ROOTS")||"").split(path.delimiter).filter(Boolean),...consentReader().roots])];
-  const isSiteApproved=site=>new Set(currentOrigins().map(originOf).filter(Boolean)).has(site);
   async function approvedRoots(){
     return Promise.all(currentRoots().map(async x=>{
       const root=await fs.realpath(path.resolve(x));
@@ -85,7 +83,6 @@ export function createAgentUploadBroker({
     if(typeof owner!=="string"||!owner.trim())throw Error("UPLOAD_OWNER_REQUIRED");
     const site=originOf(origin);
     if(!site)throw Error("UPLOAD_ORIGIN_INVALID");
-    if(!isSiteApproved(site))throw Error("UPLOAD_DESTINATION_NOT_APPROVED");
     const roots=await approvedRoots();
     if(roots.length===0)throw Error("UPLOAD_ROOT_NOT_CONFIGURED");
     if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw Error("UPLOAD_ABSOLUTE_PATH_REQUIRED");
@@ -166,8 +163,7 @@ export function createAgentUploadBroker({
     return ticketIds.map(key=>{
       const t=tickets.get(key);
       if(!t||t.consumed||t.owner!==owner||t.site!==site)throw Error("UPLOAD_TICKET_NOT_AUTHORIZED");
-      if(!isSiteApproved(site))throw Error("UPLOAD_DESTINATION_NOT_APPROVED");
-      if(!roots.some(root=>inside(root,t.source)))throw Error("UPLOAD_ROOT_REVOKED");
+        if(!roots.some(root=>inside(root,t.source)))throw Error("UPLOAD_ROOT_REVOKED");
       return {ticket:key,stagedPath:t.stage,filename:t.basename,size:t.size,mime:t.mime};
     });
   }
@@ -181,7 +177,7 @@ export function createAgentUploadBroker({
     const entry={owner,pageId,inputUid,site:origin,files:files.map(f=>({name:f.filename,bytes:f.size})),
       state,expiresAt:now()+ttlMs};
     uploads.set(upload_id,entry);
-    return {upload_id,page_id:pageId,state,website_upload_verified:false,
+    return {upload_id,page_id:pageId,destination_origin:originOf(origin),state,website_upload_verified:false,
       files:entry.files,description:state==="ui_observed"?
         "Filename visible on website after file selection; server upload not independently verified.":
         "File(s) attached to browser input; website receipt must be verified separately."};
@@ -197,7 +193,7 @@ export function createAgentUploadBroker({
       files:files.map(f=>({name:f.filename,bytes:f.size})),state,
       expiresAt:now()+ttlMs};
     uploads.set(uploadId,entry);
-    return {upload_id:uploadId,page_id:pageId,state,
+    return {upload_id:uploadId,page_id:pageId,destination_origin:originOf(origin),state,
       website_upload_verified:false,files:entry.files,
       description:"File drag event dispatched; website receipt is not independently verified."};
   }
@@ -205,7 +201,7 @@ export function createAgentUploadBroker({
     await sweep();
     const r=uploads.get(uploadId);
     if(!r||r.owner!==owner)throw Error("UPLOAD_STATUS_NOT_FOUND");
-    return {upload_id:uploadId,page_id:r.pageId,state:r.state,
+    return {upload_id:uploadId,page_id:r.pageId,destination_origin:originOf(r.site),state:r.state,
       website_upload_verified:false,files:r.files};
   }
   async function release({owner,ticketIds=[]}) {
@@ -225,7 +221,7 @@ export function createAgentUploadBroker({
   }
   return {prepare,resolve,recordSelection,recordDrop,status,release,sweep,close,
     capabilities:()=>({uploadFile:true,rootsConfigured:currentRoots().length>0,
-      destinationsConfigured:currentOrigins().length>0,
+      destinationsConfigured:true,destinationPolicy:"any_https",
       supportedExtensions:[...ALLOWED_SUFFIX],maxFileBytes:null,
       fileSizePolicy:"destination_and_available_disk",maxFilesPerUpload:MAX_FILES_PER_UPLOAD})};
 }

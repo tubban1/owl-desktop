@@ -273,10 +273,9 @@ declare global {
       getRuntimePermissions(): Promise<import("./types").RuntimePermissionProjection>;
       setRuntimePermission(key:import("./types").RuntimePermissionKey,mode:"blocked"|"review"|"enabled"): Promise<import("./types").RuntimePermissionProjection>;
       applyRuntimePermissions(): Promise<{applied:boolean;reason?:string}>;
-      getUploadConsent(): Promise<{roots:string[];origins:string[]}>;
-      addUploadFolder(): Promise<{roots:string[];origins:string[]}>;
-      addUploadWebsite(origin:string): Promise<{roots:string[];origins:string[]}>;
-      revokeUploadConsent(kind:"folder"|"website",value:string): Promise<{roots:string[];origins:string[]}>;
+      getUploadConsent(): Promise<{roots:string[]}>;
+      addUploadFolder(): Promise<{roots:string[]}>;
+      revokeUploadConsent(kind:"folder",value:string): Promise<{roots:string[]}>;
       getSettings(): Promise<Settings>;
       pickAllowedFolders(): Promise<string[]>;
       updateSettings(patch: Partial<Settings>): Promise<Settings>;

@@ -153,10 +153,11 @@ try{
   const namedDownload=path.join(files,"report.txt");
   await fs.copyFile(artifact.localPath,namedDownload);
   uploadBroker=createAgentUploadBroker({
-    allowedRoots:[files],allowedOrigins:[destination],tempRoot:path.join(tmp,"private-staging")
+    allowedRoots:[files],tempRoot:path.join(tmp,"private-staging")
   });
-  await assert.rejects(uploadBroker.prepare({owner,filePath:namedDownload,origin:source}),
-    /UPLOAD_DESTINATION_NOT_APPROVED/);
+  const sourceTicket=await uploadBroker.prepare({owner,filePath:namedDownload,origin:source});
+  await assert.rejects(uploadBroker.resolve({owner,ticketIds:[sourceTicket.file_ticket],origin:destination}),
+    /UPLOAD_TICKET_NOT_AUTHORIZED/);
   const prepared=await uploadBroker.prepare({owner,filePath:namedDownload,origin:destination});
   const staged=await uploadBroker.resolve({owner,ticketIds:[prepared.file_ticket],origin:destination});
   assert.equal(staged[0].filename,"report.txt");

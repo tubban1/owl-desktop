@@ -15,7 +15,7 @@ const fixtures=async(fn)=>{
   await fs.mkdir(allowed);
   const file=path.join(allowed,"photo.png");
   await fs.writeFile(file,Buffer.from("fixture PNG bytes for unit test"));
-  const broker=createAgentUploadBroker({allowedRoots:[allowed],allowedOrigins:[SITE],tempRoot:temp});
+  const broker=createAgentUploadBroker({allowedRoots:[allowed],tempRoot:temp});
   try{await fn({base,allowed,file,broker,temp});}
   finally{await broker.close();await fs.rm(base,{recursive:true,force:true});}
 };
@@ -32,14 +32,14 @@ describe("secure local upload staging",()=>{
     expect((await fs.stat(staged[0].stagedPath)).size).toBe(bytes);
     expect(broker.capabilities()).toMatchObject({
       maxFileBytes:null,fileSizePolicy:"destination_and_available_disk",
-      rootsConfigured:true,destinationsConfigured:true
+      rootsConfigured:true,destinationsConfigured:true,destinationPolicy:"any_https"
     });
   });
  });
  it("refuses oversized staging when the volume lacks free space",async()=>{
    await fixtures(async({allowed,base,file})=>{
      const broker=createAgentUploadBroker({
-       allowedRoots:[allowed],allowedOrigins:[SITE],
+       allowedRoots:[allowed],
        tempRoot:path.join(base,"low-space-stage"),
        statfsReader:async()=>({bavail:1,bsize:4096})
      });
@@ -107,8 +107,11 @@ describe("secure local upload staging",()=>{
     if(symlinkReady)
       await expect(broker.prepare({owner:OWNER,filePath:link,origin:SITE})).rejects.toThrow("UPLOAD_FILE_OUTSIDE_ALLOWED_ROOTS");
     await expect(broker.prepare({owner:OWNER,filePath:file,origin:"file:///etc/passwd"})).rejects.toThrow("UPLOAD_ORIGIN_INVALID");
-    await expect(broker.prepare({owner:OWNER,filePath:file,origin:"https://evil.example"})).rejects.toThrow("UPLOAD_DESTINATION_NOT_APPROVED");
-    const none=createAgentUploadBroker({allowedRoots:[],allowedOrigins:[SITE],tempRoot:path.join(base,"none")});
+    const arbitrary=await broker.prepare({owner:OWNER,filePath:file,origin:"https://unlisted.example/upload"});
+    expect(arbitrary.destination_origin).toBe("https://unlisted.example");
+    await expect(broker.resolve({owner:OWNER,ticketIds:[arbitrary.file_ticket],origin:SITE})).rejects.toThrow("UPLOAD_TICKET_NOT_AUTHORIZED");
+    await expect(broker.prepare({owner:OWNER,filePath:file,origin:"http://insecure.example"})).rejects.toThrow("UPLOAD_ORIGIN_INVALID");
+    const none=createAgentUploadBroker({allowedRoots:[],tempRoot:path.join(base,"none")});
     await expect(none.prepare({owner:OWNER,filePath:file,origin:SITE})).rejects.toThrow("UPLOAD_ROOT_NOT_CONFIGURED");
     await none.close();
   });
@@ -116,7 +119,7 @@ describe("secure local upload staging",()=>{
  it("removes expired staged files and rejects reused tickets",async()=>{
   await fixtures(async({file,base})=>{
     let tick=1000;
-    const b=createAgentUploadBroker({allowedRoots:[path.dirname(file)],allowedOrigins:[SITE],
+    const b=createAgentUploadBroker({allowedRoots:[path.dirname(file)],
       tempRoot:path.join(base,"expiring"),ttlMs:1000,now:()=>tick});
     try{
       const p=await b.prepare({owner:OWNER,filePath:file,origin:SITE});

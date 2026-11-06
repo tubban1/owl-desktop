@@ -123,8 +123,7 @@ export default function App() {
   const [page, setPage] = useState<Page>("overview");
   const [env, setEnv] = useState<DesktopEnvironment | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [uploadConsent,setUploadConsent]=useState<{roots:string[];origins:string[]}>({roots:[],origins:[]});
-  const [uploadOriginDraft,setUploadOriginDraft]=useState("");
+  const [uploadConsent,setUploadConsent]=useState<{roots:string[]}>({roots:[]});
   const [uploadConsentBusy,setUploadConsentBusy]=useState(false);
   const [uploadConsentMessage,setUploadConsentMessage]=useState("");
 
@@ -458,7 +457,7 @@ export default function App() {
       setUploadConsentMessage("Upload permissions unavailable in this Desktop version.");
     });
   },[page]);
-  const changeUploadConsentFromUi=async(action:()=>Promise<{roots:string[];origins:string[]}>)=>{
+  const changeUploadConsentFromUi=async(action:()=>Promise<{roots:string[]}>)=>{
     setUploadConsentBusy(true);setUploadConsentMessage("");
     try{setUploadConsent(await action());}
     catch(error){setUploadConsentMessage(error instanceof Error?error.message:String(error));}
@@ -1984,8 +1983,8 @@ export default function App() {
 
           <section className="panel settings-panel folder-settings">
             <div className="panel-heading"><div><span className="eyebrow">AGENT BROWSER</span><h3>File upload permissions</h3></div>
-              <span className="neutral-pill">{uploadConsent.roots.length&&uploadConsent.origins.length?"Configured":"Restricted"}</span></div>
-            <p className="panel-help">Independent of normal file access. Uploading requires BOTH a folder approved via the macOS/Windows picker and an exact HTTPS website you confirm. Agent requests cannot authorize new locations. Changes apply to the local Connection Host without restart.</p>
+              <span className="neutral-pill">{uploadConsent.roots.length?"Configured":"Restricted"}</span></div>
+            <p className="panel-help">Independent of normal file access. Uploading requires a locally approved source folder; destination websites are unrestricted over HTTPS. Agents cannot approve new folders. Upload tickets remain session- and site-bound and source access can be revoked at any time.</p>
             <div className="panel-heading"><div><strong>Approved source folders</strong></div>
               <button type="button" className="secondary" disabled={uploadConsentBusy} onClick={()=>void changeUploadConsentFromUi(()=>window.owlDesktop.addUploadFolder())}><FolderOpen size={15}/>Allow a folder</button></div>
             <div className="allowed-folder-list">
@@ -1994,24 +1993,8 @@ export default function App() {
                   onClick={()=>void changeUploadConsentFromUi(()=>window.owlDesktop.revokeUploadConsent("folder",folder))}><X size={15}/></button></div>)}
               {!uploadConsent.roots.length&&<p className="panel-help">No folders approved for upload.</p>}
             </div>
-            <div className="panel-heading"><div><strong>Approved destination websites</strong></div></div>
-            <div className="setting-row">
-              <input className="setting-input" type="url" placeholder="https://jobs.ashbyhq.com"
-                aria-label="Exact HTTPS website origin for uploads" value={uploadOriginDraft}
-                onChange={event=>setUploadOriginDraft(event.target.value)} />
-              <button type="button" className="secondary" disabled={uploadConsentBusy||!uploadOriginDraft.trim()}
-                onClick={()=>void changeUploadConsentFromUi(async()=>{
-                  const result=await window.owlDesktop.addUploadWebsite(uploadOriginDraft.trim());
-                  if(result.origins.includes(uploadOriginDraft.trim()))setUploadOriginDraft("");
-                  return result;
-                })}>Review website</button>
-            </div>
-            <div className="allowed-folder-list">
-              {uploadConsent.origins.map(origin=><div className="allowed-folder-row" key={origin}><code>{origin}</code>
-                <button type="button" className="danger-icon" title="Revoke website upload permission" disabled={uploadConsentBusy}
-                  onClick={()=>void changeUploadConsentFromUi(()=>window.owlDesktop.revokeUploadConsent("website",origin))}><X size={15}/></button></div>)}
-              {!uploadConsent.origins.length&&<p className="panel-help">No websites approved. Example: https://jobs.ashbyhq.com (not a specific job URL).</p>}
-            </div>
+            <div className="panel-heading"><div><strong>Destination websites</strong></div></div>
+            <p className="panel-help">All HTTPS sites are allowed. Uploaded files must still come from the approved source folders above and are scoped to the current Agent session and site.</p>
             {uploadConsentMessage&&<p className="panel-help" role="status">{uploadConsentMessage}</p>}
           </section>
 

@@ -9,29 +9,19 @@ export function defaultUploadConsentFile({platform=process.platform,home=os.home
     : path.join(home,".config");
   return path.join(base,"OWL LAB","desktop",FILE_NAME);
 }
-export function normalizeUploadOrigin(value){
-  if(typeof value!=="string"||value.length>300)throw Error("UPLOAD_ORIGIN_INVALID");
-  const text=value.trim();
-  let url;
-  try{url=new URL(text);}catch{throw Error("UPLOAD_ORIGIN_INVALID");}
-  if(url.protocol!=="https:"||!url.hostname||url.username||url.password||
-     text!==url.origin||url.hostname.includes("*"))throw Error("UPLOAD_ORIGIN_INVALID");
-  return url.origin;
-}
 function readConsent(file){
   try {
     const s=fs.lstatSync(file);
-    if(!s.isFile()||s.isSymbolicLink())return {roots:[],origins:[]};
+    if(!s.isFile()||s.isSymbolicLink())return {roots:[]};
     if(process.platform!=="win32" && ((s.mode&0o077)!==0 ||
-        (typeof process.getuid==="function"&&s.uid!==process.getuid())))return {roots:[],origins:[]};
+        (typeof process.getuid==="function"&&s.uid!==process.getuid())))return {roots:[]};
     const doc=JSON.parse(fs.readFileSync(file,"utf8"));
-    if(doc.version!==1||!Array.isArray(doc.roots)||!Array.isArray(doc.origins))return {roots:[],origins:[]};
+    // Preserve already-approved folder grants from the previous consent file;
+    // destination restrictions are no longer a part of the upload policy.
+    if(![1,2].includes(doc.version)||!Array.isArray(doc.roots))return {roots:[]};
     const roots=doc.roots.filter(v=>typeof v==="string"&&path.isAbsolute(v)&&v!==path.parse(v).root);
-    const origins=doc.origins.filter(v=>{
-      try{return normalizeUploadOrigin(v)===v;}catch{return false;}
-    });
-    return {roots:[...new Set(roots)],origins:[...new Set(origins)]};
-  }catch{return {roots:[],origins:[]};}
+    return {roots:[...new Set(roots)]};
+  }catch{return {roots:[]};}
 }
 export function getUploadConsent({file=defaultUploadConsentFile()}={}){return readConsent(file);}
 function validateRoot(candidate){
@@ -48,11 +38,11 @@ function saveConsent(file,state){
   // generic settings:update nor an MCP endpoint can write this file.
   const tmp=file+".tmp-"+process.pid+"-"+Math.random().toString(16).slice(2);
   try{
-    fs.writeFileSync(tmp,JSON.stringify({version:1,roots:state.roots,origins:state.origins},null,2)+"\n",{mode:0o600,flag:"wx"});
+    fs.writeFileSync(tmp,JSON.stringify({version:2,roots:state.roots},null,2)+"\n",{mode:0o600,flag:"wx"});
     fs.renameSync(tmp,file);fs.chmodSync(file,0o600);
   }finally{try{fs.unlinkSync(tmp);}catch{}}
 }
-export function changeUploadConsent({file=defaultUploadConsentFile(),addRoot,removeRoot,addOrigin,removeOrigin}={}){
+export function changeUploadConsent({file=defaultUploadConsentFile(),addRoot,removeRoot}={}){
   const current=readConsent(file);
   if(addRoot){const v=validateRoot(addRoot);current.roots=[...new Set([...current.roots,v])];}
   if(removeRoot){
@@ -62,8 +52,6 @@ export function changeUploadConsent({file=defaultUploadConsentFile(),addRoot,rem
     try{canonical=fs.realpathSync(canonical);}catch{}
     current.roots=current.roots.filter(v=>v!==canonical);
   }
-  if(addOrigin){const v=normalizeUploadOrigin(addOrigin);current.origins=[...new Set([...current.origins,v])];}
-  if(removeOrigin){current.origins=current.origins.filter(v=>v!==normalizeUploadOrigin(removeOrigin));}
   saveConsent(file,current);
   return readConsent(file);
 }
