@@ -59,11 +59,22 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
       insideChoiceList)&&
       ["div","li","span"].includes(tag)&&label.trim().length>0&&
       label.length<150;
-    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption)&&
+    // Selecting a record type only changes the editor; never submits DNS.
+    const safeDnsTab=(()=>{
+      if(location.hostname!=="www.one.com"||location.pathname!=="/admin/dns.do"||
+         (el.textContent||"").trim()!=="TXT"||tag==="input")return false;
+      for(let p=el.parentElement,d=0;p&&d<6;p=p.parentElement,d++){
+        const txt=(p.innerText||p.textContent||"").replace(/\s+/g," ").trim();
+        if(txt.length<=260&&["Web forward","Web alias","AAAA","CNAME","MX","TXT","SRV","TLSA"]
+          .filter(word=>txt.includes(word)).length>=5)return true;
+      }
+      return false;
+    })();
+    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption||safeDnsTab)&&
        (el.closest("form")||el.hasAttribute("onclick")))||
        el.getAttribute("aria-disabled")==="true"||el.disabled)
       return {error:"CURSOR_ACTION_REQUIRES_HUMAN"};
-    if(safeChoiceOpener||safeChoiceOption){
+    if(safeChoiceOpener||safeChoiceOption||safeDnsTab){
       // Only an observed, benign choice opener/option can be clicked here.
       // Submits, uploads, approvals and ambiguous controls stay human-gated.
     }else if(tag==="a"){

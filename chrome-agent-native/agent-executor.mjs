@@ -100,14 +100,27 @@ export function createNativeAgentExecutor(chrome,storage){
       const s=getComputedStyle(e),r=e.getBoundingClientRect();
       return s.visibility!=="hidden"&&s.display!=="none"&&r.width>0&&r.height>0;
     };
+    // One.com DNS uses non-semantic labels for the record-type tab bar.
+    // Detect only the exact TXT choice surrounded by known record types.
+    const safeDnsTypeTab=el=>{
+      if(location.hostname!=="www.one.com"||location.pathname!=="/admin/dns.do"||
+         (el.textContent||"").trim()!=="TXT"||
+         Array.from(el.children||[]).some(ch=>(ch.textContent||"").trim()==="TXT"))
+        return false;
+      for(let p=el.parentElement,d=0;p&&d<6;p=p.parentElement,d++){
+        const txt=(p.innerText||p.textContent||"").replace(/\s+/g," ").trim();
+        if(txt.length<=260&&["Web forward","Web alias","AAAA","CNAME","MX","TXT","SRV","TLSA"]
+          .filter(word=>txt.includes(word)).length>=5)return true;
+      }
+      return false;
+    };
     // Inspect only this Agent-owned document and its *open* shadow roots.
     // Cross-origin frames and closed roots remain out of scope; no OS focus.
     const nodes=[];
     const collect=(root,depth)=>{
       if(depth>8 || nodes.length>=120)return;
       for(const el of root.querySelectorAll("*")){
-        if(el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[aria-placeholder],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone],[role=option],[class*=\"select-option\"] li,[class*=\"select-option\"] > div,[class*=\"select-item\"],[class*=\"dropdown-option\"]") &&
-           visible(el))nodes.push({el,shadowDepth:depth});
+        if((el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[aria-placeholder],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone],[role=option],[role=tab],[class*=\"select-option\"] li,[class*=\"select-option\"] > div,[class*=\"select-item\"],[class*=\"dropdown-option\"]") || safeDnsTypeTab(el)) && visible(el))nodes.push({el,shadowDepth:depth});
         if(nodes.length>=120)break;
         if(el.shadowRoot)collect(el.shadowRoot,depth+1);
       }

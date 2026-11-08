@@ -62,6 +62,17 @@ describe("background Agent cursor",()=>{
     const r=locateVirtualCursorTarget("owl-agent-7","https://careers.axpo.com","click");
     expect(r).toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});
   });
+  it("allows an observed non-semantic one.com TXT tab in a DNS type strip",()=>{
+    mockPage({tag:"SPAN",type:"",label:"TXT",form:true,offscreen:false});
+    const el=document.querySelector();
+    el.parentElement={innerText:"Web forward Web alias A AAAA CNAME MX TXT SRV TLSA SSHFP CAA",parentElement:null};
+    vi.stubGlobal("location",{origin:"https://www.one.com",hostname:"www.one.com",pathname:"/admin/dns.do"});
+    expect(locateVirtualCursorTarget("owl-agent-7","https://www.one.com","click"))
+      .toMatchObject({valid:true,tag:"span"});
+    vi.stubGlobal("location",{origin:"https://www.one.com",hostname:"www.one.com",pathname:"/admin/account/invoices.do"});
+    expect(locateVirtualCursorTarget("owl-agent-7","https://www.one.com","click"))
+      .toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});
+  });
   it("still denies form submit despite bringing offscreen control into view",()=>{
     const p=mockPage({label:"Submit application",form:true,type:"submit"});
     const r=locateVirtualCursorTarget("owl-agent-7","https://careers.axpo.com","click");
