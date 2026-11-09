@@ -83,6 +83,23 @@ describe("background Agent cursor",()=>{
     el.textContent="由于遇到其他 4xx 问题而被屏蔽了";
     expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
       .toMatchObject({valid:true,tag:"span"});
+    el.textContent="重复网页，Google 选择的规范网页与用户指定的不同";
+    expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
+      .toMatchObject({valid:true,tag:"span"});
+    vi.stubGlobal("location",{origin:"https://search.google.com",hostname:"search.google.com",pathname:"/search-console/removals"});
+    expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
+      .toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});
+  });
+  it("allows read-only canonical URL drilldown but not unrelated domains",()=>{
+    mockPage({tag:"SPAN",type:"",label:"https://www.edunest.app/learn",form:true,offscreen:false});
+    const el=document.querySelector();
+    vi.stubGlobal("location",{origin:"https://search.google.com",hostname:"search.google.com",pathname:"/search-console/index/drilldown",search:"?resource_id=sc-domain%3Aedunest.app"});
+    expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
+      .toMatchObject({valid:true,tag:"span"});
+    el.textContent="https://unrelated.example.org/learn";
+    expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
+      .toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});
+    el.textContent="https://www.edunest.app/learn";
     vi.stubGlobal("location",{origin:"https://search.google.com",hostname:"search.google.com",pathname:"/search-console/removals"});
     expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
       .toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});

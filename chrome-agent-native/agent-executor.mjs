@@ -118,7 +118,7 @@ export function createNativeAgentExecutor(chrome,storage){
     const safeGscNoindexRow=el=>
       location.hostname==="search.google.com"&&
       location.pathname==="/search-console/index"&&
-      ["被“noindex”标记排除了","由于遇到其他 4xx 问题而被屏蔽了"].includes((el.textContent||"").trim())&&
+      ["被“noindex”标记排除了","由于遇到其他 4xx 问题而被屏蔽了","重复网页，Google 选择的规范网页与用户指定的不同"].includes((el.textContent||"").trim())&&
       !Array.from(el.children||[]).some(
         ch=>(ch.textContent||"").trim()===(el.textContent||"").trim());
     // Non-semantic custom select widgets often use div/span rather than ARIA
@@ -136,18 +136,44 @@ export function createNativeAgentExecutor(chrome,storage){
       return selectPattern.test(semantic)||userChoice.test(txt)||
         !!el.closest('[role="listbox"],[class*="select-dropdown"],[class*="dropdown-menu"]');
     };
+    // In a verified GSC property, its URL-example rows open read-only details.
+    // Never surface URLs outside the currently selected property domain.
+    const safeGscExample=el=>{
+      if(location.hostname!=="search.google.com"||
+         location.pathname!=="/search-console/index/drilldown")return false;
+      const property=(new URLSearchParams(location.search||"")
+        .get("resource_id")||"").replace(/^sc-domain:/,"").toLowerCase();
+      const text=(el.textContent||"").trim();
+      const host=text.match(/^https?:\/\/([a-z0-9.-]+)/i)?.[1]?.toLowerCase();
+      if(!property||!host||(host!==property&&!host.endsWith("."+property))||
+         text.length>150)return false;
+      return !Array.from(el.children||[]).some(ch=>
+        (ch.textContent||"").trim().startsWith("http"));
+    };
     // Inspect only this Agent-owned document and its *open* shadow roots.
     // Cross-origin frames and closed roots remain out of scope; no OS focus.
     const nodes=[];
     const collect=(root,depth)=>{
       if(depth>8 || nodes.length>=120)return;
       for(const el of root.querySelectorAll("*")){
-        if((el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[aria-placeholder],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone],[role=option],[role=tab],[class*=\"select-option\"] li,[class*=\"select-option\"] > div,[class*=\"select-item\"],[class*=\"dropdown-option\"]") || safeDnsTypeTab(el) || safeGscNoindexRow(el) || customChoice(el)) && visible(el))nodes.push({el,shadowDepth:depth});
+        if((el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[aria-placeholder],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone],[role=option],[role=tab],[class*=\"select-option\"] li,[class*=\"select-option\"] > div,[class*=\"select-item\"],[class*=\"dropdown-option\"]") || safeDnsTypeTab(el) || safeGscNoindexRow(el) || safeGscExample(el) || customChoice(el)) && visible(el))nodes.push({el,shadowDepth:depth});
         if(nodes.length>=120)break;
         if(el.shadowRoot)collect(el.shadowRoot,depth+1);
       }
     };
     collect(document,0);
+    // Snapshot UIDs are ephemeral. A removed/hidden upload control can still
+    // retain its former marker and shadow another control with the same UID.
+    // Clear old markers across the document and open shadow roots BEFORE
+    // assigning this snapshot's UIDs; never let an obsolete node win lookup.
+    const clearMarkers=(root,depth=0)=>{
+      if(depth>8)return;
+      for(const el of root.querySelectorAll('[data-owl-agent-control]'))
+        el.removeAttribute("data-owl-agent-control");
+      for(const el of root.querySelectorAll("*"))
+        if(el.shadowRoot)clearMarkers(el.shadowRoot,depth+1);
+    };
+    clearMarkers(document);
     const controls=nodes.slice(0,120).map(({el,shadowDepth},i)=>{
       const key="owl-agent-"+i;
       el.setAttribute("data-owl-agent-control",key);

@@ -113,14 +113,26 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
     const safeGscNoindexRow=
       location.hostname==="search.google.com"&&
       location.pathname==="/search-console/index"&&
-      ["被“noindex”标记排除了","由于遇到其他 4xx 问题而被屏蔽了"].includes((el.textContent||"").trim())&&
+      ["被“noindex”标记排除了","由于遇到其他 4xx 问题而被屏蔽了","重复网页，Google 选择的规范网页与用户指定的不同"].includes((el.textContent||"").trim())&&
       !Array.from(el.children||[]).some(
         ch=>(ch.textContent||"").trim()===(el.textContent||"").trim());
-    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow)&&
+    const safeGscExample=(()=>{
+      if(location.hostname!=="search.google.com"||
+         location.pathname!=="/search-console/index/drilldown")return false;
+      const property=(new URLSearchParams(location.search||"")
+        .get("resource_id")||"").replace(/^sc-domain:/,"").toLowerCase();
+      const text=(el.textContent||"").trim();
+      const host=text.match(/^https?:\/\/([a-z0-9.-]+)/i)?.[1]?.toLowerCase();
+      return !!property&&!!host&&
+        (host===property||host.endsWith("."+property))&&text.length<=150&&
+        !Array.from(el.children||[]).some(ch=>
+          (ch.textContent||"").trim().startsWith("http"));
+    })();
+    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow||safeGscExample)&&
        (el.closest("form")||el.hasAttribute("onclick")))||
        el.getAttribute("aria-disabled")==="true"||el.disabled)
       return {error:"CURSOR_ACTION_REQUIRES_HUMAN"};
-    if(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow){
+    if(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow||safeGscExample){
       // Only an observed, benign choice opener/option can be clicked here.
       // Submits, uploads, approvals and ambiguous controls stay human-gated.
     }else if(tag==="a"){
