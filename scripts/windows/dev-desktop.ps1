@@ -2,8 +2,25 @@
 $ErrorActionPreference="Stop"
 $project=(Resolve-Path (Join-Path $PSScriptRoot "../..")).ProviderPath
 $workspace=(Split-Path -Parent $project)
-# A separate test checkout can reside below mcp-workspace, next to pinned Runtime.
-$runtime=(Join-Path $workspace "owl-runtime-pin")
+# Resolve the exact signed release's pinned Runtime into a separate immutable
+# directory. Never modify the old, potentially dirty owl-runtime-pin checkout;
+# it remains usable by the previous Desktop's rollback launcher.
+$runtimeContractPath=Join-Path $project "docs/contracts/OWL_RUNTIME_COMPONENT_V1.json"
+$runtimeContract=Get-Content -LiteralPath $runtimeContractPath -Raw | ConvertFrom-Json
+$runtimeSha=[string]$runtimeContract.gitSha
+if($runtimeSha -cnotmatch '^[0-9a-f]{40}$'){throw "WINDOWS_DEV_RUNTIME_CONTRACT_INVALID"}
+$runtime=(Join-Path $workspace ("owl-runtime-release-"+$runtimeSha.Substring(0,7)))
+if(-not (Test-Path -LiteralPath $runtime -PathType Container)){
+  throw "WINDOWS_DEV_PINNED_RUNTIME_MISSING"
+}
+$actualRuntimeSha=[string](& git -C $runtime rev-parse HEAD 2>$null)
+if($LASTEXITCODE -ne 0 -or $actualRuntimeSha.Trim() -cne $runtimeSha){
+  throw "WINDOWS_DEV_PINNED_RUNTIME_SHA_MISMATCH"
+}
+$dirtyRuntime=@(& git -C $runtime status --porcelain --untracked-files=normal)
+if($LASTEXITCODE -ne 0 -or $dirtyRuntime.Count -gt 0){
+  throw "WINDOWS_DEV_PINNED_RUNTIME_DIRTY"
+}
 $legacyKey=(Join-Path $workspace "owl-cloud-runtime-lease-public.pem")
 $standardKey=(Join-Path $env:USERPROFILE ".owl-lab/trust/owl-cloud-dev-runtime-lease-public.pem")
 if(-not (Test-Path -LiteralPath (Join-Path $runtime "dist/server.js") -PathType Leaf)) {
@@ -50,6 +67,7 @@ $env:OWL_WIN_DEV_NATIVE_BROWSER="true"
 # authorize pointer, keyboard, shell or clipboard mutation.
 $env:OWL_WIN_DEV_UIA_READ_ONLY="true"
 $env:OWL_WIN_DEV_RUNTIME_ROOT=$runtime
+$env:OWL_RUNTIME_SOURCE_ROOT=$runtime
 $env:OWL_WIN_DEV_RUNTIME_PUBLIC_KEY=$key
 Set-Location -LiteralPath $project
 & npm.cmd run dev:desktop

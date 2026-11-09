@@ -91,7 +91,7 @@ function OwnedPortSnapshot([string]$Root,[int]$MainPid){
    8790 { $process.ProcessId -eq $MainPid -and
      $process.ExecutablePath -eq (Join-Path $Root 'node_modules\electron\dist\electron.exe') }
    8788 { $process.ParentProcessId -eq $MainPid -and
-     $process.CommandLine -match '(?i)owl-runtime-pin[\\/]dist[\\/]server\.js' }
+     $process.CommandLine -match '(?i)owl-runtime-(?:pin|release-[0-9a-f]{7})[\\/]dist[\\/]server\.js' }
    5173 { [string]$process.CommandLine -like ('*'+$Root+'*') -and
      [string]$process.CommandLine -match '(?i)vite' }
   }
@@ -111,6 +111,10 @@ function StopVerifiedResidualPorts([hashtable]$Snapshot){
  }
 }
 function CleanupCandidatePorts([string]$Root,[int]$OldRuntimePid){
+ $contract=Get-Content -LiteralPath (Join-Path $Root 'docs\\contracts\\OWL_RUNTIME_COMPONENT_V1.json') -Raw | ConvertFrom-Json
+ $sha=[string]$contract.gitSha
+ if($sha -cnotmatch '^[0-9a-f]{40}$'){throw 'ROLLBACK_INVALID_RUNTIME_SHA'}
+ $newRuntimeEntry=Join-Path (Join-Path $workspace ('owl-runtime-release-'+$sha.Substring(0,7))) 'dist\\server.js'
  foreach($port in @(8788,8790,5173)){
   $listener=@(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
   if($listener.Count -eq 0){continue}
@@ -120,7 +124,7 @@ function CleanupCandidatePorts([string]$Root,[int]$OldRuntimePid){
   $allowed=switch($port){
    8790 { $process.ExecutablePath -eq (Join-Path $Root 'node_modules\electron\dist\electron.exe') }
    8788 { $process.ProcessId -ne $OldRuntimePid -and
-      $process.CommandLine -match '(?i)owl-runtime-pin[\\/]dist[\\/]server\.js' }
+      [string]$process.CommandLine -like ('*'+$newRuntimeEntry+'*') }
    5173 { [string]$process.CommandLine -like ('*'+$Root+'*') -and
       $process.CommandLine -match '(?i)vite' }
   }

@@ -25,4 +25,7 @@ it("Windows DEV UIA opt-in never enables shell, delete or input actions", async 
   expect(source).toContain('ALLOW_DELETE:"false"');
   const launcher = await fs.readFile(new URL("../scripts/windows/dev-desktop.ps1", import.meta.url), "utf8");
   expect(launcher).toContain('OWL_WIN_DEV_UIA_READ_ONLY="true"');
+  expect(launcher).toContain('WINDOWS_DEV_PINNED_RUNTIME_SHA_MISMATCH');
+  expect(launcher).toContain('OWL_RUNTIME_SOURCE_ROOT=$runtime');
+  expect(launcher).not.toContain('$runtime=(Join-Path $workspace "owl-runtime-pin")');
 });
