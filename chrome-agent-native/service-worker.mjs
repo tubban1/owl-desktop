@@ -1,10 +1,36 @@
 import {createNativeAgentExecutor} from "./agent-executor.mjs";
+import {withNativeCommandDeadline} from "./command-watchdog.mjs";
 const executor=createNativeAgentExecutor(chrome,chrome.storage.session);
 const HOST="ai.owl.lab.agent";
 let port=null;
 let serial=Promise.resolve();
 let lastError=null;
 let reloadScheduled=false;
+// A native host that is polling does not prove a responsive extension.
+// On an unresponsive Chrome API, fail this command explicitly, then retire
+// the blocked worker. Never retry the command: it may have had side effects.
+function recoverStalledWorker(){
+  if(reloadScheduled)return;
+  reloadScheduled=true;
+  void (async()=>{
+    try{
+      await withNativeCommandDeadline(async()=>{
+        const session=await chrome.storage.session.get(["owlNativeOwned","owlNativeSelected"]);
+        await chrome.storage.local.set({owlNativeReloadCheckpoint:{
+          version:1,expiresAt:Date.now()+90_000,
+          owned:session.owlNativeOwned||{},selected:session.owlNativeSelected||{}
+        }});
+      },2_000);
+    }catch{
+      // Preserve existing Chrome tabs if storage becomes unavailable.
+      // No ownership may be invented; the next worker must revalidate tabs.
+    }finally{
+      // Same-Chrome extension reload. Never move the OS cursor, activate
+      // another tab, restart Chrome, or replay the timed-out operation.
+      chrome.runtime.reload();
+    }
+  })();
+}
 function connect(){
   if(port)return;
   try{
@@ -19,7 +45,7 @@ function connect(){
         serial=serial.then(async()=>{
           try{
             if(reloadScheduled)throw Error("EXTENSION_RELOAD_IN_PROGRESS");
-            const result=await executor.run(message);
+            const result=await withNativeCommandDeadline(()=>executor.run(message));
             p.postMessage({type:"result",id:message.id,ok:true,result});
             if(message.op==="extension_prepare_reload"&&result?.reloadPrepared){
               reloadScheduled=true;
@@ -28,7 +54,11 @@ function connect(){
               // mouse click, OS keyboard, DevTools port, or Chrome shutdown.
               setTimeout(()=>chrome.runtime.reload(),350);
             }
-          }catch(e){p.postMessage({type:"result",id:message.id,ok:false,error:String(e?.message||e).slice(0,300)});}
+          }catch(e){
+            try{p.postMessage({type:"result",id:message.id,ok:false,
+              error:String(e?.message||e).slice(0,300)});}catch{}
+            if(e?.code==="AGENT_NATIVE_COMMAND_STALLED")recoverStalledWorker();
+          }
         }).catch(()=>{});
       }
     });

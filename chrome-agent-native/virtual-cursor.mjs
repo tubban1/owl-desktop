@@ -48,8 +48,22 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
     const hint=[el.getAttribute("aria-label"),el.getAttribute("title"),
       el.getAttribute("role"),el.getAttribute("class"),el.textContent]
       .filter(Boolean).join(" ").slice(0,600);
+    // The WeChat video upload tile contains a *description* of publishing
+    // requirements. Reject consequential actions by the actual control
+    // identity, not keywords buried in explanatory text. This exception is
+    // restricted to its exact site, route, role and leading upload phrase.
+    const uploadLabel=(el.textContent||"").replace(/\s+/g," ").trim();
+    const actualAction=[el.getAttribute("aria-label"),el.getAttribute("title")]
+      .filter(Boolean).join(" ").trim();
+    const safeChannelsTile=location.hostname==="channels.weixin.qq.com"&&
+      location.pathname==="/platform/post/create"&&el.tagName==="SPAN"&&
+      el.getAttribute("role")==="button"&&/^支持上传/.test(uploadLabel)&&
+      /视频/.test(uploadLabel.slice(0,95))&&
+      !/上传后?自动?(?:发布|发表|提交)|上传并(?:发布|发表|提交)/.test(uploadLabel.slice(0,120))&&
+      !/^(?:发布|发表|提交|删除|支付|确认)/.test(actualAction);
+    const dangerousAction=/delete|destroy|logout|checkout|purchase|payment|pay|submit|publish|post|share|password|credential|删除|注销|付款|提交|发布|发送/i;
     if(!/upload|file.?select|file.?picker|choose file|browse files|上传|选择文件|添加视频/i.test(hint)||
-       /delete|destroy|logout|checkout|purchase|payment|pay|submit|publish|post|share|password|credential|删除|注销|付款|提交|发布|发送/i.test(hint))
+       (!safeChannelsTile&&dangerousAction.test(hint)))
       return {error:"UPLOAD_TRIGGER_NOT_APPROVED"};
     if(el.disabled||el.getAttribute("aria-disabled")==="true")
       return {error:"UPLOAD_TRIGGER_DISABLED"};

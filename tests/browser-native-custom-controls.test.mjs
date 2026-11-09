@@ -48,11 +48,12 @@ describe("custom field discovery in Agent-owned shadow roots",()=>{
 
 function cursor(label,kind="choice"){
   const e={
-    tagName:"DIV",textContent:label,className:kind==="choice"?"weui-select-trigger":"payment-button",
+    tagName:kind==="upload"?"SPAN":"DIV",textContent:label,className:kind==="choice"?"weui-select-trigger":"payment-button",
     disabled:false,readOnly:false,children:[],
     getAttribute(name){
       if(name==="type")return "";
       if(name==="class")return this.className;
+      if(name==="role")return kind==="upload"?"button":null;
       return null;
     },hasAttribute:()=>false,closest:()=>null,
     contains(node){return node===this;},getRootNode:()=>({}),
@@ -93,6 +94,16 @@ describe("safe background custom-choice cursor",()=>{
     expect(locateVirtualCursorTarget("owl-agent-8",ORIGIN,"upload"))
       .toMatchObject({valid:true});
     cursor("确认付款");
+    expect(locateVirtualCursorTarget("owl-agent-8",ORIGIN,"upload"))
+      .toMatchObject({error:"UPLOAD_TRIGGER_NOT_APPROVED"});
+  });
+  it("accepts the real video tile's descriptive 发布 text but never a publish action",()=>{
+    cursor("支持上传 8 小时以内、不超过20GB 的视频。发布视频动态，分辨率建议1080p及以上。","upload");
+    expect(locateVirtualCursorTarget("owl-agent-8",ORIGIN,"upload"))
+      .toMatchObject({valid:true,tag:"span"});
+    expect(locateVirtualCursorTarget("owl-agent-8",ORIGIN,"click"))
+      .toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});
+    cursor("上传后自动发布视频","upload");
     expect(locateVirtualCursorTarget("owl-agent-8",ORIGIN,"upload"))
       .toMatchObject({error:"UPLOAD_TRIGGER_NOT_APPROVED"});
   });
