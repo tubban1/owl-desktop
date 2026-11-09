@@ -70,11 +70,17 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
       }
       return false;
     })();
-    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption||safeDnsTab)&&
+    const safeGscNoindexRow=
+      location.hostname==="search.google.com"&&
+      location.pathname==="/search-console/index"&&
+      ["被“noindex”标记排除了","由于遇到其他 4xx 问题而被屏蔽了"].includes((el.textContent||"").trim())&&
+      !Array.from(el.children||[]).some(
+        ch=>(ch.textContent||"").trim()===(el.textContent||"").trim());
+    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow)&&
        (el.closest("form")||el.hasAttribute("onclick")))||
        el.getAttribute("aria-disabled")==="true"||el.disabled)
       return {error:"CURSOR_ACTION_REQUIRES_HUMAN"};
-    if(safeChoiceOpener||safeChoiceOption||safeDnsTab){
+    if(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow){
       // Only an observed, benign choice opener/option can be clicked here.
       // Submits, uploads, approvals and ambiguous controls stay human-gated.
     }else if(tag==="a"){

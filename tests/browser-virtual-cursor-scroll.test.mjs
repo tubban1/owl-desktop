@@ -73,6 +73,20 @@ describe("background Agent cursor",()=>{
     expect(locateVirtualCursorTarget("owl-agent-7","https://www.one.com","click"))
       .toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});
   });
+  it("allows only observed Search Console noindex report navigation",()=>{
+    mockPage({tag:"SPAN",type:"",label:"被“noindex”标记排除了",form:true,offscreen:false});
+    const el=document.querySelector();
+    el.children=[];
+    vi.stubGlobal("location",{origin:"https://search.google.com",hostname:"search.google.com",pathname:"/search-console/index"});
+    expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
+      .toMatchObject({valid:true,tag:"span"});
+    el.textContent="由于遇到其他 4xx 问题而被屏蔽了";
+    expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
+      .toMatchObject({valid:true,tag:"span"});
+    vi.stubGlobal("location",{origin:"https://search.google.com",hostname:"search.google.com",pathname:"/search-console/removals"});
+    expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
+      .toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});
+  });
   it("still denies form submit despite bringing offscreen control into view",()=>{
     const p=mockPage({label:"Submit application",form:true,type:"submit"});
     const r=locateVirtualCursorTarget("owl-agent-7","https://careers.axpo.com","click");

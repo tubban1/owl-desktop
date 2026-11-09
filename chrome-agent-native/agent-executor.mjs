@@ -114,13 +114,20 @@ export function createNativeAgentExecutor(chrome,storage){
       }
       return false;
     };
+    // Read-only GSC report drilldown: expose only the exact noindex row label.
+    const safeGscNoindexRow=el=>
+      location.hostname==="search.google.com"&&
+      location.pathname==="/search-console/index"&&
+      ["被“noindex”标记排除了","由于遇到其他 4xx 问题而被屏蔽了"].includes((el.textContent||"").trim())&&
+      !Array.from(el.children||[]).some(
+        ch=>(ch.textContent||"").trim()===(el.textContent||"").trim());
     // Inspect only this Agent-owned document and its *open* shadow roots.
     // Cross-origin frames and closed roots remain out of scope; no OS focus.
     const nodes=[];
     const collect=(root,depth)=>{
       if(depth>8 || nodes.length>=120)return;
       for(const el of root.querySelectorAll("*")){
-        if((el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[aria-placeholder],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone],[role=option],[role=tab],[class*=\"select-option\"] li,[class*=\"select-option\"] > div,[class*=\"select-item\"],[class*=\"dropdown-option\"]") || safeDnsTypeTab(el)) && visible(el))nodes.push({el,shadowDepth:depth});
+        if((el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[aria-placeholder],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone],[role=option],[role=tab],[class*=\"select-option\"] li,[class*=\"select-option\"] > div,[class*=\"select-item\"],[class*=\"dropdown-option\"]") || safeDnsTypeTab(el) || safeGscNoindexRow(el)) && visible(el))nodes.push({el,shadowDepth:depth});
         if(nodes.length>=120)break;
         if(el.shadowRoot)collect(el.shadowRoot,depth+1);
       }
