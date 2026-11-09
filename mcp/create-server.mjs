@@ -1,3 +1,4 @@
+import { safeMcpErrorCode } from "./tool-error-code.mjs";
 import { createHash } from "node:crypto";
 import { toolRegistrySnapshot } from "./tool-registry.mjs";
 import {createBrowserCompatRouter} from "./browser-compat-router.mjs";
@@ -863,6 +864,9 @@ function tool(server, name, description, schema, annotations, handler) {
         // workstream is descriptive metadata and creates no second approval
         // requirement. Runtime and OS denials still apply unchanged.
         const value = await handler(args);
+        if (name === "get_process_output" && Number.isFinite(value?.waitedMs))
+          context.recordToolWait?.(value.waitedMs);
+        context.recordToolOutcome?.("success");
         const durationMs = Date.now() - started;
         const pendingRecoveryRead =
           isProgressSafeRead(name, args) &&
@@ -891,6 +895,8 @@ function tool(server, name, description, schema, annotations, handler) {
           phase: "response",
           status: "success",
           durationMs,
+          ...(name === "get_process_output" && Number.isFinite(value?.waitedMs)
+            ? { intentionalWaitMs:Math.max(0,Math.min(durationMs,value.waitedMs)) } : {}),
           ...(typeof value?.concurrencyWaitMs === "number"
             ? { queueWaitMs: value.concurrencyWaitMs } : {}),
           ...(typeof value?.executionDurationMs === "number"
@@ -911,6 +917,8 @@ function tool(server, name, description, schema, annotations, handler) {
         });
         return ok(addProgressAdvisory(context, name, value));
       } catch (error) {
+        const errorCode=safeMcpErrorCode(error,name);
+        context.recordToolOutcome?.("error",errorCode);
         const durationMs = Date.now() - started;
         const step =
           !WORKSTREAM_META_TOOLS.has(name) &&
@@ -951,7 +959,7 @@ function tool(server, name, description, schema, annotations, handler) {
             phase: "response",
             status: progressBoundary ? "progress_required" : "error",
             durationMs,
-            code: error?.code ?? null,
+            code: errorCode,
             ...(error?.code === "SHELL_CAPACITY_BUSY"
               ? { queueWaitMs: Number(error?.queueWaitMs) || 0,
                   executionPhase: "admission" } : {}),
@@ -972,7 +980,7 @@ function tool(server, name, description, schema, annotations, handler) {
                 ? context.runtimeSessionId
                 : null,
             durationMs,
-            code: error?.code,
+            code: errorCode,
             message: error instanceof Error ? error.message : String(error),
           },
         );

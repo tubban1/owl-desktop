@@ -44,7 +44,9 @@ export function StatisticsPanel({
         <Clock3 size={19} aria-hidden="true"/>
         <small>Avg. tool response</small>
         <strong>{duration(model.avgDurationMs)}</strong>
-        <span>MCP tool processing; excludes ChatGPT transport</span>
+        <span>Full MCP response time, including intentional waits</span>
+        <span>Processing only (new observations): {duration(model.avgServiceDurationMs)}
+          {" · "}{fmt(model.total.serviceTimedCalls)} measured</span>
       </div>
       <div>
         <CheckCircle2 size={19} aria-hidden="true"/>

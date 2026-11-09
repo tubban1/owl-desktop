@@ -20,6 +20,10 @@ export function createCallTimingJournal({ root, maxBytes = 4 * 1024 * 1024, back
       ...(typeof row.tool === "string" ? { tool: row.tool.slice(0, 100) } : {}),
       ...(typeof row.status === "string" || typeof row.status === "number"
         ? { status: row.status } : {}),
+      ...(row.toolOutcome === "error" || row.toolOutcome === "success"
+        ? { toolOutcome: row.toolOutcome } : {}),
+      ...(typeof row.toolErrorCode === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(row.toolErrorCode)
+        ? { toolErrorCode: row.toolErrorCode } : {}),
       ...Object.fromEntries(
         ["totalMs", "preflightMs", "queueMs", "connectMs", "executeMs", "completeMs", "waitingMs"]
           .filter((key) => Number.isFinite(row[key]) && row[key] >= 0)

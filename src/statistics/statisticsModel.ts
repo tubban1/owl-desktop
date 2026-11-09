@@ -4,7 +4,9 @@ export type UsageDay = {
   workstreamOpens: number; completedWorkstreams: number; reconnects: number;
   sessionOpens?: number; idleReclaimed?: number; capEvictions?: number; unknownReclaimed?: number; ownerSuperseded?: number;
   externalFallbacks?: number; fallbackReasons?: Record<string,number>; errorCodes?: Record<string,number>;
-  durationMs: number; timedCalls: number; tools: UsageToolCount[];
+  durationMs: number; timedCalls: number;
+  serviceDurationMs?: number; serviceTimedCalls?: number; intentionalWaitMs?: number;
+  tools: UsageToolCount[];
 };
 export type UsageStatisticsSnapshot = { since: string; days: UsageDay[] };
 export type StatisticsRange = 7 | 30 | 90 | "all";
@@ -21,7 +23,8 @@ export function summarizeUsage(snapshot: UsageStatisticsSnapshot | null, range: 
   if (range !== "all") day.setDate(day.getDate() - range + 1);
   const cutoff = [day.getFullYear(), String(day.getMonth() + 1).padStart(2,"0"), String(day.getDate()).padStart(2,"0")].join("-");
   const rows = (snapshot?.days ?? []).filter((d) => range === "all" || d.day >= cutoff).sort((a,b) => a.day.localeCompare(b.day));
-  const total = { calls: 0, successes: 0, errors: 0, workstreamOpens: 0, completedWorkstreams: 0, reconnects: 0, sessionOpens: 0, idleReclaimed: 0, capEvictions: 0, unknownReclaimed: 0, ownerSuperseded: 0, externalFallbacks: 0, durationMs: 0, timedCalls: 0 };
+  const total = { calls: 0, successes: 0, errors: 0, workstreamOpens: 0, completedWorkstreams: 0, reconnects: 0, sessionOpens: 0, idleReclaimed: 0, capEvictions: 0, unknownReclaimed: 0, ownerSuperseded: 0, externalFallbacks: 0, durationMs: 0, timedCalls: 0,
+    serviceDurationMs: 0, serviceTimedCalls: 0, intentionalWaitMs: 0 };
   const tools = new Map<string, UsageToolCount>();
   const fallbackReasons = new Map<string,number>();
   const errorCodes = new Map<string,number>();
@@ -44,5 +47,8 @@ export function summarizeUsage(snapshot: UsageStatisticsSnapshot | null, range: 
     errorCodes:[...errorCodes].map(([code,count])=>({code,count})).sort((a,b)=>b.count-a.count || a.code.localeCompare(b.code)),
     transportStartsPerToolCall:total.calls ? Math.round(total.sessionOpens * 100 / total.calls)/100 : null,
     successRate: total.successes + total.errors ? Math.round(total.successes * 1000/(total.successes+total.errors))/10 : null,
-    avgDurationMs: dailyAvgDurationMs(total) };
+    avgDurationMs: dailyAvgDurationMs(total),
+    avgServiceDurationMs: dailyAvgDurationMs({
+      durationMs:total.serviceDurationMs,timedCalls:total.serviceTimedCalls,
+    }) };
 }

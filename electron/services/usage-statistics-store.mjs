@@ -3,7 +3,7 @@ import path from "node:path";
 
 // Stores only counters and opaque interaction IDs. No prompts, payloads or credentials.
 const MAX_DEDUPE = 100_000;
-const freshDay = () => ({ calls: 0, successes: 0, errors: 0, workstreamOpens: 0, completedWorkstreams: 0, reconnects: 0, sessionOpens: 0, idleReclaimed: 0, capEvictions: 0, unknownReclaimed: 0, ownerSuperseded: 0, errorCodes: {}, durationMs: 0, timedCalls: 0, externalFallbacks: 0, fallbackReasons: {}, tools: {} });
+const freshDay = () => ({ calls: 0, successes: 0, errors: 0, workstreamOpens: 0, completedWorkstreams: 0, reconnects: 0, sessionOpens: 0, idleReclaimed: 0, capEvictions: 0, unknownReclaimed: 0, ownerSuperseded: 0, errorCodes: {}, durationMs: 0, timedCalls: 0, serviceDurationMs: 0, serviceTimedCalls: 0, intentionalWaitMs: 0, externalFallbacks: 0, fallbackReasons: {}, tools: {} });
 const validDay = (at) => {
   const ms = Date.parse(at ?? "");
   if (!Number.isFinite(ms)) return null;
@@ -92,6 +92,16 @@ export class UsageStatisticsStore {
         if (typeof meta.durationMs === "number" && Number.isFinite(meta.durationMs) && meta.durationMs >= 0) {
           row.durationMs += meta.durationMs;
           row.timedCalls += 1;
+          // Keep full end-to-end tool latency and actual processing latency
+          // separate. An intentional long poll is not Runtime computation.
+          // Historical records retain their original, unrevised averages.
+          const intentionalWait = typeof meta.intentionalWaitMs === "number" &&
+            Number.isFinite(meta.intentionalWaitMs) && meta.intentionalWaitMs >= 0
+              ? Math.min(meta.durationMs,meta.intentionalWaitMs) : 0;
+          row.serviceDurationMs = (row.serviceDurationMs ?? 0) +
+            (meta.durationMs-intentionalWait);
+          row.serviceTimedCalls = (row.serviceTimedCalls ?? 0) + 1;
+          row.intentionalWaitMs = (row.intentionalWaitMs ?? 0) + intentionalWait;
         }
       }
     }

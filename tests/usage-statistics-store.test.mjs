@@ -33,7 +33,18 @@ describe("Durable usage statistics", () => {
     const row = store.snapshot().days[0];
     expect(row).toMatchObject({calls:2, successes:1, errors:1, timedCalls:2, durationMs:840});
     expect(row.tools).toEqual([{tool:"edit_file",calls:1,errors:1},{tool:"execute_command",calls:1,errors:0}]);
+    expect(row).toMatchObject({serviceDurationMs:840,serviceTimedCalls:2,intentionalWaitMs:0});
     expect(JSON.stringify(store.snapshot())).not.toContain("NEVER STORE");
+  });
+  it("tracks intentional long-poll waits without hiding total response time",()=>{
+    const {store}=make();
+    const result=event("longpoll","response","success","2026-10-08","get_process_output");
+    result.meta.durationMs=5400;
+    result.meta.intentionalWaitMs=5200;
+    store.ingest(result);
+    const row=store.snapshot().days[0];
+    expect(row).toMatchObject({durationMs:5400,timedCalls:1,
+      serviceDurationMs:200,serviceTimedCalls:1,intentionalWaitMs:5200});
   });
   it("aggregates only bounded, privacy-safe error codes and preserves original success-rate denominators", () => {
     const {store,file} = make();

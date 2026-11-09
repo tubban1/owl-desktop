@@ -5,7 +5,7 @@ import { startOwlMcpHttpServer } from "../mcp/http-server.mjs";
 const closers = [];
 afterEach(async () => { while (closers.length) await closers.pop()(); });
 
-async function runtime() {
+async function runtime(responseForMethod = () => ({ apiVersion: "0.1", runtimeVersion: "test" })) {
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -13,7 +13,7 @@ async function runtime() {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({
       ok: true, apiVersion: "0.1", requestId: data.id,
-      result: { apiVersion: "0.1", runtimeVersion: "test" },
+      result: responseForMethod(data.method),
     }));
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -54,6 +54,29 @@ describe("MCP lightweight health and bounded latency diagnostics", () => {
     expect(diagnostic.plannerContinuation.owners).toHaveLength(50);
     expect(heavyReads).toBe(1);
     expect(diagnostic.mcpLatency.sampleCount).toBe(0);
+  });
+
+  it("blocks OTA activation when Runtime/MCP work is present or telemetry fails", async () => {
+    let active=false;
+    const server=await startOwlMcpHttpServer({
+      port:0, mcpToken:"ota-test-secret",
+      runtimeBaseUrl:await runtime(method => {
+        if(method==="tasks.list")return active?[{status:"running"}]:[];
+        if(method==="approvals.list")return [];
+        if(method==="process")return [{status:"exited"}];
+        return {apiVersion:"0.1",runtimeVersion:"test"};
+      }),
+    });
+    closers.push(()=>server.close());
+    const base=new URL(server.url).origin;
+    expect((await fetch(base+"/ota/activity")).status).toBe(401);
+    const headers={authorization:"Bearer ota-test-secret"};
+    const idle=await (await fetch(base+"/ota/activity",{headers})).json();
+    expect(idle).toMatchObject({ok:true,service:"owl-ota-activity",ready:true});
+    expect(idle).not.toHaveProperty("tasks");
+    active=true;
+    const busy=await (await fetch(base+"/ota/activity",{headers})).json();
+    expect(busy).toMatchObject({ready:false,reason:"runtime-or-mcp-work-active",activeTasks:1});
   });
 
   it("records bounded, payload-free MCP request timing", async () => {

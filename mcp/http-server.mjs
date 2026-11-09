@@ -8,6 +8,8 @@ import { createOwlMcpServer } from "./create-server.mjs";
 import { resolveOwnerIdentity } from "./owner-identity.mjs";
 import { withMcpRequestContext } from "./request-context.mjs";
 import { createCallTimingJournal, safeTraceId } from "./call-timing-journal.mjs";
+import { summarizeMcpCallMetrics } from "./call-metrics.mjs";
+import { evaluateOtaActivity } from "./ota-activity.mjs";
 
 export async function startOwlMcpHttpServer({
   port = 8790,
@@ -46,18 +48,7 @@ export async function startOwlMcpHttpServer({
   });
   const LATENCY_SAMPLE_LIMIT = 128;
   function latencySummary() {
-    const values = recentMcpCalls.map((row) => row.totalMs).sort((a, b) => a - b);
-    const percentile = (p) => values.length
-      ? values[Math.min(values.length - 1, Math.ceil(values.length * p) - 1)]
-      : null;
-    return {
-      sampleCount: values.length,
-      p50Ms: percentile(0.5),
-      p95Ms: percentile(0.95),
-      maxMs: values.at(-1) ?? null,
-      failedCount: recentMcpCalls.filter((row) => row.status >= 400 || row.status === 0).length,
-      slowCallCount: recentMcpCalls.filter((row) => row.totalMs >= 2000).length,
-    };
+    return summarizeMcpCallMetrics(recentMcpCalls);
   }
   plannerContinuation?.recoverConnectedTransports?.("mcp_restart");
   const boundedSessionIdleTtlMs = Math.max(Number(sessionIdleTtlMs) || 0, 1_000);
@@ -228,6 +219,7 @@ export async function startOwlMcpHttpServer({
       lastSeenAtMs: 0,
       lastSeenMonotonicMs: 0,
       activeRequestCount: 0,
+      activeToolRequestCount: 0,
     };
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
@@ -254,6 +246,9 @@ export async function startOwlMcpHttpServer({
     const requestStarted = performance.now();
     let preflightCompleted = requestStarted;
     let recorded = false;
+    let toolOutcome = null;
+    let toolErrorCode = null;
+    let intentionalWaitingMs = 0;
     const traceId = safeTraceId(req.headers["x-owl-trace-id"]) ?? randomUUID();
     const receivedAt = new Date().toISOString();
     res.setHeader("x-owl-trace-id", traceId);
@@ -270,6 +265,9 @@ export async function startOwlMcpHttpServer({
         traceId, phase: "mcp_response", method: requestedMethod,
         ...(toolName ? { tool: toolName } : {}),
         status: res.writableFinished ? res.statusCode : 0,
+        ...(toolName && toolOutcome ? { toolOutcome } : {}),
+        ...(toolErrorCode ? { toolErrorCode } : {}),
+        ...(intentionalWaitingMs > 0 ? {waitingMs:intentionalWaitingMs} : {}),
         totalMs, preflightMs: Math.round(preflightCompleted - requestStarted),
       });
       recentMcpCalls.push({
@@ -277,6 +275,9 @@ export async function startOwlMcpHttpServer({
         method: requestedMethod,
         ...(toolName ? { tool: toolName } : {}),
         status: res.writableFinished ? res.statusCode : 0,
+        ...(toolName && toolOutcome ? { toolOutcome } : {}),
+        ...(toolErrorCode ? { toolErrorCode } : {}),
+        ...(intentionalWaitingMs > 0 ? {waitingMs:intentionalWaitingMs} : {}),
         totalMs,
         preflightMs: Math.round(preflightCompleted - requestStarted),
       });
@@ -395,6 +396,8 @@ export async function startOwlMcpHttpServer({
       touchTransportSession(active);
       active.activeRequestCount =
         Number(active.activeRequestCount ?? 0) + 1;
+      if (toolName) active.activeToolRequestCount =
+        Number(active.activeToolRequestCount ?? 0) + 1;
 
       preflightCompleted = performance.now();
       try {
@@ -470,6 +473,16 @@ export async function startOwlMcpHttpServer({
               return true;
             },
             onEvent,
+            recordToolOutcome: (outcome, code) => {
+              toolOutcome = outcome === "error" ? "error" : "success";
+              toolErrorCode = typeof code === "string" ? code.slice(0,80) : null;
+            },
+            recordToolWait: (waitedMs) => {
+              // Long-poll results report actual elapsed wait; not a tool
+              // execution bottleneck. Preserve the full wall time separately.
+              intentionalWaitingMs = Number.isFinite(waitedMs)
+                ? Math.max(0,Math.min(waitedMs,120_000)) : 0;
+            },
           },
           () => active.transport.handleRequest(req, res, req.body),
         );
@@ -478,6 +491,8 @@ export async function startOwlMcpHttpServer({
           0,
           Number(active.activeRequestCount ?? 1) - 1,
         );
+        if (toolName) active.activeToolRequestCount = Math.max(
+          0, Number(active.activeToolRequestCount ?? 1) - 1);
         // A long request is activity for its entire lifetime. Refresh the idle
         // clock on completion so it cannot be reclaimed immediately afterward.
         touchTransportSession(active);
@@ -603,6 +618,29 @@ export async function startOwlMcpHttpServer({
 
   // Detailed owner history is available only on the explicit diagnostics
   // endpoint. Do not include it in the hot /health readiness path.
+  // Local loopback (127.0.0.1) release readiness; never serializes task
+  // payloads, owners, commands, file paths or tokens into a response.
+  // Unknown state is NOT interpreted as a safe time to restart.
+  app.get("/ota/activity", requireAuth, async (_req,res) => {
+    const inFlightTools=[...sessions.values()].reduce((sum,session)=>
+      sum+Number(session.activeToolRequestCount??0),0);
+    const client=new RuntimeHttpClient({
+      baseUrl:runtimeBaseUrl,sessionId:"owl-mcp:ota-observe",
+      token:runtimeToken,
+    });
+    try {
+      const [tasks,approvals,processes]=await Promise.all([
+        client.tasks(),client.approvals(),client.processes(),
+      ]);
+      res.json({ok:true,service:"owl-ota-activity",
+        observedAt:new Date().toISOString(),
+        ...evaluateOtaActivity({tasks,approvals,processes,inFlightTools})});
+    }catch{
+      res.status(503).json({ok:false,service:"owl-ota-activity",
+        observedAt:new Date().toISOString(),ready:false,reason:"activity-query-unavailable"});
+    }
+  });
+
   app.get("/diagnostics", requireAuth, (_req, res) => {
     res.json({
       ok: true,
