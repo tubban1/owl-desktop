@@ -4,6 +4,12 @@ const file=new URL("../scripts/windows/verified-dev-cutover.ps1",import.meta.url
 describe("Windows autonomous cutover guardian drift recovery",()=>{
   it("accepts Ready and Running scheduled guardian, prevents trigger races, and restores on rollback",async()=>{
     const source=await readFile(file,"utf8");
+    expect(source).toContain("function GuardianProcesses {");
+    expect(source).toContain("Get-CimInstance Win32_Process -Filter");
+    expect(source).toContain("dev-guardian.ps1");
+    expect(source).toContain("$preflight.orphanGuardianPids");
+    expect(source).toContain("$preflight.guardianProcessesSafe");
+    expect(source).toContain("CUTOVER_ORPHAN_OR_DUPLICATE_GUARDIAN");
     expect(source).toContain("$preflight.guardianRecoverable=$false");
     expect(source).toContain("$guard.State -in @('Ready','Running')");
     expect(source).toContain("Disable-ScheduledTask -TaskName $taskName");
@@ -14,7 +20,7 @@ describe("Windows autonomous cutover guardian drift recovery",()=>{
     expect(source).toContain(String.raw`Join-Path $guardianRoot 'scripts\windows\dev-guardian.ps1'`);
     expect(source).toContain("-not (MainProcess $guardianRoot)");
     expect(source).toContain("$guardianRoot.StartsWith($workspace+[IO.Path]::DirectorySeparatorChar");
-    expect(source).toContain("$preflight.guardianRecoverable)");
+    expect(source).toContain("$preflight.guardianRecoverable -and $preflight.guardianProcessesSafe)");
     expect(source).toContain("Restore-OldGuardian");
     expect(source).toContain("CUTOVER_PREFLIGHT_BLOCKED");
   });

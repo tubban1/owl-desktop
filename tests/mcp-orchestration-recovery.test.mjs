@@ -291,6 +291,18 @@ describe("OWL orchestration recovery snapshot", () => {
       },
     });
     expect(snapshot.focus.progress.message).toContain("verification matrix");
+    expect(snapshot.focusDiagnosis).toMatchObject({
+      taskId: "task_release_tests",
+      outcome: "still_running",
+      terminal: false,
+      nextAction: "observe_existing_task",
+      progress: { revision: 7, stepSuccessPercent: 50, totalSteps: 4 },
+      verification: { required: 2, verified: 1, missing: 1 },
+      transport: { runtime: "observed", mcp: "connected", planner: "unknown" },
+      chatResponseOutcome: "not_observable_from_runtime",
+      safeToAutomaticallyReplay: false,
+      safeToAutomaticallySendChatTurn: false,
+    });
     expect(snapshot.focusDetail).toMatchObject({
       activeSteps: [
         {

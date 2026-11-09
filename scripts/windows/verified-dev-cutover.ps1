@@ -47,6 +47,24 @@ function MainProcess([string]$Root){
  if($items.Count -gt 1){throw 'CUTOVER_MULTIPLE_MAIN_PROCESSES'}
  return $(if($items.Count -eq 1){$items[0]}else{$null})
 }
+# Inventory the ACTUAL long-lived Guardian processes, not just the registered
+# Scheduler definition. An orphan from another release can respawn old Vite or
+# Electron during port handoff even when the Scheduler is correctly updated.
+function GuardianProcesses {
+ $rows=@()
+ foreach($item in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'")){
+  $line=[string]$item.CommandLine
+  $match=[regex]::Match($line,
+    '(?i)(?:^|\s)-File\s+(?:"([^"]+)"|(\S+))\s+-Mode\s+Run(?:\s|$)')
+  if(-not $match.Success){continue}
+  $scriptPath=if($match.Groups[1].Success){$match.Groups[1].Value}else{$match.Groups[2].Value}
+  if(-not $scriptPath.EndsWith('\scripts\windows\dev-guardian.ps1',
+    [StringComparison]::OrdinalIgnoreCase)){continue}
+  $root=Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $scriptPath))
+  $rows+= [pscustomobject]@{pid=[int]$item.ProcessId;root=$root}
+ }
+ return $rows
+}
 function PortBusy([int]$Port){return @((Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)).Count -gt 0}
 function Test-Tunnel {
  try{
@@ -283,6 +301,15 @@ if($guard){$preflight.guardianRoot=[string]$guard.Actions[0].WorkingDirectory}
 # other Electron main is running from the guardian root, and the independent
 # Computer MCP remains reachable. On success install the new guardian; on
 # failure restore the actual old Electron owner's guardian, not the stale pin.
+$runningGuardians=@(GuardianProcesses)
+$orphanGuardians=@($runningGuardians|Where-Object {
+ [string]$_.root -ine $OldRoot
+})
+$preflight.guardianProcessCount=$runningGuardians.Count
+$preflight.orphanGuardianPids=@($orphanGuardians|ForEach-Object {$_.pid})
+$preflight.guardianProcessesSafe=[bool](
+ $runningGuardians.Count -le 1 -and $orphanGuardians.Count -eq 0
+)
 $preflight.guardianRecoverable=$false
 if($guard -and $guard.State -in @('Ready','Running') -and
    [string]$guard.Actions[0].Execute -ieq 'powershell.exe' -and
@@ -301,8 +328,9 @@ if($guard -and $guard.State -in @('Ready','Running') -and
 }
 $preflight.ready=[bool]($original -and -not $preflight.newMainPresent -and
  $preflight.computerMcpBackup -and $preflight.runtimeHealthy -and $preflight.tunnelHealthy -and
- $preflight.guardianRecoverable)
+ $preflight.guardianRecoverable -and $preflight.guardianProcessesSafe)
 if($Mode -eq 'Check'){$preflight|ConvertTo-Json -Depth 4;exit 0}
+if(-not $preflight.guardianProcessesSafe){throw 'CUTOVER_ORPHAN_OR_DUPLICATE_GUARDIAN'}
 if(-not $preflight.ready){throw 'CUTOVER_PREFLIGHT_BLOCKED'}
 # Windows Computer MCP is the local independent fallback. A remote caller must
 # also verify Mac is online before submitting this one-device transition.

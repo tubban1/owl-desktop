@@ -5,6 +5,8 @@ import type {
   SkillManagerSnapshot,
 } from "../types";
 import type { MonitorModel } from "./monitorModel";
+import { diagnoseTaskContinuity } from "../../shared/task-continuity.mjs";
+import type { TaskContinuityDiagnosis } from "../../shared/task-continuity.mjs";
 
 type Row = Record<string, any>;
 
@@ -114,6 +116,7 @@ export type OrchestrationTaskInspector = {
   currentAction: string;
   currentDetail: string;
   progressPercent: number | null;
+  continuity: TaskContinuityDiagnosis;
   stepCounts: {
     total: number;
     pending: number;
@@ -569,6 +572,7 @@ function buildGraph(detail: Row | null) {
 function buildInspector(
   task: Row | null,
   detail: Row | null,
+  snapshot: RuntimeSnapshot | null,
 ): OrchestrationTaskInspector | null {
   if (!task) return null;
   const source = detail ?? task;
@@ -601,6 +605,16 @@ function buildInspector(
       ? String(activeStep.id) + " · " + String(activeStep.state)
       : String(source.progress?.message ?? ""),
     progressPercent: taskProgressPercent(source),
+    continuity: diagnoseTaskContinuity({
+      task: source,
+      runtimeObserved: snapshot?.mode === "live",
+      mcpConnected: snapshot?.mcp.status === "running",
+      tunnelConnected: snapshot?.tunnel.reachability?.state === "ready"
+        ? true
+        : snapshot?.tunnel.reachability?.state
+          ? false
+          : null,
+    }),
     stepCounts: {
       total: num(counts.total),
       pending: num(counts.pending),
@@ -776,7 +790,7 @@ export function buildOrchestrationModel(input: {
     }),
     milestones: buildMilestones(detail, agentRequests),
     graph: buildGraph(detail),
-    inspector: buildInspector(focusTask, detail),
+    inspector: buildInspector(focusTask, detail, snapshot),
     system,
   };
 }

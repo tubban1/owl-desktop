@@ -155,6 +155,24 @@ function TaskInspector({ model }: { model: OrchestrationModel }) {
           </small>
         </div>
         <div>
+          <span>Execution outcome</span>
+          <strong>{task.continuity.outcome.replaceAll("_", " ")}</strong>
+          <small>
+            Runtime Task is authoritative · ChatGPT delivery is not observable here
+          </small>
+        </div>
+        <div>
+          <span>Connection / recovery</span>
+          <strong>{task.continuity.interruption.replaceAll("_", " ")}</strong>
+          <small>
+            {task.continuity.progress.revision === null
+              ? "Progress revision unavailable"
+              : "Progress revision " + task.continuity.progress.revision}
+            {" · "}
+            {task.continuity.nextAction.replaceAll("_", " ")}
+          </small>
+        </div>
+        <div>
           <span>Evidence memory</span>
           <strong>{task.memory.eventCount} events</strong>
           <small>

@@ -1,4 +1,5 @@
 import { safeMcpErrorCode } from "./tool-error-code.mjs";
+import { diagnoseTaskContinuity } from "../shared/task-continuity.mjs";
 import { createHash } from "node:crypto";
 import { toolRegistrySnapshot } from "./tool-registry.mjs";
 import {createBrowserCompatRouter} from "./browser-compat-router.mjs";
@@ -3927,6 +3928,12 @@ export function createOwlMcpServer({fileDelivery=null,userChromeBridge=null,mail
         },
         continuation,
         focus: focus ? compactRecoveryTask(focus) : null,
+        focusDiagnosis: diagnoseTaskContinuity({
+          task: focus,
+          plannerConnected: continuation?.plannerConnected ?? null,
+          runtimeObserved: true,
+          mcpConnected: true,
+        }),
         focusDetail: compactRecoveryDetail(detail),
         workset: resolvedOrchestrationId
           ? {
