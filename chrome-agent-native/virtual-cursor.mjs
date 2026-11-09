@@ -74,9 +74,15 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
       /^(?:选择合集|添加到合集|请选择|选择分类|选择标签|select collection|choose category)$/i.test(label.trim()));
     const safeChoiceOpener=nonSensitiveChoice&&(readOnlyChoice||customOpener);
     const insideChoiceList=!!el.closest?.('[role="listbox"],[class*="select-option"],[class*="select-dropdown"],[class*="dropdown-menu"]');
+    // WeChat Channels uses non-ARIA collection rows with labels like
+    // "Agent陷阱共3个内容". Accept only this bounded, non-consequential
+    // choice shape on its exact publishing page, not arbitrary DIV clicks.
+    const wechatCollectionOption=location.hostname==="channels.weixin.qq.com"&&
+      location.pathname==="/platform/post/create"&&pointerChoice&&
+      /^[^\n]{1,80}共\d+个内容$/.test(label.trim());
     const safeChoiceOption=(el.getAttribute("role")==="option"||
       /(?:select-option|select-item|dropdown-option)/i.test(classLabel)||
-      insideChoiceList)&&
+      insideChoiceList||wechatCollectionOption)&&
       ["div","li","span"].includes(tag)&&label.trim().length>0&&
       label.length<150&&nonSensitiveChoice;
     // Selecting a record type only changes the editor; never submits DNS.

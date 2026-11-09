@@ -72,6 +72,15 @@ describe("safe background custom-choice cursor",()=>{
     expect(locateVirtualCursorTarget("owl-agent-21",ORIGIN,"click"))
       .toMatchObject({valid:true,tag:"div"});
   });
+  it("selects a WeChat Channels collection row but rejects lookalikes elsewhere",()=>{
+    cursor("Agent陷阱共3个内容","payment");
+    expect(locateVirtualCursorTarget("owl-agent-15",ORIGIN,"click"))
+      .toMatchObject({valid:true,tag:"div"});
+    vi.stubGlobal("location",{origin:"https://example.org",hostname:"example.org",
+      pathname:"/platform/post/create"});
+    expect(locateVirtualCursorTarget("owl-agent-15","https://example.org","click"))
+      .toMatchObject({error:"CURSOR_UNSUPPORTED_CONTROL"});
+  });
   it("still blocks ambiguous payment actions",()=>{
     cursor("确认付款");
     expect(locateVirtualCursorTarget("owl-agent-21",ORIGIN,"click"))
