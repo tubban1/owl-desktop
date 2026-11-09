@@ -81,6 +81,53 @@ describe("MCP lightweight health and bounded latency diagnostics", () => {
     expect(busy).toMatchObject({ready:false,reason:"runtime-or-mcp-work-active",activeTasks:1});
   });
 
+  it("locally fences new MCP tools, fails closed for busy Runtime and releases safely", async () => {
+    let active=false;
+    const token="a".repeat(43);
+    const server=await startOwlMcpHttpServer({
+      port:0,mcpToken:"ota-test-secret",otaActivityToken:token,
+      runtimeBaseUrl:await runtime(method=>{
+        if(method==="tasks.list")return active?[{status:"running"}]:[];
+        if(method==="approvals.list")return [];
+        if(method==="process")return [{status:"exited"}];
+        return {apiVersion:"0.1",runtimeVersion:"test"};
+      }),
+    });
+    closers.push(()=>server.close());
+    const base=new URL(server.url).origin;
+    const headers={"content-type":"application/json","x-owl-ota-activity-token":token};
+    const post=async(data,authorized=true)=>fetch(base+"/ota/drain",{
+      method:"POST",headers:authorized?headers:{"content-type":"application/json"},
+      body:JSON.stringify(data),
+    });
+    expect((await post({action:"arm"},false)).status).toBe(401);
+    active=true;
+    const rejected=await post({action:"arm",ttlMs:30000});
+    expect(rejected.status).toBe(409);
+    expect((await rejected.json()).reason).toBe("runtime-or-mcp-work-active");
+    active=false;
+    const accepted=await post({action:"arm",ttlMs:30000});
+    expect(accepted.status).toBe(200);
+    const receipt=await accepted.json();
+    expect(receipt).toMatchObject({ready:true});
+    expect(typeof receipt.nonce).toBe("string");
+    const tool=()=>fetch(server.url,{
+      method:"POST",headers:{authorization:"Bearer ota-test-secret",
+        "content-type":"application/json",
+        accept:"application/json, text/event-stream"},
+      body:JSON.stringify({jsonrpc:"2.0",id:4,method:"tools/call",
+        params:{name:"task_status",arguments:{}}}),
+    });
+    const blocked=await tool();
+    expect(blocked.status).toBe(503);
+    expect(blocked.headers.get("retry-after")).toBe("5");
+    expect(await blocked.json()).toMatchObject({error:"OTA_DRAINING",retryable:true});
+    expect((await post({action:"release",nonce:"wrong"})).status).toBe(409);
+    expect((await tool()).status).toBe(503);
+    expect((await post({action:"release",nonce:receipt.nonce})).status).toBe(200);
+    expect((await tool()).status).not.toBe(503);
+  });
+
   it("records bounded, payload-free MCP request timing", async () => {
     const server = await startOwlMcpHttpServer({
       port: 0, runtimeBaseUrl: await runtime(),

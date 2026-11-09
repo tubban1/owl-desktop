@@ -98,6 +98,25 @@ async function http(url){
   return res.ok?await res.json():null;
  }catch{return null;}
 }
+// Arm the short-lived local MCP admission fence only after all shadow,
+// peer and user-idle checks have passed. Unknown/missing endpoints defer;
+// never fall back to the earlier non-atomic idle snapshot alone.
+async function otaDrain(action,nonce=null){
+ const tokenFile=path.join(otaRoot,"activity-token");
+ let token;
+ try{token=fs.readFileSync(tokenFile,"utf8").trim();}
+ catch{return null;}
+ if(!/^[A-Za-z0-9_-]{43}$/.test(token))return null;
+ try{
+  const res=await fetch("http://127.0.0.1:8790/ota/drain",{
+   method:"POST",
+   headers:{"content-type":"application/json","x-owl-ota-activity-token":token},
+   body:JSON.stringify(action==="arm"?{action,ttlMs:45_000}:{action,nonce}),
+   signal:AbortSignal.timeout(6000),
+  });
+  return res.ok?await res.json():null;
+ }catch{return null;}
+}
 async function tunnelReady(root){
  if(device==="windows"){
   const h=await http("http://127.0.0.1:18081/health?details=true");
@@ -232,6 +251,21 @@ function applyWindows(oldRoot,newRoot,oldSha,newSha){
  run("powershell.exe",["-NoProfile","-NonInteractive","-EncodedCommand",
   Buffer.from(ps,"utf16le").toString("base64")],{timeout:25000});
 }
+// Best-effort housekeeping outside the activation critical path. Only
+// removes a completed one-shot Windows rollout whose full SHA, success
+// receipt, and archived Scheduler definition have been verified.
+function cleanupCompletedWindowsRollout(sha){
+ if(device!=="windows"||!SHA.test(sha))return null;
+ const script=path.join(agent,"windows","cleanup-completed-rollout.ps1");
+ if(!fs.existsSync(script))return {status:"janitor-script-unavailable"};
+ try{
+  const raw=run("powershell.exe",["-NoProfile","-NonInteractive",
+   "-ExecutionPolicy","Bypass","-File",script,"-Sha",sha],{timeout:12000});
+  return {status:raw.slice(-160)};
+ }catch(e){
+  return {status:"deferred",reason:String(e.message??e).slice(0,140)};
+ }
+}
 async function waitForActivation(sha){
  const file=path.join(stageRoot,device==="mac"?"mac-cutover-transaction.json":"cutover-last.json");
  const deadline=Date.now()+270000;
@@ -269,6 +303,9 @@ async function prepare(){
 async function tick(){
  const live=await liveStatus();await publish(live,fs.existsSync(path.join(rollState,"rollout.lock")));
  if(!live.healthy)return {status:"blocked",reason:"local-unhealthy"};
+ // Reap completed one-shot jobs on subsequent healthy ticks. Never do
+ // housekeeping while the host is unhealthy or within active cutover.
+ cleanupCompletedWindowsRollout(live.sha);
  const firstGate=await localActivationGate();
  if(!firstGate.allowed)return {status:"deferred",reason:firstGate.reason,live:live.sha};
  const staged=readVerifiedStage(stageRoot);
@@ -286,6 +323,7 @@ async function tick(){
  const unlock=tryAcquireLocalRolloutLock(rollState);
  if(!unlock)return {status:"deferred",reason:"local-rollout-already-in-progress"};
  let lease=null;
+ let drainNonce=null;
  try{
   const dest=candidate(staged.commit);
   const before=await waitForHealthyLocal(live.root,live.sha);
@@ -303,6 +341,13 @@ async function tick(){
   // become active while the candidate was being prepared.
   const finalGate=await localActivationGate();
   if(!finalGate.allowed)return {status:"deferred",reason:finalGate.reason};
+  // Set admission fence before checking Runtime activity again. A new
+  // tools/call arriving after this point receives retryable OTA_DRAINING
+  // and cannot race with process termination. The fence is lease-bounded.
+  const drained=await otaDrain("arm");
+  if(drained?.ready!==true||typeof drained?.nonce!=="string")
+   return {status:"deferred",reason:"mcp-admission-fence-not-ready"};
+  drainNonce=drained.nonce;
   if(device==="mac")applyMac(before.root,dest,before.sha,staged.commit);
   else applyWindows(before.root,dest,before.sha,staged.commit);
   const after=await waitForActivation(staged.commit);
@@ -320,7 +365,11 @@ async function tick(){
   store({status:"failed",target:staged.commit,error:reason});
   await publish(await liveStatus());
   throw e;
- }finally{if(lease){try{await release(lease)}catch{}}unlock();}
+ }finally{
+  if(drainNonce){try{await otaDrain("release",drainNonce)}catch{}}
+  if(lease){try{await release(lease)}catch{}}
+  unlock();
+ }
 }
 if(mode==="init"){const identity=initIdentity();console.log(JSON.stringify(identity));}
 else if(mode==="configure"){console.log(JSON.stringify(configure(process.argv[3])));}

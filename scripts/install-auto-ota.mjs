@@ -45,7 +45,8 @@ const copies=[
  ...(process.platform==="darwin"?[["scripts/mac-safe-cutover.mjs","mac-safe-cutover.mjs"]]:
  [["scripts/windows/verified-dev-cutover.ps1","windows/verified-dev-cutover.ps1"],
   ["scripts/windows/ota-post-activation-watch.ps1","windows/ota-post-activation-watch.ps1"],
-  ["scripts/windows/hidden-scheduled-task.vbs","windows/hidden-scheduled-task.vbs"]])
+  ["scripts/windows/hidden-scheduled-task.vbs","windows/hidden-scheduled-task.vbs"],
+  ["scripts/windows/cleanup-completed-rollout.ps1","windows/cleanup-completed-rollout.ps1"]])
 ];
 for(const [source,dest] of copies){
  const target=path.join(stable,dest);

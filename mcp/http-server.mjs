@@ -10,6 +10,7 @@ import { withMcpRequestContext } from "./request-context.mjs";
 import { createCallTimingJournal, safeTraceId } from "./call-timing-journal.mjs";
 import { summarizeMcpCallMetrics } from "./call-metrics.mjs";
 import { evaluateOtaActivity } from "./ota-activity.mjs";
+import { createOtaAdmissionFence } from "./ota-admission-fence.mjs";
 import { readOtaActivityToken, validLocalOtaRequest } from "./ota-activity-auth.mjs";
 
 export async function startOwlMcpHttpServer({
@@ -40,6 +41,7 @@ export async function startOwlMcpHttpServer({
 
   const app = express();
   const sessions = new Map();
+  const otaAdmission = createOtaAdmissionFence();
   // Bounded, payload-free local telemetry. Upstream ChatGPT/Tunnel timing is
   // intentionally NOT inferred from this server-side measurement.
   const recentMcpCalls = [];
@@ -259,6 +261,14 @@ export async function startOwlMcpHttpServer({
     const toolName = requestedMethod === "tools/call"
       && typeof req.body?.params?.name === "string"
       ? req.body.params.name.slice(0, 100) : null;
+    // The fence and admission check both run synchronously on one event loop.
+    // Once armed, a new tools/call cannot enter the MCP dispatch queue.
+    // Read-only initialize/list and health stay usable for reconnect.
+    if (requestedMethod === "tools/call" && otaAdmission.isBlockingTools()) {
+      res.setHeader("Retry-After", "5");
+      res.status(503).json({error:"OTA_DRAINING",retryable:true});
+      return;
+    }
     function recordLatency() {
       if (recorded) return;
       recorded = true;
@@ -623,6 +633,56 @@ export async function startOwlMcpHttpServer({
   // Local loopback (127.0.0.1) release readiness; never serializes task
   // payloads, owners, commands, file paths or tokens into a response.
   // Unknown state is NOT interpreted as a safe time to restart.
+  // This endpoint is local-only and uses the dedicated OTA activity token.
+  // A fence is automatically released on query failure, non-idle Runtime,
+  // explicit release, or TTL expiry. No task data escapes the response.
+  app.post("/ota/drain", (req,res,next) => {
+    if (validLocalOtaRequest(req,otaActivityToken)) return next();
+    return res.status(401).json({error:"Unauthorized"});
+  }, async (req,res) => {
+    const action=req.body?.action;
+    if(action==="release") {
+      const released=otaAdmission.release(req.body?.nonce);
+      return res.status(released?200:409).json({released});
+    }
+    if(action!=="arm")return res.status(400).json({error:"INVALID_OTA_DRAIN_ACTION"});
+    let armed;
+    try{armed=otaAdmission.arm({ttlMs:req.body?.ttlMs??30_000})}
+    catch{return res.status(409).json({ready:false,reason:"ota-drain-lease-unavailable"});}
+    const inFlightTools=[...sessions.values()].reduce((sum,session)=>
+      sum+Number(session.activeToolRequestCount??0),0);
+    const client=new RuntimeHttpClient({
+      baseUrl:runtimeBaseUrl,sessionId:"owl-mcp:ota-drain",
+      token:runtimeToken,
+    });
+    try {
+      const [tasks,approvals,processes]=await Promise.all([
+        client.tasks(),client.approvals(),client.processes(),
+      ]);
+      const decision=evaluateOtaActivity({tasks,approvals,processes,inFlightTools});
+      if(!decision.ready) {
+        otaAdmission.release(armed.nonce);
+        return res.status(409).json({ready:false,reason:decision.reason});
+      }
+      // The Runtime queries might overlap with a request accepted before
+      // the fence was armed. Recheck the in-flight count before approval.
+      const pending=[...sessions.values()].reduce((sum,session)=>
+        sum+Number(session.activeToolRequestCount??0),0);
+      if(pending!==0) {
+        otaAdmission.release(armed.nonce);
+        return res.status(409).json({ready:false,reason:"mcp-tools-still-active"});
+      }
+      if(!otaAdmission.isBlockingTools()) {
+        return res.status(503).json({ready:false,reason:"ota-fence-expired"});
+      }
+      return res.json({ready:true,nonce:armed.nonce,
+        expiresAt:armed.expiresAt,observedAt:new Date().toISOString()});
+    }catch{
+      otaAdmission.release(armed.nonce);
+      return res.status(503).json({ready:false,reason:"runtime-observation-unavailable"});
+    }
+  });
+
   app.get("/ota/activity", (req,res,next) => {
     if (validLocalOtaRequest(req,otaActivityToken)) return next();
     return res.status(401).json({error:"Unauthorized"});
