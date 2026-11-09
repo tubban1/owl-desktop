@@ -185,6 +185,10 @@ function Restore-OldGuardian {
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $guardian -Mode Install | Out-Null
   if($LASTEXITCODE -ne 0){throw 'ROLLBACK_OLD_GUARDIAN_REINSTALL_FAILED'}
  }else{
+  # Re-arm the Ready/Disabled guardian on an automatic rollback.
+  if((Get-ScheduledTask -TaskName $taskName).State -eq 'Disabled'){
+    Enable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+  }
   Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
  }
 }
@@ -280,11 +284,11 @@ if($guard){$preflight.guardianRoot=[string]$guard.Actions[0].WorkingDirectory}
 # Computer MCP remains reachable. On success install the new guardian; on
 # failure restore the actual old Electron owner's guardian, not the stale pin.
 $preflight.guardianRecoverable=$false
-if($guard -and $guard.State -eq 'Running' -and
+if($guard -and $guard.State -in @('Ready','Running') -and
    [string]$guard.Actions[0].Execute -ieq 'powershell.exe' -and
    [string]$guard.Actions[0].WorkingDirectory -eq $OldRoot){
  $preflight.guardianRecoverable=$true
-} elseif($guard -and $guard.State -eq 'Running' -and
+} elseif($guard -and $guard.State -in @('Ready','Running') -and
          [string]$guard.Actions[0].Execute -ieq 'powershell.exe'){
  $guardianRoot=[string]$guard.Actions[0].WorkingDirectory
  $scriptPath=Join-Path $guardianRoot 'scripts\windows\dev-guardian.ps1'
@@ -310,8 +314,13 @@ $oldClosed=$false
 $newLaunched=$false
 $guardianChanged=$false
 try{
- Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
+ # A scheduled Guardian is normally Ready between its executions.
+ # Disabling triggers prevents its next recovery run from racing cutover.
+ Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
  $hadGuardian=$true
+ if($guard.State -eq 'Running'){
+   Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
+ }
  $stopUntil=(Get-Date).AddSeconds(10)
  while((Get-Date) -lt $stopUntil -and (Get-ScheduledTask -TaskName $taskName).State -eq 'Running'){
   Start-Sleep -Milliseconds 400
