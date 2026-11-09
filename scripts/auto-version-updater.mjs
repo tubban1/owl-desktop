@@ -83,8 +83,20 @@ function actualRoot(){
  return roots.length===1?roots[0]:null;
 }
 async function http(url){
- try{const res=await fetch(url,{signal:AbortSignal.timeout(3000)});
-  return res.ok?await res.json():null;}catch{return null}
+ try{
+  const isOtaActivity=url==="http://127.0.0.1:8790/ota/activity";
+  let headers={};
+  if(isOtaActivity){
+   // The local credential is independent of MCP API/auth secrets and
+   // can only be sent to the exact loopback activity endpoint.
+   const file=path.join(otaRoot,"activity-token");
+   const token=fs.readFileSync(file,"utf8").trim();
+   if(!/^[A-Za-z0-9_-]{43}$/.test(token))return null;
+   headers={"x-owl-ota-activity-token":token};
+  }
+  const res=await fetch(url,{headers,signal:AbortSignal.timeout(3000)});
+  return res.ok?await res.json():null;
+ }catch{return null;}
 }
 async function tunnelReady(root){
  if(device==="windows"){

@@ -60,6 +60,7 @@ describe("MCP lightweight health and bounded latency diagnostics", () => {
     let active=false;
     const server=await startOwlMcpHttpServer({
       port:0, mcpToken:"ota-test-secret",
+      otaActivityToken:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       runtimeBaseUrl:await runtime(method => {
         if(method==="tasks.list")return active?[{status:"running"}]:[];
         if(method==="approvals.list")return [];
@@ -70,7 +71,8 @@ describe("MCP lightweight health and bounded latency diagnostics", () => {
     closers.push(()=>server.close());
     const base=new URL(server.url).origin;
     expect((await fetch(base+"/ota/activity")).status).toBe(401);
-    const headers={authorization:"Bearer ota-test-secret"};
+    const headers={"x-owl-ota-activity-token":
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"};
     const idle=await (await fetch(base+"/ota/activity",{headers})).json();
     expect(idle).toMatchObject({ok:true,service:"owl-ota-activity",ready:true});
     expect(idle).not.toHaveProperty("tasks");

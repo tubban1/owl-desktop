@@ -10,6 +10,7 @@ import { withMcpRequestContext } from "./request-context.mjs";
 import { createCallTimingJournal, safeTraceId } from "./call-timing-journal.mjs";
 import { summarizeMcpCallMetrics } from "./call-metrics.mjs";
 import { evaluateOtaActivity } from "./ota-activity.mjs";
+import { readOtaActivityToken, validLocalOtaRequest } from "./ota-activity-auth.mjs";
 
 export async function startOwlMcpHttpServer({
   port = 8790,
@@ -31,6 +32,7 @@ export async function startOwlMcpHttpServer({
   maxSessions = 128,
   monotonicNow = () => performance.now(),
   timingJournal = null,
+  otaActivityToken = readOtaActivityToken(),
 } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error(`Invalid OWL MCP port: ${port}`);
@@ -621,7 +623,10 @@ export async function startOwlMcpHttpServer({
   // Local loopback (127.0.0.1) release readiness; never serializes task
   // payloads, owners, commands, file paths or tokens into a response.
   // Unknown state is NOT interpreted as a safe time to restart.
-  app.get("/ota/activity", requireAuth, async (_req,res) => {
+  app.get("/ota/activity", (req,res,next) => {
+    if (validLocalOtaRequest(req,otaActivityToken)) return next();
+    return res.status(401).json({error:"Unauthorized"});
+  }, async (_req,res) => {
     const inFlightTools=[...sessions.values()].reduce((sum,session)=>
       sum+Number(session.activeToolRequestCount??0),0);
     const client=new RuntimeHttpClient({

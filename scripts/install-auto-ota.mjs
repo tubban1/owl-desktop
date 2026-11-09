@@ -4,11 +4,26 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import {spawnSync} from "node:child_process";
+import {randomBytes} from "node:crypto";
 import {fileURLToPath} from "node:url";
 import {otaRoot} from "./lib/ota-client.mjs";
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const stable=path.join(os.homedir(),".owl-lab","version-sync","desktop","agent","scripts");
 const task=path.join(stable,"auto-version-updater.mjs");
+// Install a separate, file-permission-restricted credential for one localhost
+// telemetry endpoint. Reinstall is idempotent and does not rotate live keys.
+fs.mkdirSync(otaRoot,{recursive:true,mode:0o700});
+const activityTokenFile=path.join(otaRoot,"activity-token");
+if(!fs.existsSync(activityTokenFile)){
+ fs.writeFileSync(activityTokenFile,randomBytes(32).toString("base64url")+"\n",
+  {flag:"wx",mode:0o600});
+}
+const activityStat=fs.statSync(activityTokenFile);
+if(!activityStat.isFile()||(process.platform!=="win32"&&(activityStat.mode & 0o077)))
+ throw Error("OTA_ACTIVITY_TOKEN_PERMISSIONS_INVALID");
+if(!/^[A-Za-z0-9_-]{43}$/.test(fs.readFileSync(activityTokenFile,"utf8").trim()))
+ throw Error("OTA_ACTIVITY_TOKEN_INVALID");
+
 if(!fs.existsSync(path.join(otaRoot,"device-private.pem"))||
    !fs.existsSync(path.join(otaRoot,"coordinator.json")))
  throw Error("OTA_NOT_CONFIGURED_FAIL_CLOSED");
