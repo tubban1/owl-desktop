@@ -1,6 +1,6 @@
 # OWL LAB Agent Browser — Native Messaging (macOS and Linux pilot)
 
-Default **browser_agent_*** tools now control background tabs created by OWL in your existing signed-in Google Chrome through the **OWL LAB Agent Browser** extension and a Chrome Native Messaging host. Chrome's `Allow remote debugging` switch and TCP/9222 **are not required**. The old Chrome DevTools connection is available only when `OWL_CHROME_BACKEND=devtools` is set explicitly, while `browser_open` remains a separate isolated browser.
+Default **browser_agent_*** tools now control background tabs created by OWL in your existing signed-in Google Chrome through the **OWL LAB Agent Browser** extension and a Chrome Native Messaging host. Chrome's `Allow remote debugging` switch and TCP/9222 **are not required**. The removed Chrome DevTools and Chrome Companion transports are not supported. Agent Browser uses official Chrome Native Messaging; `browser_open` defaults to the same existing-Chrome backend, while `mode: "isolated"` is explicitly separate.
 
 ## First-time setup (requires user to install/authorize extension)
 

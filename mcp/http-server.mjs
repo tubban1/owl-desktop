@@ -22,7 +22,6 @@ export async function startOwlMcpHttpServer({
   peerRecovery = null,
   plannerContinuation,
   fileDelivery = null,
-  browserCompanion = null,
   userChromeBridge = null,
   onEvent = () => {},
   sessionIdleTtlMs = 30 * 60_000,
@@ -213,7 +212,7 @@ export async function startOwlMcpHttpServer({
   }
 
   function createTransportSession() {
-    const server = createOwlMcpServer({ fileDelivery, browserCompanion, userChromeBridge, mailService, providerOperations, peerRecovery });
+    const server = createOwlMcpServer({ fileDelivery, userChromeBridge, mailService, providerOperations, peerRecovery });
     // Tool definitions are immutable for the lifetime of a Connection Host.
     // tools/list is available immediately after initialize. Announcing
     // tools/list_changed on EVERY fresh session used to generate one extra

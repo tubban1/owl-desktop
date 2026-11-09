@@ -982,7 +982,7 @@ function tool(server, name, description, schema, annotations, handler) {
   );
 }
 
-export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,userChromeBridge=null,mailService=null,providerOperations=null,peerRecovery=null}={}) {
+export function createOwlMcpServer({fileDelivery=null,userChromeBridge=null,mailService=null,providerOperations=null,peerRecovery=null}={}) {
   const server = new McpServer(
     {
       name: "owl-mcp",
@@ -2328,137 +2328,6 @@ export function createOwlMcpServer({fileDelivery=null,browserCompanion=null,user
       openWorldHint: true,
     },
     async () => browserCompat.close(),
-  );
-
-  // Existing signed-in Chrome: opt-in via extension pairing code.
-  // This broker never attaches to Chrome DevTools or imports cookies.
-  tool(
-    server,"browser_companion_screenshot",
-    "Capture the selected, already-authorized Chrome tab even while the user works in other tabs. The user must explicitly enable tab capture in the Chrome extension first. Returns native image evidence, not the foreground desktop screenshot.",
-    {},{title:"Screenshot Authorized Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-    async()=>{
-      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      const proof=await browserCompanion.command("screenshot",{},owner.runtimeSessionId);
-      if(!proof||proof.mimeType!=="image/jpeg"||
-         typeof proof.base64!=="string"||proof.base64.length>4_500_000||
-         !/^[a-zA-Z0-9+/=]+$/.test(proof.base64)) {
-        throw new Error("Invalid authorized Chrome capture.");
-      }
-      return new NativeMcpResult([
-        {type:"image",data:proof.base64,mimeType:"image/jpeg"},
-        {type:"text",text:JSON.stringify({tabId:proof.tabId,
-          origin:proof.origin,width:proof.width,height:proof.height})}
-      ],{imageCount:1,captured:true,tabId:proof.tabId});
-    }
-  );
-
-  tool(
-    server, "browser_companion_pair",
-    "OPTIONAL Chrome Companion compatibility only. Default browser_agent_open uses OWL Native Messaging (not the Chrome debugging port) with one-time extension/native host registration, no per-session pairing. Legacy Companion codes remain optional.",
-    {}, {title:"Pair OWL Chrome Companion",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
-    async () => {
-      if (!browserCompanion) throw new Error("Chrome Companion is not enabled in this Connection Host.");
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      return browserCompanion.pair(owner.runtimeSessionId);
-    },
-  );
-  tool(
-    server,"browser_companion_open",
-    "Open an Agent-owned background tab in the user's signed-in Chrome at a website they have explicitly approved for site automation. Does NOT activate the tab or change the user's foreground window. If site permission is missing, ask the user to grant it in Chrome Companion.",
-    {url:z.string().url().max(2048)},
-    {title:"Open Background Chrome Agent Tab",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true},
-    async({url})=>{
-      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      return browserCompanion.command("agent_open",{url},owner.runtimeSessionId);
-    }
-  );
-  tool(
-    server,"browser_companion_agent_tabs",
-    "List only OWL-created background Chrome tabs for this paired Companion session; never enumerate the user's unrelated tabs.",
-    {},{title:"List OWL Chrome Agent Tabs",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
-    async()=>{
-      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      return browserCompanion.command("agent_tabs",{},owner.runtimeSessionId);
-    }
-  );
-  tool(
-    server,"browser_companion_use_agent_tab",
-    "Select one already-owned Chrome Agent tab by its returned tabId without bringing it to the foreground or taking over a user's tab.",
-    {tab_id:z.number().int().nonnegative()},
-    {title:"Select OWL Chrome Agent Tab",readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
-    async({tab_id})=>{
-      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      return browserCompanion.command("agent_use_tab",{tabId:tab_id},owner.runtimeSessionId);
-    }
-  );
-
-  tool(
-    server,"browser_companion_close_agent_tab",
-    "Close only a tab OWL created for the authorized Chrome Agent workspace. Cannot close a user's unrelated tab or a tab from another origin.",
-    {tab_id:z.number().int().nonnegative()},
-    {title:"Close OWL Chrome Agent Tab",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:false},
-    async({tab_id})=>{
-      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      return browserCompanion.command("agent_close_tab",{tabId:tab_id},owner.runtimeSessionId);
-    }
-  );
-  tool(
-    server, "browser_companion_status",
-    "Check whether the opt-in Chrome Companion extension is currently paired to this Mac.",
-    {}, {title:"Chrome Companion Status",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
-    async () => {
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      return browserCompanion?.status(owner.runtimeSessionId) ?? {connected:false};
-    },
-  );
-  tool(
-    server, "browser_companion_snapshot",
-    "Read the explicitly authorized tab of the user's already-signed-in Chrome, without switching focus. The user must grant that tab in the Companion popup.",
-    {}, {title:"Inspect Authorized Chrome Tab",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:true},
-    async () => {
-      if (!browserCompanion) throw new Error("Chrome Companion unavailable.");
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      return browserCompanion.command("snapshot",{},owner.runtimeSessionId);
-    },
-  );
-  tool(
-    server, "browser_companion_fill",
-    "Fill a safe non-password field of a user-authorized Chrome tab without submitting. Requires the user to enable editing in the extension popup; never bypass OWL approvals.",
-    {selector:z.string().min(1).max(320),text:z.string().max(4000)},
-    {title:"Fill Authorized Chrome Field",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
-    async ({selector,text}) => {
-      if (!browserCompanion) throw new Error("Chrome Companion unavailable.");
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      return browserCompanion.command("fill",{selector,text},owner.runtimeSessionId);
-    },
-  );
-  tool(
-    server,"browser_companion_action_result",
-    "Check the result of a previously requested Chrome click. The click is NEVER considered completed until the human approves it in the extension and this tool reports done=true, ok=true.",
-    {request_id:z.string().regex(/^[a-f0-9]{32}$/)},
-    {title:"Check Chrome Action Confirmation",readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
-    async({request_id})=>{
-      if(!browserCompanion)throw new Error("Chrome Companion unavailable.");
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      return browserCompanion.result(request_id,owner.runtimeSessionId);
-    }
-  );
-
-  tool(
-    server, "browser_companion_click",
-    "Queue an authorized Chrome click. Safe same-origin navigation links in OWL-created tabs may click automatically; save/submit/buttons/cross-site effects still require user confirmation. Returns requestId immediately: check browser_companion_action_result for completion before claiming success.",
-    {selector:z.string().min(1).max(320)},
-    {title:"Request Authorized Chrome Click",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
-    async ({selector}) => {
-      if (!browserCompanion) throw new Error("Chrome Companion unavailable.");
-      const owner=currentMcpRequestContext();requireStableOwner(owner);
-      return browserCompanion.command("click",{selector},owner.runtimeSessionId);
-    },
   );
 
   tool(
