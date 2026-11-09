@@ -125,10 +125,19 @@ export function createNativeAgentExecutor(chrome,storage){
     // combobox/option. Surface only pointer-operated, concise choice controls;
     // clicking them remains independently guarded by virtual-cursor.mjs.
     const customChoice=el=>{
-      if(!["DIV","SPAN","LI"].includes(el.tagName)||getComputedStyle(el).cursor!=="pointer")
-        return false;
       const txt=(el.getAttribute("aria-label")||el.textContent||"").trim();
       if(!txt||txt.length>125)return false;
+      // A LinkedIn post's "Feature on top of profile" action is a benign,
+      // user-requested curation operation. Its menu row lacks an ARIA role.
+      // Expose only the exact leaf control on the user's own post page.
+      const linkedInFeatured=location.hostname==="www.linkedin.com"&&
+        /^\/feed\/update\/urn:li:(?:ugcPost|activity):\d+\/?$/.test(location.pathname)&&
+        ["我的职业档案顶部的特色内容","Feature on top of profile"].includes(txt)&&
+        !Array.from(el.children||[]).some(ch=>(ch.textContent||"").trim()===txt);
+      if(linkedInFeatured&&["DIV","SPAN","LI","P","LABEL","B","STRONG"].includes(el.tagName))
+        return true;
+      if(!["DIV","SPAN","LI"].includes(el.tagName)||
+         getComputedStyle(el).cursor!=="pointer")return false;
       const css=typeof el.className==="string"?el.className:"";
       const semantic=[css,el.getAttribute("role"),el.getAttribute("aria-haspopup")].filter(Boolean).join(" ");
       const selectPattern=/(?:select|dropdown|combobox|listbox|option|picker|choice)/i;

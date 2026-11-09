@@ -5,7 +5,12 @@ export function evaluateOtaActivity({tasks,approvals,processes,inFlightTools} = 
     Array.isArray(v?.items) ? v.items :
     Array.isArray(v?.processes) ? v.processes :
     Array.isArray(v?.tasks) ? v.tasks :
-    Array.isArray(v?.approvals) ? v.approvals : null;
+    Array.isArray(v?.approvals) ? v.approvals :
+    // Runtime RPC "process" returns the public skill envelope, unlike
+    // tasks.list and approvals.list, which return arrays directly.
+    // Accept only the exact expected runtime.process result shape.
+    v?.skill === "runtime.process" &&
+    Array.isArray(v?.result?.processes) ? v.result.processes : null;
   const t=rows(tasks),a=rows(approvals),p=rows(processes);
   if (!t || !a || !p || !Number.isSafeInteger(inFlightTools) || inFlightTools<0)
     return {ready:false,reason:"activity-unknown"};

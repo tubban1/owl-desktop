@@ -82,6 +82,24 @@ describe("safe background custom-choice cursor",()=>{
     expect(locateVirtualCursorTarget("owl-agent-15","https://example.org","click"))
       .toMatchObject({error:"CURSOR_UNSUPPORTED_CONTROL"});
   });
+  it("allows only the exact LinkedIn Featured curation row on an owned post",()=>{
+    cursor("我的职业档案顶部的特色内容","payment");
+    vi.stubGlobal("location",{origin:"https://www.linkedin.com",
+      hostname:"www.linkedin.com",
+      pathname:"/feed/update/urn:li:ugcPost:7525544812490518528/"});
+    expect(locateVirtualCursorTarget("owl-agent-59","https://www.linkedin.com","click"))
+      .toMatchObject({valid:true,tag:"div"});
+    vi.stubGlobal("location",{origin:"https://www.linkedin.com",
+      hostname:"www.linkedin.com",pathname:"/messaging/"});
+    expect(locateVirtualCursorTarget("owl-agent-59","https://www.linkedin.com","click"))
+      .toMatchObject({error:"CURSOR_UNSUPPORTED_CONTROL"});
+    cursor("删除动态","payment");
+    vi.stubGlobal("location",{origin:"https://www.linkedin.com",
+      hostname:"www.linkedin.com",
+      pathname:"/feed/update/urn:li:ugcPost:7525544812490518528/"});
+    expect(locateVirtualCursorTarget("owl-agent-59","https://www.linkedin.com","click"))
+      .toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});
+  });
   it("still blocks ambiguous payment actions",()=>{
     cursor("确认付款");
     expect(locateVirtualCursorTarget("owl-agent-21",ORIGIN,"click"))

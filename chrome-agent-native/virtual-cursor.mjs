@@ -94,6 +94,13 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
     const wechatCollectionOption=location.hostname==="channels.weixin.qq.com"&&
       location.pathname==="/platform/post/create"&&pointerChoice&&
       /^[^\n]{1,80}共\d+个内容$/.test(label.trim());
+    // LinkedIn user-profile curation only: exact benign menu entry on a post.
+    // Never allow ordinary submit, removal or a different post action.
+    const linkedInFeatured=location.hostname==="www.linkedin.com"&&
+      /^\/feed\/update\/urn:li:(?:ugcPost|activity):\d+\/?$/.test(location.pathname)&&
+      ["我的职业档案顶部的特色内容","Feature on top of profile"].includes(label.trim())&&
+      ["div","li","span","p","label","b","strong"].includes(tag)&&
+      !Array.from(el.children||[]).some(ch=>(ch.textContent||"").trim()===label.trim());
     const safeChoiceOption=(el.getAttribute("role")==="option"||
       /(?:select-option|select-item|dropdown-option)/i.test(classLabel)||
       insideChoiceList||wechatCollectionOption)&&
@@ -128,11 +135,11 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
         !Array.from(el.children||[]).some(ch=>
           (ch.textContent||"").trim().startsWith("http"));
     })();
-    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow||safeGscExample)&&
+    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow||safeGscExample||linkedInFeatured)&&
        (el.closest("form")||el.hasAttribute("onclick")))||
        el.getAttribute("aria-disabled")==="true"||el.disabled)
       return {error:"CURSOR_ACTION_REQUIRES_HUMAN"};
-    if(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow||safeGscExample){
+    if(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow||safeGscExample||linkedInFeatured){
       // Only an observed, benign choice opener/option can be clicked here.
       // Submits, uploads, approvals and ambiguous controls stay human-gated.
     }else if(tag==="a"){
