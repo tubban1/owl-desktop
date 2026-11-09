@@ -29,6 +29,20 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     const result=await req(owner,"upload_file",{pageId,inputUid,origin:target.origin,files});
     return upload.recordSelection({owner,ticketIds:fileTickets,pageId,inputUid,result,origin:target.origin});
   }
+  async function uploadPicker(owner,{pageId,targetUid,fileTickets}){
+    if(!upload)throw Error("UPLOAD_BROKER_UNAVAILABLE");
+    const tab=await req(owner,"snapshot");
+    if(tab?.pageId!==pageId)throw Error("UPLOAD_PAGE_NOT_SELECTED");
+    const url=tab.snapshot?.url;
+    if(!url)throw Error("UPLOAD_PAGE_NOT_AVAILABLE");
+    const origin=new URL(url).origin;
+    if(!tab.snapshot?.controls?.some(x=>x.uid===targetUid))
+      throw Error("UPLOAD_TRIGGER_NOT_OBSERVED");
+    const files=await upload.resolve({owner,ticketIds:fileTickets,origin});
+    const result=await req(owner,"upload_picker",{pageId,targetUid,origin,files});
+    return upload.recordSelection({owner,ticketIds:fileTickets,pageId,
+      inputUid:"picker:"+targetUid,result,origin});
+  }
   async function dropFiles(owner,{pageId,targetUid,fileTickets}){
     if(!upload)throw Error("UPLOAD_BROKER_UNAVAILABLE");
     const tab=await req(owner,"snapshot");
@@ -257,12 +271,13 @@ export function createNativeChromeBridge({broker,uploadBroker,submissionGrantRea
     fileInputs,
     prepareFile,
     uploadFile,
+    uploadPicker,
     dropFiles,
     uploadStatus:(owner,uploadId)=>upload.status({owner,uploadId}),
     releaseFiles:(owner,tickets)=>upload.release({owner,ticketIds:tickets}),
     capabilities:()=>({transport:"chrome-native-messaging",
       fileUpload:upload?.capabilities()??{uploadFile:false},
-      standardInput:true,hiddenInput:true,downloads:true,downloadToUpload:true,uiReceiptCheck:true,plainTextPaste:true,textDragDrop:true,fileDragDrop:true,fileDragDropBackend:"chrome_debugger_cdp",osClipboard:false,nativePicker:false,tabLocalVirtualCursor:true,
+      standardInput:true,hiddenInput:true,interceptedPickerUpload:true,downloads:true,downloadToUpload:true,uiReceiptCheck:true,plainTextPaste:true,textDragDrop:true,fileDragDrop:true,fileDragDropBackend:"chrome_debugger_cdp",osClipboard:false,nativePicker:false,tabLocalVirtualCursor:true,
       systemPointerShared:false,trustedTabMouseEvents:true,nativeDialogRequiresHuman:true}),
     status:()=>broker.status(),
     close:async()=>{} // broker/upload lifecycle belongs to Connection Host

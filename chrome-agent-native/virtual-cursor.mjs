@@ -3,7 +3,7 @@
 export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
   if(location.origin!==expectedOrigin)return {error:"CURSOR_ORIGIN_CHANGED"};
   if(!/^owl-agent-\d{1,3}$/.test(uid))return {error:"CURSOR_UID_INVALID"};
-  if(mode!=="move"&&mode!=="click")return {error:"CURSOR_MODE_INVALID"};
+  if(!["move","click","upload"].includes(mode))return {error:"CURSOR_MODE_INVALID"};
   const selector='[data-owl-agent-control="'+CSS.escape(uid)+'"]';
   const find=(root,depth=0)=>{
     if(depth>8)return null;
@@ -41,6 +41,19 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
   const label=[el.getAttribute("aria-label"),el.getAttribute("title"),
     el.getAttribute("name"),el.getAttribute("placeholder"),el.textContent]
     .filter(Boolean).join(" ").slice(0,500);
+  if(mode==="upload"){
+    // Used only with an already-authorized one-use local file ticket.
+    // Intercept the Chrome chooser BEFORE trusted pointer dispatch; never
+    // open the shared OS picker or click an arbitrary consequential control.
+    const hint=[el.getAttribute("aria-label"),el.getAttribute("title"),
+      el.getAttribute("role"),el.getAttribute("class"),el.textContent]
+      .filter(Boolean).join(" ").slice(0,600);
+    if(!/upload|file.?select|file.?picker|choose file|browse files|上传|选择文件|添加视频/i.test(hint)||
+       /delete|destroy|logout|checkout|purchase|payment|pay|submit|publish|post|share|password|credential|删除|注销|付款|提交|发布|发送/i.test(hint))
+      return {error:"UPLOAD_TRIGGER_NOT_APPROVED"};
+    if(el.disabled||el.getAttribute("aria-disabled")==="true")
+      return {error:"UPLOAD_TRIGGER_DISABLED"};
+  }
   if(mode==="click"){
     const danger=/delete|destroy|logout|log.?out|sign.?out|purchase|payment|pay|checkout|unsubscribe|remove|erase|security|password|credential|approve|reject|confirm|submit|publish|post|share|vote|follow|send|order|transfer|upload|select file|choose file|browse files|删除|注销|付款|确认|提交|发布|上传|发送|选择文件/i;
     const tag=el.tagName.toLowerCase(),type=(el.getAttribute("type")||"text").toLowerCase();
@@ -49,16 +62,23 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
     // submission, file-picker and security controls remain human-gated.
     const choiceHint=[el.getAttribute("role"),el.getAttribute("aria-haspopup"),
       el.getAttribute("placeholder")].filter(Boolean).join(" ");
-    const safeChoiceOpener=tag==="input"&&type==="text"&&el.readOnly===true&&
-      /combobox|listbox|请选择|select (?:an? )?option/i.test(choiceHint)&&
-      !/file|upload|attachment|login|password|credential|token|payment|pay|submit|publish|send|文件|上传|登录|密码|付款|提交|发布|发送/i.test(label);
     const classLabel=typeof el.className==="string"?el.className:"";
-    const insideChoiceList=tag==="li"&&!!el.closest('[class*="select-option"]');
+    const nonSensitiveChoice=!/file|upload|attachment|login|password|credential|token|payment|pay|submit|publish|send|文件|上传|登录|密码|付款|提交|发布|发送/i.test(label);
+    const readOnlyChoice=tag==="input"&&type==="text"&&el.readOnly===true&&
+      /combobox|listbox|请选择|select (?:an? )?option/i.test(choiceHint);
+    const customChoiceHint=[choiceHint,classLabel].filter(Boolean).join(" ");
+    const pointerChoice=getComputedStyle(el).cursor==="pointer"&&
+      ["div","span","li"].includes(tag)&&label.trim().length>0&&label.length<150;
+    const customOpener=pointerChoice&&(
+      /(?:select|dropdown|combobox|listbox|picker|choice)/i.test(customChoiceHint)||
+      /^(?:选择合集|添加到合集|请选择|选择分类|选择标签|select collection|choose category)$/i.test(label.trim()));
+    const safeChoiceOpener=nonSensitiveChoice&&(readOnlyChoice||customOpener);
+    const insideChoiceList=!!el.closest?.('[role="listbox"],[class*="select-option"],[class*="select-dropdown"],[class*="dropdown-menu"]');
     const safeChoiceOption=(el.getAttribute("role")==="option"||
       /(?:select-option|select-item|dropdown-option)/i.test(classLabel)||
       insideChoiceList)&&
       ["div","li","span"].includes(tag)&&label.trim().length>0&&
-      label.length<150;
+      label.length<150&&nonSensitiveChoice;
     // Selecting a record type only changes the editor; never submits DNS.
     const safeDnsTab=(()=>{
       if(location.hostname!=="www.one.com"||location.pathname!=="/admin/dns.do"||

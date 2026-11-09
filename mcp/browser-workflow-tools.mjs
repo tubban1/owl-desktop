@@ -39,6 +39,15 @@ export function registerBrowserWorkflowTools({tool,server,z,trustedUserChrome}) 
     {uid:z.string().min(1).max(100),value:z.string().max(4000)},
     {title:"Edit Rich Text in Agent Browser",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
     async({uid,value})=>{const{bridge,owner}=trustedUserChrome();return bridge.richEditorInsert(owner,uid,value);});
+  tool(server,"browser_agent_upload_picker",
+    "Attach 1–5 authorized local files to a custom upload tile in an Agent-owned Chrome tab by intercepting its file chooser. No native file dialog, OS cursor, or foreground focus. Returns selection only, not site upload confirmation.",
+    {page_id:z.number().int().nonnegative(),target_uid:z.string().regex(/^owl-agent-\d{1,3}$/),
+      file_tickets:z.array(z.string().length(48)).min(1).max(5)},
+    {title:"Upload Through Custom Browser Picker",readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    async({page_id,target_uid,file_tickets})=>{
+      const{bridge,owner}=trustedUserChrome();
+      return bridge.uploadPicker(owner,{pageId:page_id,targetUid:target_uid,fileTickets:file_tickets});
+    });
   tool(server,"browser_agent_drop_files",
     "Drop local files prepared by the OWL Native Host as owner/origin-bound tickets into a previously observed Agent-owned dropzone. Files stay on device until the approved website receives them; event dispatch does not prove upload completion.",
     {page_id:z.number().int().nonnegative(),target_uid:z.string().min(1).max(100),

@@ -121,13 +121,28 @@ export function createNativeAgentExecutor(chrome,storage){
       ["被“noindex”标记排除了","由于遇到其他 4xx 问题而被屏蔽了"].includes((el.textContent||"").trim())&&
       !Array.from(el.children||[]).some(
         ch=>(ch.textContent||"").trim()===(el.textContent||"").trim());
+    // Non-semantic custom select widgets often use div/span rather than ARIA
+    // combobox/option. Surface only pointer-operated, concise choice controls;
+    // clicking them remains independently guarded by virtual-cursor.mjs.
+    const customChoice=el=>{
+      if(!["DIV","SPAN","LI"].includes(el.tagName)||getComputedStyle(el).cursor!=="pointer")
+        return false;
+      const txt=(el.getAttribute("aria-label")||el.textContent||"").trim();
+      if(!txt||txt.length>125)return false;
+      const css=typeof el.className==="string"?el.className:"";
+      const semantic=[css,el.getAttribute("role"),el.getAttribute("aria-haspopup")].filter(Boolean).join(" ");
+      const selectPattern=/(?:select|dropdown|combobox|listbox|option|picker|choice)/i;
+      const userChoice=/^(?:选择合集|添加到合集|请选择|选择分类|选择标签|select collection|choose category)$/i;
+      return selectPattern.test(semantic)||userChoice.test(txt)||
+        !!el.closest('[role="listbox"],[class*="select-dropdown"],[class*="dropdown-menu"]');
+    };
     // Inspect only this Agent-owned document and its *open* shadow roots.
     // Cross-origin frames and closed roots remain out of scope; no OS focus.
     const nodes=[];
     const collect=(root,depth)=>{
       if(depth>8 || nodes.length>=120)return;
       for(const el of root.querySelectorAll("*")){
-        if((el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[aria-placeholder],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone],[role=option],[role=tab],[class*=\"select-option\"] li,[class*=\"select-option\"] > div,[class*=\"select-item\"],[class*=\"dropdown-option\"]") || safeDnsTypeTab(el) || safeGscNoindexRow(el)) && visible(el))nodes.push({el,shadowDepth:depth});
+        if((el.matches("a,button,input,textarea,select,[role=button],[role=textbox],[role=combobox],[role=searchbox],[aria-autocomplete],[aria-placeholder],[data-placeholder],[contenteditable]:not([contenteditable=false]),[draggable=true],[data-dropzone],[role=option],[role=tab],[class*=\"select-option\"] li,[class*=\"select-option\"] > div,[class*=\"select-item\"],[class*=\"dropdown-option\"]") || safeDnsTypeTab(el) || safeGscNoindexRow(el) || customChoice(el)) && visible(el))nodes.push({el,shadowDepth:depth});
         if(nodes.length>=120)break;
         if(el.shadowRoot)collect(el.shadowRoot,depth+1);
       }
@@ -390,6 +405,93 @@ export function createNativeAgentExecutor(chrome,storage){
         selectedFileNames:files.map(f=>f.filename),siteUiObserved,
         websiteUploadVerified:false};
     }
+    if(op==="upload_picker"){
+      // A site may create its <input type=file> only AFTER its custom upload
+      // tile is clicked. Attach files to the intercepted chooser's backend
+      // node, never invoke Finder/Explorer and never expose the staged path.
+      const {pageId,targetUid,origin,files}=args;
+      if(pageId!==tabId||!/^owl-agent-\d{1,3}$/.test(targetUid||"")||
+         !Array.isArray(files)||files.length<1||files.length>5||
+         !files.every(f=>f&&isNativeAbsoluteStagePath(f.stagedPath)&&
+           typeof f.filename==="string"&&f.filename.length>0&&f.filename.length<256))
+        throw Error("UPLOAD_PICKER_ARGUMENT_INVALID");
+      if(urlOrigin(tab.url)!==origin)throw Error("UPLOAD_ORIGIN_CHANGED");
+      const zone=await inject(tabId,locateVirtualCursorTarget,[targetUid,origin,"upload"]);
+      if(zone?.error)throw Error(zone.error);
+      if(!zone?.valid)throw Error("UPLOAD_TRIGGER_NOT_APPROVED");
+      const target={tabId};
+      let attached=false,emulated=false,intercepted=false,resolveChooser,timeout;
+      const chooserPromise=new Promise(resolve=>{resolveChooser=resolve;});
+      const onEvent=(source,method,params)=>{
+        if(source.tabId===tabId&&method==="Page.fileChooserOpened")
+          resolveChooser(params);
+      };
+      chrome.debugger.onEvent.addListener(onEvent);
+      try{
+        await chrome.debugger.attach(target,"1.3");attached=true;
+        await chrome.debugger.sendCommand(target,"Page.enable");
+        await chrome.debugger.sendCommand(target,"Page.setInterceptFileChooserDialog",{enabled:true});
+        intercepted=true;
+        const latest=await chrome.tabs.get(tabId);
+        if(urlOrigin(latest.url)!==origin)throw Error("UPLOAD_ORIGIN_CHANGED");
+        if(latest.active===false){
+          await chrome.debugger.sendCommand(target,"Emulation.setFocusEmulationEnabled",{enabled:true});
+          emulated=true;
+        }
+        await inject(tabId,showVirtualCursor,[zone.x,zone.y,"click"]);
+        await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+          type:"mouseMoved",x:zone.x,y:zone.y});
+        const repeat=await inject(tabId,locateVirtualCursorTarget,[targetUid,origin,"upload"]);
+        if(!repeat?.valid||Math.abs(repeat.x-zone.x)>3||Math.abs(repeat.y-zone.y)>3)
+          throw Error(repeat?.error||"UPLOAD_TRIGGER_MOVED");
+        await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+          type:"mousePressed",x:zone.x,y:zone.y,button:"left",clickCount:1});
+        await chrome.debugger.sendCommand(target,"Input.dispatchMouseEvent",{
+          type:"mouseReleased",x:zone.x,y:zone.y,button:"left",clickCount:1});
+        const chooser=await Promise.race([chooserPromise,new Promise(resolve=>{
+          timeout=setTimeout(()=>resolve(null),3000);
+        })]);
+        if(!Number.isInteger(chooser?.backendNodeId)||chooser.backendNodeId<1)
+          throw Error("UPLOAD_INTERCEPTED_CHOOSER_NOT_OBSERVED");
+        if(files.length>1&&chooser.mode!=="selectMultiple")
+          throw Error("UPLOAD_INPUT_NOT_MULTIPLE");
+        const described=await chrome.debugger.sendCommand(target,"DOM.describeNode",{
+          backendNodeId:chooser.backendNodeId,depth:0});
+        const node=described?.node,attrs={};
+        for(let i=0;i<(node?.attributes?.length||0);i+=2)
+          attrs[String(node.attributes[i]).toLowerCase()]=node.attributes[i+1];
+        if(String(node?.nodeName).toUpperCase()!=="INPUT"||
+           String(attrs.type).toLowerCase()!=="file"||"disabled" in attrs)
+          throw Error("UPLOAD_CHOOSER_INPUT_NOT_VERIFIED");
+        const accept=(attrs.accept||"").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean);
+        for(const f of files)if(accept.length&&!accept.some(x=>
+          x===f.mime?.toLowerCase()||
+          (x.endsWith("/*")&&f.mime?.toLowerCase().startsWith(x.slice(0,-1)))||
+          (x.startsWith(".")&&f.filename.toLowerCase().endsWith(x))))
+            throw Error("UPLOAD_ACCEPT_MISMATCH");
+        await chrome.debugger.sendCommand(target,"DOM.setFileInputFiles",{
+          backendNodeId:chooser.backendNodeId,files:files.map(f=>f.stagedPath)});
+      }finally{
+        if(timeout)clearTimeout(timeout);
+        if(intercepted)await chrome.debugger.sendCommand(target,
+          "Page.setInterceptFileChooserDialog",{enabled:false}).catch(()=>{});
+        if(emulated)await chrome.debugger.sendCommand(target,
+          "Emulation.setFocusEmulationEnabled",{enabled:false}).catch(()=>{});
+        if(attached)await chrome.debugger.detach(target).catch(()=>{});
+        chrome.debugger.onEvent.removeListener(onEvent);
+      }
+      // A chooser selection is not a server-side upload receipt.
+      const currentTab=await chrome.tabs.get(tabId);
+      if(urlOrigin(currentTab.url)!==origin)throw Error("UPLOAD_ORIGIN_CHANGED");
+      const receipts=await Promise.all(files.map(f=>
+        inject(tabId,detectPageReceipt,[f.filename,origin]).catch(()=>null)));
+      return {pageId:tabId,selected:true,selectedCount:files.length,
+        selectedFileNames:files.map(f=>f.filename),
+        siteUiObserved:receipts.every(r=>r?.observed===true),
+        websiteUploadVerified:false,foregroundUnchanged:true,
+        osPointerMoved:false,inputMethod:"tab_scoped_intercepted_chooser"};
+    }
+
     if(op==="rich_editor_insert"){
       if(typeof args.uid!=="string"||!/^owl-agent-\d{1,3}$/.test(args.uid)||
          typeof args.value!=="string"||args.value.length>4000)

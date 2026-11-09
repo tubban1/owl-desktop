@@ -28,17 +28,25 @@ export function executeFormAction(mode,args={}){
   };
   if(mode==="inspect"){
     const rows=[];
-    for(const el of document.querySelectorAll("input,select,textarea")){
-      const id=el.getAttribute("data-owl-agent-control");
-      const type=(el.getAttribute("type")||el.tagName).toLowerCase();
-      if(!id||!safe(el)||!["radio","checkbox","number","text","email","tel","textarea"].includes(type))
-        continue;
-      rows.push({uid:id,type,name:el.name||"",label:labeled(el),
-        checked:["radio","checkbox"].includes(type)?!!el.checked:undefined,
-        value:["radio","number"].includes(type)?String(el.value).slice(0,120):undefined,
-        required:!!el.required});
-      if(rows.length>=100)break;
-    }
+    // Snapshot already assigns UIDs inside open shadow roots. Traverse those
+    // same roots rather than silently dropping controls in modern web apps.
+    const collect=(root,depth=0)=>{
+      if(depth>8||rows.length>=100)return;
+      for(const el of root.querySelectorAll("input,select,textarea,*")){
+        if(rows.length>=100)break;
+        if(el.matches("input,select,textarea")){
+          const id=el.getAttribute("data-owl-agent-control");
+          const type=(el.getAttribute("type")||el.tagName).toLowerCase();
+          if(id&&safe(el)&&["radio","checkbox","number","text","email","tel","textarea"].includes(type))
+            rows.push({uid:id,type,name:el.name||"",label:labeled(el),
+              checked:["radio","checkbox"].includes(type)?!!el.checked:undefined,
+              value:["radio","number"].includes(type)?String(el.value).slice(0,120):undefined,
+              required:!!el.required});
+        }
+        if(el.shadowRoot)collect(el.shadowRoot,depth+1);
+      }
+    };
+    collect(document);
     return {origin,pageUrl:location.href,controls:rows};
   }
   if(mode==="set"){

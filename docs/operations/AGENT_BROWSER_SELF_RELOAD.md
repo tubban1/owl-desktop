@@ -52,3 +52,10 @@ One successful fill only means DOM text matched. Chips might still need a
 distinct Add action, and campaigns must be saved and independently read back.
 An inaccessible closed shadow root or cross-origin iframe is not silently
 handled, and Windows desktop.nativeInput permissions remain unchanged.
+
+## 0.4.11 — Custom choices and intercepted upload tiles
+
+- Snapshot now discovers concise, pointer-driven custom select/dropdown controls (including open Shadow DOM). The tab-local virtual cursor may open non-destructive choices/options, but continues to deny payment, destructive, credential, submit and upload actions through ordinary click. A fresh snapshot and post-selection readback remain necessary.
+- `browser_agent_form_controls` inspects safe native controls inside open Shadow DOM, matching the snapshotted UIDs. `browser_agent_form_set` checks the requested state and retains the independent legal-consent grant policy. Closed shadow roots and cross-origin frames remain inaccessible.
+- `browser_agent_upload_picker({page_id,target_uid,file_tickets})` attaches owner/root/origin-approved, one-use file tickets to upload tiles that create a hidden input only after a click. The extension intercepts `Page.fileChooserOpened` on the Agent-owned tab, validates the backend input node and accept/multiple restrictions, then uses `DOM.setFileInputFiles`. No native Finder/Explorer dialog is opened; no OS mouse/foreground is used. If interception, origin or target verification fails, the operation fails closed.
+- A selected file is **not** proof of a completed website upload. Check the destination's UI and server-side processing/receipt before submitting or reporting publication.
