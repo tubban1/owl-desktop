@@ -15,6 +15,7 @@ import {isRetryablePeerFailure,shouldBackoffFailedRelease} from "./lib/ota-retry
 import {parseOtaReceipt} from "./lib/ota-receipt.mjs";
 import {tryAcquireLocalRolloutLock} from "./lib/ota-local-rollout-lock.mjs";
 import {syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
+import {activationPermit,localUserIdleSeconds} from "./lib/ota-activation-policy.mjs";
 
 const device=platform,peer=device==="mac"?"windows":"mac";
 if(!device)throw Error("ROLL_UNSUPPORTED_OS");
@@ -141,9 +142,12 @@ async function waitForHealthyPeer(timeoutMs=90000){
  }
  return result;
 }
-// Remote lease + fresh peer proof serialize updates any time both devices are online.
-// Do not require powered-on computers during a fixed overnight maintenance window.
-function inWindow(){return true;}
+// Remote lease + peer proof serialize the update. Local activation is
+// additionally restricted to an idle maintenance window to avoid disrupting
+// active human work. Staging and CI validation remain available 24/7.
+function localActivationGate(){
+  return activationPermit({idleSeconds:localUserIdleSeconds(device)});
+}
 function npmCommand(args,cwd,timeout=180000){
  const cli=resolveBundledNpm();if(!cli)throw Error("ROLL_NPM_UNAVAILABLE");
  return run(process.execPath,[cli,...args],{cwd,timeout});
@@ -244,7 +248,8 @@ async function prepare(){
 async function tick(){
  const live=await liveStatus();await publish(live,fs.existsSync(path.join(rollState,"rollout.lock")));
  if(!live.healthy)return {status:"blocked",reason:"local-unhealthy"};
- if(!inWindow())return {status:"blocked",reason:"utc-window",live:live.sha};
+ const firstGate=localActivationGate();
+ if(!firstGate.allowed)return {status:"deferred",reason:firstGate.reason,live:live.sha};
  const staged=readVerifiedStage(stageRoot);
  if(!staged.gatesPassed||!staged.commit)return {status:"blocked",reason:"stage-unverified"};
  if(live.sha===staged.commit)return {status:"current",sha:live.sha};
@@ -273,6 +278,10 @@ async function tick(){
   await publish(before,true);
   await delay(18000);
   if(!(await waitForHealthyPeer(30000)).ok)throw Error("ROLL_PEER_CHANGED_AFTER_INTENT");
+  // Recheck after build, peer lease and grace interval: the user may have
+  // become active while the candidate was being prepared.
+  const finalGate=localActivationGate();
+  if(!finalGate.allowed)return {status:"deferred",reason:finalGate.reason};
   if(device==="mac")applyMac(before.root,dest,before.sha,staged.commit);
   else applyWindows(before.root,dest,before.sha,staged.commit);
   const after=await waitForActivation(staged.commit);

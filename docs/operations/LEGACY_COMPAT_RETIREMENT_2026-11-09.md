@@ -21,6 +21,14 @@
 8. **Security kill switch:** `OWL_COMPANION_BRIDGE_DISABLED` is still consumed by Runtime's now-renamed Agent Browser bridge, retained to avoid silently re-enabling an intentionally disabled browser capability. Rename only after deployment configuration audit.
 9. **OWL Worker mock/projection:** currently used for mock previews and support UI; no evidence of a deprecated production fallback.
 
+## Unattended activation interaction policy (2026-11-09 update)
+
+- Prepare, download, build and verify release candidates at any hour; only *activation* is gated.
+- Automatic activation requires **02:00–05:00 Europe/Zurich local time** and **at least 15 minutes of detected user input inactivity** on the target machine.
+- Unknown HID/Windows idle status fails closed. Recheck immediately before cutover after all coordinator/CI stages.
+- The live Mac/Windows updater agents also received the full time-and-idle guard without restarting applications; the previous scripts were backed up. The source release contains the same policy and regression tests.
+- **Important gap:** user inactivity does not prove Runtime's background task queue is drained. Independent active-task admission/drain integration and a real postactivation rollback fault-injection maintenance window remain required before claiming complete no-disruption guarantees.
+
 ## Activation gate
 
 Browser code is committed **locally only**. Do not automatically publish to `owl-desktop/main` while OTA can activate during a foreground session: the updater currently allows all hours (`inWindow() { return true; }`). Mac/Windows must first pass the same revision and Agent Browser Native Messaging parity check, including a controlled restart/reload and rollback proof. As of this audit Windows' running MCP revision lags GitHub `main`.
