@@ -18,6 +18,15 @@ export function createCallTimingJournal({ root, maxBytes = 4 * 1024 * 1024, back
       at: new Date().toISOString(),
       ...(typeof row.method === "string" ? { method: row.method.slice(0, 80) } : {}),
       ...(typeof row.tool === "string" ? { tool: row.tool.slice(0, 100) } : {}),
+      ...(typeof row.primitive === "string"
+        && /^[a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+){1,3}$/.test(row.primitive)
+        && row.primitive.length <= 80
+        && !/secret|password|token|credential/i.test(row.primitive)
+          ? { primitive: row.primitive } : {}),
+      ...(typeof row.primitiveOp === "string" && /^[a-z][a-z0-9_-]{0,39}$/.test(row.primitiveOp)
+        ? { primitiveOp: row.primitiveOp } : {}),
+      ...(["host","sandbox","remote"].includes(row.targetKind)
+        ? { targetKind: row.targetKind } : {}),
       ...(typeof row.status === "string" || typeof row.status === "number"
         ? { status: row.status } : {}),
       ...(row.toolOutcome === "error" || row.toolOutcome === "success"

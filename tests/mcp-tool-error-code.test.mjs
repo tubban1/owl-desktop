@@ -16,6 +16,10 @@ describe("privacy-safe meaningful tool error code",()=>{
     .toBe("BROWSER_AGENT_TIMEOUT");
    expect(safeMcpErrorCode(new Error("/Users/private/my-password"),"browser_agent_click"))
     .toBe("BROWSER_AGENT_UNCLASSIFIED");
+   expect(safeMcpErrorCode(new Error("Runtime request timed out after 20000ms"),"execute_command"))
+    .toBe("RUNTIME_TIMEOUT");
+   expect(safeMcpErrorCode(new Error("process timed out"),"primitive_call"))
+    .toBe("RUNTIME_TIMEOUT");
    expect(safeMcpErrorCode(new Error("oops"),"execute_command"))
     .toBe("UNCLASSIFIED");
  });

@@ -107,5 +107,18 @@ describe("MCP real interaction stream", () => {
     expect(response.meta.payload).toContain("[redacted]");
     expect(response.meta.payload).not.toContain("must-not-leak");
     expect(response.meta.interactionId).toBe(request.meta.interactionId);
+    const diag=await (await fetch(new URL(mcp.url).origin+"/diagnostics")).json();
+    const timing=diag.recentMcpCalls.find(item=>item.tool==="primitive_call");
+    expect(timing).toMatchObject({primitive:"test.echo",primitiveOp:"run"});
+    expect(timing).not.toHaveProperty("args");
+    expect(JSON.stringify(timing)).not.toContain("super-secret");
+    const longSync=await client.callTool({name:"primitive_call",arguments:{
+      primitive:"sys.exec",op:"run",args:{command:"sleep 200",timeout_ms:180000},
+    }});
+    expect(longSync.isError).toBe(true);
+    expect(JSON.stringify(longSync)).toContain("LONG_SYNC_EXEC_REQUIRES_DURABLE_PROCESS");
+    const latest=await (await fetch(new URL(mcp.url).origin+"/diagnostics")).json();
+    expect(latest.recentMcpCalls.some(x=>x.tool==="primitive_call"
+      && x.toolErrorCode==="LONG_SYNC_EXEC_REQUIRES_DURABLE_PROCESS")).toBe(true);
   });
 });

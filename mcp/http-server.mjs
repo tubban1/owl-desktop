@@ -261,6 +261,21 @@ export async function startOwlMcpHttpServer({
     const toolName = requestedMethod === "tools/call"
       && typeof req.body?.params?.name === "string"
       ? req.body.params.name.slice(0, 100) : null;
+    // Attribute long-running generic primitive_call without recording any
+    // arguments, commands, paths, credentials or target IDs. A primitive ID
+    // and verb are low-cardinality API identifiers, not user payload.
+    const primitiveArgs = toolName === "primitive_call" ? req.body?.params?.arguments : null;
+    const primitiveName = typeof primitiveArgs?.primitive === "string"
+      && /^[a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+){1,3}$/.test(primitiveArgs.primitive)
+      && primitiveArgs.primitive.length <= 80
+      && !/secret|password|token|credential/i.test(primitiveArgs.primitive)
+        ? primitiveArgs.primitive : null;
+    const primitiveOp = primitiveName && typeof primitiveArgs?.op === "string"
+      && /^[a-z][a-z0-9_-]{0,39}$/.test(primitiveArgs.op)
+        ? primitiveArgs.op : null;
+    const targetKind = primitiveName &&
+      ["host","sandbox","remote"].includes(primitiveArgs?.execution_target?.kind)
+        ? primitiveArgs.execution_target.kind : null;
     // The fence and admission check both run synchronously on one event loop.
     // Once armed, a new tools/call cannot enter the MCP dispatch queue.
     // Read-only initialize/list and health stay usable for reconnect.
@@ -276,6 +291,9 @@ export async function startOwlMcpHttpServer({
       callTimings.record({
         traceId, phase: "mcp_response", method: requestedMethod,
         ...(toolName ? { tool: toolName } : {}),
+        ...(primitiveName ? { primitive: primitiveName } : {}),
+        ...(primitiveOp ? { primitiveOp } : {}),
+        ...(targetKind ? { targetKind } : {}),
         status: res.writableFinished ? res.statusCode : 0,
         ...(toolName && toolOutcome ? { toolOutcome } : {}),
         ...(toolErrorCode ? { toolErrorCode } : {}),
@@ -286,6 +304,9 @@ export async function startOwlMcpHttpServer({
         traceId, receivedAt,
         method: requestedMethod,
         ...(toolName ? { tool: toolName } : {}),
+        ...(primitiveName ? { primitive: primitiveName } : {}),
+        ...(primitiveOp ? { primitiveOp } : {}),
+        ...(targetKind ? { targetKind } : {}),
         status: res.writableFinished ? res.statusCode : 0,
         ...(toolName && toolOutcome ? { toolOutcome } : {}),
         ...(toolErrorCode ? { toolErrorCode } : {}),

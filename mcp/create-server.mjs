@@ -1151,7 +1151,7 @@ export function createOwlMcpServer({fileDelivery=null,userChromeBridge=null,mail
   tool(
     server,
     "primitive_call",
-    "Call one OWL Runtime Primitive. Runtime remains the policy, approval, execution, observation and verification authority.",
+    "Call one bounded OWL Runtime Primitive. For shell commands or operations likely to take longer than 20 seconds, use start_process and get_process_output or durable task_create/task_submit rather than waiting on a synchronous primitive_call. A lost ChatGPT/tunnel response does not prove the primitive failed; reconcile its idempotency receipt before retrying. Runtime remains the execution authority.",
     {
       primitive: z.string().min(1),
       op: z.string().min(1),
@@ -1170,16 +1170,27 @@ export function createOwlMcpServer({fileDelivery=null,userChromeBridge=null,mail
       idempotentHint: false,
       openWorldHint: true,
     },
-    ({ primitive, op, args, execution_target }) => invoke(
-      "primitive.call",
-      {
+    ({ primitive, op, args, execution_target }) => {
+      // Explicitly declared long shell execution must be admitted as a
+      // durable managed process/Task, never wait inside a single MCP call.
+      // Reject BEFORE dispatch: a timeout after dispatch cannot prove a
+      // command with external side effects was cancelled.
+      const shellDeadline=args?.timeout_ms ?? args?.timeoutMs;
+      if(primitive==="sys.exec" && op==="run" &&
+        Number.isFinite(Number(shellDeadline)) && Number(shellDeadline)>20_000) {
+        const error=new Error(
+          "LONG_SYNC_EXEC_REQUIRES_DURABLE_PROCESS: For shell operations over 20 seconds, use start_process/get_process_output or task_create/task_submit.",
+        );
+        error.code="LONG_SYNC_EXEC_REQUIRES_DURABLE_PROCESS";
+        throw error;
+      }
+      return invoke("primitive.call",{
         primitive,
         op,
         args: args ?? {},
         ...(execution_target ? { executionTarget: execution_target } : {}),
-      },
-      10 * 60_000,
-    ),
+      },10*60_000);
+    },
   );
 
   tool(
