@@ -123,6 +123,14 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
       ["被“noindex”标记排除了","由于遇到其他 4xx 问题而被屏蔽了","重复网页，Google 选择的规范网页与用户指定的不同"].includes((el.textContent||"").trim())&&
       !Array.from(el.children||[]).some(
         ch=>(ch.textContent||"").trim()===(el.textContent||"").trim());
+    // Search Console's report dimension tabs are read-only navigation.
+    // Restrict to GSC Performance, exact role=tab and known tab labels.
+    const safeGscPerformanceTab=
+      location.hostname==="search.google.com"&&
+      location.pathname==="/search-console/performance/search-analytics"&&
+      el.getAttribute("role")==="tab"&&
+      ["查询数","网页","国家/地区","设备","搜索结果呈现","天"].includes(
+        (el.textContent||"").trim());
     const safeGscExample=(()=>{
       if(location.hostname!=="search.google.com"||
          location.pathname!=="/search-console/index/drilldown")return false;
@@ -135,11 +143,11 @@ export function locateVirtualCursorTarget(uid,expectedOrigin,mode="move"){
         !Array.from(el.children||[]).some(ch=>
           (ch.textContent||"").trim().startsWith("http"));
     })();
-    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow||safeGscExample||linkedInFeatured)&&
+    if(danger.test(label)||(!(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow||safeGscExample||safeGscPerformanceTab||linkedInFeatured)&&
        (el.closest("form")||el.hasAttribute("onclick")))||
        el.getAttribute("aria-disabled")==="true"||el.disabled)
       return {error:"CURSOR_ACTION_REQUIRES_HUMAN"};
-    if(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow||safeGscExample||linkedInFeatured){
+    if(safeChoiceOpener||safeChoiceOption||safeDnsTab||safeGscNoindexRow||safeGscExample||safeGscPerformanceTab||linkedInFeatured){
       // Only an observed, benign choice opener/option can be clicked here.
       // Submits, uploads, approvals and ambiguous controls stay human-gated.
     }else if(tag==="a"){

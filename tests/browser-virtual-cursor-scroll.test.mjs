@@ -104,6 +104,19 @@ describe("background Agent cursor",()=>{
     expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
       .toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});
   });
+  it("allows read-only Search Console performance tabs only on their exact route",()=>{
+    mockPage({tag:"DIV",type:"",label:"网页",form:true,offscreen:false});
+    const el=document.querySelector();
+    el.getAttribute=(name)=>name==="role"?"tab":null;
+    vi.stubGlobal("location",{origin:"https://search.google.com",hostname:"search.google.com",
+      pathname:"/search-console/performance/search-analytics"});
+    expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
+      .toMatchObject({valid:true,tag:"div"});
+    vi.stubGlobal("location",{origin:"https://search.google.com",hostname:"search.google.com",
+      pathname:"/search-console/sitemaps"});
+    expect(locateVirtualCursorTarget("owl-agent-7","https://search.google.com","click"))
+      .toMatchObject({error:"CURSOR_ACTION_REQUIRES_HUMAN"});
+  });
   it("still denies form submit despite bringing offscreen control into view",()=>{
     const p=mockPage({label:"Submit application",form:true,type:"submit"});
     const r=locateVirtualCursorTarget("owl-agent-7","https://careers.axpo.com","click");
