@@ -48,6 +48,44 @@ it("a transient MCP or Runtime timeout is observed, not treated as an upgrade fa
  }
 });
 
+it("severe host contention protects a live owned release from false rollback",()=>{
+ const busy={...ok,mcp:{ok:false,reason:"timeout",elapsedMs:3500},
+  runtime:{ok:false,reason:"timeout",elapsedMs:3500},
+  hostLoad:{oneMinute:120,fiveMinute:80,cpuCount:8}};
+ const original=macWatchdogDecision({probe:busy,now,firstSeenAt:mark(420),
+  consecutiveFailures:7});
+ assert.equal(original.action,"wait");
+ assert.equal(original.reason,"system-contention-recovery-grace");
+ assert.equal(macWatchdogDecision({probe:{...busy,hostLoad:{oneMinute:1,cpuCount:8}},
+  now,firstSeenAt:mark(650),consecutiveFailures:13,
+  contentionObserved:true}).action,"wait");
+ assert.equal(macWatchdogDecision({probe:busy,now,firstSeenAt:mark(901),
+  consecutiveFailures:25}).action,"rollback");
+ assert.equal(macWatchdogDecision({probe:ok,now,firstSeenAt:mark(1500),
+  contentionObserved:true,consecutiveFailures:45}).action,"clear");
+});
+
+it("host load does not mask true dead processes, HTTP failures or unknown owner",()=>{
+ const offline={...ok,hostLoad:{oneMinute:160,cpuCount:8},
+  mcp:{ok:false,reason:"unreachable"},runtime:{ok:false,reason:"unreachable"}};
+ assert.equal(macWatchdogDecision({probe:offline,now,firstSeenAt:mark(360),
+  consecutiveFailures:9,contentionObserved:true}).action,"rollback");
+ const absent={...offline,supervisorPresent:false,desktopMainPresent:false,
+  mcp:{ok:false,reason:"timeout"},runtime:{ok:false,reason:"timeout"}};
+ assert.equal(macWatchdogDecision({probe:absent,now,firstSeenAt:mark(80),
+  consecutiveFailures:4,contentionObserved:true}).action,"restart");
+ assert.equal(macWatchdogDecision({probe:absent,now,firstSeenAt:mark(360),
+  consecutiveFailures:9,contentionObserved:true}).action,"rollback");
+ const unknown={...offline,ownerVerified:false,
+  mcp:{ok:false,reason:"timeout"},runtime:{ok:false,reason:"timeout"}};
+ assert.equal(macWatchdogDecision({probe:unknown,now,firstSeenAt:mark(360),
+  consecutiveFailures:9,contentionObserved:true}).action,"rollback");
+ const missingCpu={...offline,mcp:{ok:false,reason:"timeout"},
+  runtime:{ok:false,reason:"timeout"},hostLoad:{oneMinute:200}};
+ assert.equal(macWatchdogDecision({probe:missingCpu,now,firstSeenAt:mark(360),
+  consecutiveFailures:9}).action,"rollback");
+});
+
 it("Supervisor missing is restarted first, with delayed rollback for persistent outage",()=>{
  const probe={...ok,supervisorPresent:false,supervisorPid:null,mcp:{ok:false},runtime:{ok:false}};
  assert.equal(macWatchdogDecision({probe,now,

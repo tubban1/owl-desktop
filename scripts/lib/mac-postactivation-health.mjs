@@ -33,6 +33,7 @@ export function macDesktopMainPresent(releaseRoot, psOutput) {
  */
 export function macWatchdogDecision({
   probe, firstSeenAt, consecutiveFailures = 0, now = Date.now(),
+  contentionObserved = false,
 }) {
   const coreHealthy = Boolean(probe.supervisorPresent && probe.mcp?.ok &&
     probe.runtime?.ok);
@@ -52,13 +53,33 @@ export function macWatchdogDecision({
     return { action: "observe", reason: "insufficient-evidence" };
   }
   const ageMs = now - firstMs;
-  if (ageMs >= 300_000 && consecutiveFailures >= 6) {
+  // A still-owned, live supervisor and Electron are not proof that HTTP is
+  // responsive; however, timeouts during heavy host contention are also NOT
+  // proof that the release is broken. Keep auto-recovery bounded, and never
+  // extend the grace period for a real HTTP failure or missing process.
+  const transientTimeout = (probe.mcp?.ok || probe.mcp?.reason === "timeout") &&
+    (probe.runtime?.ok || probe.runtime?.reason === "timeout") &&
+    (!probe.mcp?.ok || !probe.runtime?.ok);
+  const processIdentityVerified = probe.supervisorPresent &&
+    probe.ownerVerified && probe.desktopMainPresent;
+  const cpuCount = probe.hostLoad?.cpuCount;
+  const load1 = probe.hostLoad?.oneMinute;
+  const overloaded = Number.isFinite(cpuCount) && cpuCount > 0 &&
+    Number.isFinite(load1) && load1 >= 2.5 * cpuCount;
+  const resourceContention = processIdentityVerified && transientTimeout &&
+    (overloaded || contentionObserved);
+  // A single 30-second watchdog probe must not tear down long-running
+  // authorized work when macOS is heavily paging. The extended grace is
+  // still finite: 15 minutes, then the usual independently-verified rollback.
+  const graceMs = resourceContention ? 900_000 : 300_000;
+  if (ageMs >= graceMs && consecutiveFailures >= 6) {
     return { action: "rollback", reason: "persistent-core-failure" };
   }
   if (!probe.supervisorPresent && ageMs >= 60_000 && consecutiveFailures >= 3) {
     return { action: "restart", reason: "supervisor-missing" };
   }
-  return { action: "wait", reason: "core-recovery-grace" };
+  return { action: "wait", reason: resourceContention
+    ? "system-contention-recovery-grace" : "core-recovery-grace" };
 }
 
 // Kept for legacy callers of the pure recovery contract; new watchdog uses

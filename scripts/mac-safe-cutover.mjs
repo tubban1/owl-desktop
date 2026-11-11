@@ -63,10 +63,10 @@ async function health(port){
 }
 // Independent, bounded evidence for *local* process/HTTP health. Network
 // reachability of Cloud is not allowed to initiate a local process rollback.
-async function componentHttp(port){
+async function componentHttp(port,timeoutMs=3500){
  const started=performance.now();
  try{
-  const res=await fetch("http://127.0.0.1:"+port+"/health",{signal:AbortSignal.timeout(3500)});
+  const res=await fetch("http://127.0.0.1:"+port+"/health",{signal:AbortSignal.timeout(timeoutMs)});
   const payload=res.ok?await res.json():null;
   return {ok:res.ok&&payload?.ok===true,code:res.status,
    elapsedMs:Math.round(performance.now()-started),
@@ -76,10 +76,15 @@ async function componentHttp(port){
    reason:e?.name==="TimeoutError"?"timeout":"unreachable"};
  }
 }
-async function componentProbe(dir){
+async function componentProbe(dir,httpTimeoutMs=3500){
  const supervisor=exactSupervisor(dir);
- const [mcp,runtime]=await Promise.all([componentHttp(8790),componentHttp(18788)]);
- return {at:new Date().toISOString(),supervisorPresent:Boolean(supervisor),
+ const [mcp,runtime]=await Promise.all([
+  componentHttp(8790,httpTimeoutMs),componentHttp(18788,httpTimeoutMs),
+ ]);
+ const [oneMinute,fiveMinute]=os.loadavg();
+ const hostLoad={oneMinute:Math.round(oneMinute*10)/10,
+  fiveMinute:Math.round(fiveMinute*10)/10,cpuCount:os.cpus().length};
+ return {at:new Date().toISOString(),hostLoad,supervisorPresent:Boolean(supervisor),
   supervisorPid:supervisor?.pid??null,
   desktopMainPresent:desktopMainRunning(dir),ownerVerified:ownerMatches(dir),
   mcp,runtime};
@@ -347,9 +352,23 @@ if(mode==="watch"){
        &&now-Date.parse(previous.lastObservedAt)<90_000;
    const consecutiveFailures=continuation?(previous.consecutiveFailures??1)+1:1;
    const firstSeenAt=continuation?previous.firstSeenAt:new Date(now).toISOString();
-   const decision=macWatchdogDecision({probe,firstSeenAt,consecutiveFailures,now});
+   const hostLoadOverloaded=Number.isFinite(probe.hostLoad?.oneMinute) &&
+     Number.isFinite(probe.hostLoad?.cpuCount) &&
+     probe.hostLoad.cpuCount>0 &&
+     probe.hostLoad.oneMinute>=2.5*probe.hostLoad.cpuCount;
+   const contentionObserved=Boolean(
+     (continuation && previous?.contentionObserved) ||
+     (hostLoadOverloaded && probe.supervisorPresent &&
+       probe.ownerVerified && probe.desktopMainPresent &&
+       (probe.mcp.ok||probe.mcp.reason==="timeout") &&
+       (probe.runtime.ok||probe.runtime.reason==="timeout"))
+   );
+   const decision=macWatchdogDecision({
+    probe,firstSeenAt,consecutiveFailures,now,contentionObserved,
+   });
    saveTracker(tracker,{newSha,firstSeenAt,lastObservedAt:new Date(now).toISOString(),
-    consecutiveFailures,lastReason:decision.reason,lastAction:decision.action,probe});
+    consecutiveFailures,contentionObserved,lastReason:decision.reason,
+    lastAction:decision.action,probe});
    watchdogEvidence({event:"unhealthy-probe",action:decision.action,
     reason:decision.reason,consecutiveFailures,probe});
    if(decision.action==="restart"){
@@ -362,11 +381,19 @@ if(mode==="watch"){
    }
    if(decision.action==="rollback"){
     // Re-probe immediately before destructive transition.
-    const confirm=await componentProbe(newRoot);
-    if((!confirm.mcp.ok||!confirm.runtime.ok)&&
-       (confirm.supervisorPresent||!(confirm.mcp.ok&&confirm.runtime.ok))){
+    // Final independent confirmation uses a longer timeout than the routine
+    // 3.5s health probe. On a paged-out Mac the services can still be alive.
+    const confirm=await componentProbe(newRoot,12_000);
+    const confirmedDecision=macWatchdogDecision({
+     probe:confirm,firstSeenAt,consecutiveFailures,
+     now:Date.now(),contentionObserved,
+    });
+    if(confirmedDecision.action==="rollback" &&
+       (!confirm.mcp.ok||!confirm.runtime.ok)){
      await rollback("watchdog-persistent-core-failure");
-    }else watchdogEvidence({event:"recovered-before-rollback",probe:confirm});
+    }else watchdogEvidence({event:"recovered-or-grace-before-rollback",
+      action:confirmedDecision.action,reason:confirmedDecision.reason,
+      probe:confirm});
    }
   }
  }
