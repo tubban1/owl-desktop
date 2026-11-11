@@ -11,7 +11,7 @@ export type RuntimePermissionProjection = {
 export type WindowsGuiMode = "off"|"inspect"|"semantic"|"foreground";
 export type WindowsGuiStatus = {
   platform:string;requestedMode:WindowsGuiMode;effectiveMode:WindowsGuiMode|"unverified";
-  available:boolean;reason:string|null;applied:boolean;
+  available:boolean;helperVerified?:boolean;reason:string|null;applied:boolean;
   foregroundMayTakeFocus:boolean;changed?:boolean;
 };
 

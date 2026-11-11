@@ -2476,8 +2476,13 @@ Only this single action will be approved.`,
     const liveMode=live?.get("ALLOW_GUI")==="true"?
       live?.get("OWL_WIN_GUI_FOREGROUND_INPUT")==="true"?"foreground":
       live?.get("OWL_WIN_GUI_INPUT")==="true"?"semantic":"inspect":"off";
+    // Windows packaged Runtime Host has not implemented per-user GUI consent
+    // handoff. A staged helper binary alone must NEVER claim install readiness.
+    const packagedUnsupported=process.platform==="win32"&&app.isPackaged;
     return {platform:process.platform,requestedMode:desired.requested,
-      available:proof.verified,reason:proof.reason,
+      available:proof.verified&&!packagedUnsupported,
+      helperVerified:proof.verified,
+      reason:packagedUnsupported?"WINDOWS_GUI_PACKAGED_RUNTIME_HOST_NOT_READY":proof.reason,
       effectiveMode:live?liveMode:"unverified",
       applied:!!live&&desired.effective===liveMode,
       foregroundMayTakeFocus:desired.requested==="foreground"};
@@ -2486,6 +2491,10 @@ Only this single action will be approved.`,
   ipcMain.handle("windows-gui:set",async(_event,mode)=>{
     if(process.platform!=="win32")throw Error("WINDOWS_GUI_ONLY");
     assertWindowsGuiMode(mode);
+    // No Windows packaged GUI service / activation contract exists yet.
+    // Disable is always allowed; enabling would falsely advertise capability.
+    if(app.isPackaged&&mode!=="off")
+      throw Error("WINDOWS_GUI_PACKAGED_RUNTIME_HOST_NOT_READY");
     const before=windowsGuiStatus();
     if(mode!=="off"&&!before.available)
       throw Error("WINDOWS_GUI_HELPER_NOT_VERIFIED: Install reviewed OWL Windows Helper before enabling native GUI.");
@@ -2497,6 +2506,7 @@ Only this single action will be approved.`,
     });
     if(response!==1)return {...before,changed:false};
     store.setWindowsGuiMode(mode);
+    if(app.isPackaged) return {...windowsGuiStatus(),changed:true,applied:false};
     const apply=await applyRuntimeUserPreferences(store.getSettings());
     record(apply.applied?"info":"warn","runtime","Windows GUI consent changed",{
       requestedMode:mode,applied:apply.applied,reason:apply.reason??null,

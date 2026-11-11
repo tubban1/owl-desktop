@@ -57,6 +57,8 @@ describe("Windows GUI consent and Helper verification",()=>{
  it("requires local UI confirmation and rejects generic settings bypass",async()=>{
   const main=fs.readFileSync(new URL("../electron/main.mjs",import.meta.url),"utf8");
   const store=fs.readFileSync(new URL("../electron/store.mjs",import.meta.url),"utf8");
+  expect(main).toContain('WINDOWS_GUI_PACKAGED_RUNTIME_HOST_NOT_READY');
+  expect(main).toContain('if(app.isPackaged&&mode!=="off")');
   expect(main).toContain('ipcMain.handle("windows-gui:set",');
   expect(main).toContain("dialog.showMessageBox");
   expect(main).toContain("store.setWindowsGuiMode(mode)");
