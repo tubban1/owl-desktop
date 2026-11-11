@@ -118,6 +118,115 @@ afterEach(() => {
 });
 
 describe("CloudBridgeService", () => {
+  it("coalesces a prolonged outage and reports recovery only after a complete cycle", async () => {
+    const setup = createService();
+    const error = Object.assign(new Error("private-token/should-never-appear"), {
+      code: "CLOUD_TIMEOUT",
+      diagnostic: {
+        operation: "POST:device.presence",
+        phase: "request",
+        httpStatus: 0,
+        durationMs: 8000,
+        networkCode: "UNCLASSIFIED",
+      },
+    });
+
+    setup.service.noteError(error);
+    setup.service.noteError(error);
+    setup.service.noteError(error);
+    expect(setup.service.snapshot()).toMatchObject({
+      status: "degraded",
+      consecutiveFailures: 3,
+      lastErrorCode: "CLOUD_TIMEOUT",
+      lastErrorDiagnostic: { operation: "POST:device.presence", durationMs: 8000 },
+    });
+    expect(setup.onEvent.mock.calls.filter(([level]) => level === "warn")).toHaveLength(1);
+    const errors = setup.store.dueOutbox().filter(
+      (row) => row.payload.eventType === "desktop.cloud.bridge.error",
+    );
+    expect(errors).toHaveLength(1);
+    expect(JSON.stringify(errors)).not.toContain("private-token");
+
+    setup.service.noteContact();
+    expect(setup.service.snapshot().status).toBe("degraded");
+    expect(setup.service.computeNextDelayMs()).toBeGreaterThanOrEqual(54_000);
+    expect(setup.service.computeNextDelayMs()).toBeLessThanOrEqual(60_000);
+
+    await setup.service.syncOnce({ forceHeartbeat: true });
+    expect(setup.service.snapshot()).toMatchObject({
+      status: "connected",
+      consecutiveFailures: 0,
+      lastErrorCode: null,
+      outageStartedAt: null,
+      nextRetryDelayMs: 60_000,
+    });
+    expect(setup.onEvent).toHaveBeenCalledWith(
+      "info", "Cloud Bridge sync recovered",
+      expect.objectContaining({
+        failedSyncs: 3,
+        errorCounts: { CLOUD_TIMEOUT: 3 },
+        lastDiagnostic: expect.objectContaining({ operation: "POST:device.presence" }),
+      }),
+    );
+    expect(setup.store.dueOutbox().filter(
+      (row) => row.payload.eventType === "desktop.cloud.bridge.recovered",
+    )).toHaveLength(1);
+
+    // Once recovered a new independent outage creates one fresh incident.
+    setup.service.noteError(error);
+    expect(setup.onEvent.mock.calls.filter(([level]) => level === "warn")).toHaveLength(2);
+  });
+
+  it("keeps an outage open when an earlier request succeeds but a later one fails", async () => {
+    const error = Object.assign(new Error("network unavailable"), {
+      code: "CLOUD_NETWORK_ERROR",
+    });
+    const client = createClient({
+      pullCommands: vi.fn()
+        .mockRejectedValueOnce(error)
+        .mockRejectedValueOnce(error)
+        .mockResolvedValue({ commands: [] }),
+    });
+    const setup = createService({ client });
+    for (let i = 0; i < 2; i++) {
+      await expect(setup.service.syncOnce({ forceHeartbeat: true })).rejects.toMatchObject({
+        code: "CLOUD_NETWORK_ERROR",
+      });
+      setup.service.noteError(error);
+    }
+    expect(setup.service.snapshot()).toMatchObject({
+      status: "degraded",
+      consecutiveFailures: 2,
+    });
+    expect(setup.onEvent.mock.calls.filter(([level]) => level === "warn")).toHaveLength(1);
+    await setup.service.syncOnce({ forceHeartbeat: true });
+    expect(setup.service.snapshot().status).toBe("connected");
+    expect(setup.onEvent.mock.calls.filter(([level, msg]) => (
+      level === "info" && msg === "Cloud Bridge sync recovered"
+    ))).toHaveLength(1);
+  });
+
+  it("rejects known-unsupported remote actions before creating a Runtime task", async () => {
+    const setup = createService();
+    for (const [index, action] of [
+      "fs.read.one", "fs.stat", "primitive.call", "file.read",
+      "sys.exec", "runtime.task.create-and-start@1",
+    ].entries()) {
+      const commandId = `cmd_known_bad_${index}`;
+      await setup.service.processCommand(command({
+        commandId,
+        payload: { label: "Action contract test", steps: [
+          { id: "attempt", action, args: { path: "/private/user-data" } },
+        ] },
+      }));
+      expect(setup.client.rejectCommand).toHaveBeenCalledWith(
+        commandId, "INVALID_COMMAND_PAYLOAD:UNSUPPORTED_ROUTED_ACTION",
+      );
+    }
+    expect(setup.runtimeClient.createTask).not.toHaveBeenCalled();
+    expect(JSON.stringify(setup.store.snapshot())).not.toContain("/private/user-data");
+  });
+
   it("reports unsupported graph actions without exposing private arguments", async () => {
     const error = new Error('Unknown routed action "runtime.info" in step "info". Call router_catalog for supported actions.');
     error.code = "Error";

@@ -1,3 +1,33 @@
+function safeCloudOperation(path, method) {
+  const route = String(path ?? "").split("?")[0];
+  const scope = route.startsWith("/device/v1/") ? "device" :
+    route.startsWith("/v1/") ? "account" :
+    route === "/health" ? "health" :
+    route === "/auth/config" ? "auth.config" : "other";
+  const category = route.includes("/approval-decisions") || route.includes("/approvals/")
+    ? "approvals" : route.includes("/mcp-calls") ? "mcp-calls" :
+      route.includes("/commands") ? "commands" :
+      route.includes("/presence") ? "presence" :
+      route.includes("/telemetry") ? "telemetry" :
+      route.includes("/events") ? "events" :
+      route.includes("/runtime-lease") ? "lease" :
+      route.includes("/devices") ? "devices" :
+      route.includes("/connectivity/") ? "connectivity" : "other";
+  return `${String(method ?? "GET").toUpperCase()}:${scope}.${category}`;
+}
+
+const SAFE_NETWORK_CODES = new Set([
+  "ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT",
+  "EHOSTUNREACH", "ENETUNREACH", "EPIPE", "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET", "CERT_HAS_EXPIRED",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+]);
+
+function safeNetworkCode(error) {
+  const value = String(error?.cause?.code ?? error?.code ?? "");
+  return SAFE_NETWORK_CODES.has(value) ? value : "UNCLASSIFIED";
+}
+
 export class CloudHttpError extends Error {
   constructor(message, { status = 0, code = "CLOUD_HTTP_ERROR" } = {}) {
     super(message);
@@ -63,6 +93,9 @@ export class CloudHttpClient {
     userJwt,
     timeoutMs = this.timeoutMs,
   } = {}) {
+    const startedAtMs = Date.now();
+    const operation = safeCloudOperation(path, method);
+    let phase = "request";
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(new Error(`OWL Cloud request timed out after ${timeoutMs}ms`)),
@@ -96,6 +129,7 @@ export class CloudHttpClient {
         signal: controller.signal,
       });
 
+      phase = "response_body";
       const text = await response.text();
       let payload = null;
       if (text) {
@@ -120,16 +154,27 @@ export class CloudHttpClient {
       }
       return payload;
     } catch (error) {
-      if (error instanceof CloudHttpError) throw error;
-      if (controller.signal.aborted || error?.name === "AbortError") {
-        throw new CloudHttpError("OWL Cloud request timed out or was aborted.", {
-          code: "CLOUD_TIMEOUT",
-        });
-      }
-      throw new CloudHttpError(
-        error instanceof Error ? error.message : String(error),
-        { code: "CLOUD_NETWORK_ERROR" },
-      );
+      // Only attach bounded, stable metadata. Never report raw paths, URLs or messages.
+      const diagnostic = {
+        operation,
+        phase,
+        durationMs: Math.max(0, Date.now() - startedAtMs),
+      };
+      const classified = error instanceof CloudHttpError ? error :
+        controller.signal.aborted || error?.name === "AbortError" ?
+          new CloudHttpError("OWL Cloud request timed out or was aborted.", {
+            code: "CLOUD_TIMEOUT",
+          }) :
+          new CloudHttpError("OWL Cloud network request failed.", {
+            code: "CLOUD_NETWORK_ERROR",
+          });
+      classified.diagnostic = {
+        ...diagnostic,
+        httpStatus: Number.isInteger(classified.status) ? classified.status : 0,
+        networkCode: error instanceof CloudHttpError
+          ? "NONE" : safeNetworkCode(error),
+      };
+      throw classified;
     } finally {
       clearTimeout(timeout);
     }

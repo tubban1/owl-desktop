@@ -12,6 +12,54 @@ function jsonResponse(body, status = 200) {
 }
 
 describe("CloudHttpClient", () => {
+  it("attaches safe diagnostics to network errors without exposing request secrets", async () => {
+    const fetchImpl = vi.fn(async () => {
+      const e = new TypeError("failed to fetch SECRET credential/path/identifier");
+      e.cause = { code: "ENOTFOUND" };
+      throw e;
+    });
+    const client = new CloudHttpClient({
+      baseUrl: "https://cloud.example.test",
+      deviceCredential: "SECRET_CREDENTIAL",
+      fetchImpl,
+    });
+    let caught;
+    try {
+      await client.rejectCommand("cmd_private_id", "reason");
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      code: "CLOUD_NETWORK_ERROR",
+      diagnostic: {
+        operation: "POST:device.commands",
+        phase: "request",
+        networkCode: "ENOTFOUND",
+        httpStatus: 0,
+      },
+    });
+    expect(caught.diagnostic.durationMs).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(caught.diagnostic)).not.toContain("SECRET");
+    expect(JSON.stringify(caught.diagnostic)).not.toContain("cmd_private_id");
+  });
+
+  it("classifies response HTTP statuses with bounded diagnostics", async () => {
+    const client = new CloudHttpClient({
+      baseUrl: "https://cloud.example.test",
+      deviceCredential: "super-private-token",
+      fetchImpl: vi.fn(async () => jsonResponse({ error: "UNAUTHORIZED" }, 401)),
+    });
+    await expect(client.pullCommands()).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      diagnostic: {
+        operation: "GET:device.commands",
+        phase: "response_body",
+        networkCode: "NONE",
+        httpStatus: 401,
+      },
+    });
+  });
+
   it("uses Device auth for managed connectivity bootstrap", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({

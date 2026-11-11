@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { remoteSubmissionDigest } from "./remote-submission-store.mjs";
+import { isKnownUnsupportedRemoteTaskAction } from "./remote-task-action-guard.mjs";
 
 function codedError(code, message) {
   const error = new Error(message);
@@ -144,6 +145,14 @@ export class RemoteDeviceControlService {
       throw codedError(
         "REMOTE_SUBMISSION_INVALID",
         "steps must be a non-empty array.",
+      );
+    }
+    // Catch known invalid task actions before they create Cloud commands.
+    // Do not expose step IDs, private paths, arguments or names in errors.
+    if (steps.some((step) => isKnownUnsupportedRemoteTaskAction(step?.action))) {
+      throw codedError(
+        "REMOTE_UNSUPPORTED_ROUTED_ACTION",
+        "The remote task uses an action unsupported by the target Runtime.",
       );
     }
     if (

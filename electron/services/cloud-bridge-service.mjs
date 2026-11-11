@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isKnownUnsupportedRemoteTaskAction } from "./remote-task-action-guard.mjs";
 
 import {
   OWL_COMPATIBILITY_V1,
@@ -36,6 +37,29 @@ function errorFingerprint(error) {
 
 function backoffMs(attempts) {
   return Math.min(60_000, 1_000 * 2 ** Math.min(attempts, 6));
+}
+
+function safeBridgeDiagnostic(error) {
+  const raw = error?.diagnostic ?? {};
+  const text = (value, allowed, fallback) =>
+    typeof value === "string" && allowed.includes(value) ? value : fallback;
+  return {
+    operation: typeof raw.operation === "string" &&
+        /^(GET|POST|PUT|PATCH|DELETE):(device|account|health|auth.config|other)\.(approvals|mcp-calls|commands|presence|telemetry|events|lease|devices|connectivity|other)$/.test(raw.operation)
+      ? raw.operation : "unknown",
+    phase: text(raw.phase, ["request", "response_body"], "unknown"),
+    httpStatus: Number.isInteger(raw.httpStatus) && raw.httpStatus >= 0 && raw.httpStatus <= 599
+      ? raw.httpStatus : 0,
+    durationMs: Number.isFinite(raw.durationMs) && raw.durationMs >= 0
+      ? Math.min(Math.round(raw.durationMs), 600_000) : 0,
+    networkCode: text(raw.networkCode, [
+      "NONE", "ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "ECONNREFUSED",
+      "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH", "EPIPE",
+      "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT",
+      "UND_ERR_SOCKET", "CERT_HAS_EXPIRED",
+      "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "UNCLASSIFIED",
+    ], "UNCLASSIFIED"),
+  };
 }
 
 const VERIFICATION_OPERATORS = new Set([
@@ -166,6 +190,9 @@ function sanitizeTaskStep(step) {
     invalid("TASK_STEP_DEPENDS_ON_INVALID");
   }
 
+  if (isKnownUnsupportedRemoteTaskAction(step.action)) {
+    invalid("UNSUPPORTED_ROUTED_ACTION");
+  }
   const verify = sanitizeVerification(step.verify);
   return {
     id: step.id,
@@ -299,6 +326,8 @@ export class CloudBridgeService {
     this.running = false;
     this.timer = null;
     this.syncing = false;
+    this.failureWindow = null;
+    this.consecutiveFailures = 0;
     this.approvalDecisionCapability = {
       status: "unknown",
       nextProbeAtMs: 0,
@@ -311,6 +340,10 @@ export class CloudBridgeService {
       lastErrorCode: null,
       lastErrorAt: null,
       recoveredUncertain: 0,
+      consecutiveFailures: 0,
+      outageStartedAt: null,
+      nextRetryDelayMs: this.pollIntervalMs,
+      lastErrorDiagnostic: null,
     };
   }
 
@@ -389,46 +422,107 @@ export class CloudBridgeService {
     return this.snapshot();
   }
 
+  computeNextDelayMs() {
+    if (this.consecutiveFailures === 0) return this.pollIntervalMs;
+    const base = Math.min(60_000,
+      this.pollIntervalMs * 2 ** Math.min(this.consecutiveFailures, 5));
+    // A small jitter avoids many devices retrying simultaneously after an outage.
+    return Math.min(60_000, Math.max(1_000,
+      Math.round(base * (0.9 + 0.2 * Math.random()))));
+  }
+
   scheduleNext() {
     if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
+    const delay = this.computeNextDelayMs();
+    this.state.nextRetryDelayMs = delay;
     this.timer = setTimeout(() => {
       this.syncOnce()
         .catch((error) => this.noteError(error))
         .finally(() => this.scheduleNext());
-    }, this.pollIntervalMs);
+    }, delay);
     this.timer.unref?.();
   }
 
   noteContact() {
     this.state.lastCloudContactAt = new Date().toISOString();
+    // A partial success is not a recovery: a later endpoint in this sync
+    // can still fail, so leave the incident open until the full cycle succeeds.
+    if (!this.failureWindow) {
+      this.state.lastErrorCode = null;
+      this.state.status = "connected";
+    }
+  }
+
+  noteRecovered() {
+    if (this.failureWindow) {
+      const incident = this.failureWindow;
+      const durationMs = Math.max(0, Date.now() - incident.startedAtMs);
+      const summary = {
+        durationMs,
+        failedSyncs: incident.count,
+        errorCounts: { ...incident.errorCounts },
+        lastDiagnostic: { ...incident.lastDiagnostic },
+      };
+      this.onEvent("info", "Cloud Bridge sync recovered", summary);
+      this.queueTelemetry({
+        eventType: "desktop.cloud.bridge.recovered",
+        severity: "info",
+        operation: "sync",
+        durationMs,
+        retryCount: incident.count,
+        attributes: summary,
+      });
+    }
+    this.failureWindow = null;
+    this.consecutiveFailures = 0;
+    this.state.consecutiveFailures = 0;
+    this.state.outageStartedAt = null;
+    this.state.nextRetryDelayMs = this.pollIntervalMs;
     this.state.lastErrorCode = null;
+    this.state.lastErrorDiagnostic = null;
     this.state.status = "connected";
   }
 
   noteError(error) {
+    const code = errorCode(error);
+    const first = !this.failureWindow;
+    const diagnostic = safeBridgeDiagnostic(error);
+    if (first) {
+      this.failureWindow = {
+        startedAtMs: Date.now(),
+        count: 0,
+        errorCounts: {},
+        lastDiagnostic: diagnostic,
+      };
+    }
+    const window = this.failureWindow;
+    window.count += 1;
+    window.errorCounts[code] = (window.errorCounts[code] ?? 0) + 1;
+    window.lastDiagnostic = diagnostic;
+    this.consecutiveFailures = Math.min(window.count, 10_000);
+    this.state.consecutiveFailures = this.consecutiveFailures;
+    this.state.outageStartedAt = new Date(window.startedAtMs).toISOString();
     this.state.status = "degraded";
-    this.state.lastErrorCode = errorCode(error);
-    if (
-      error?.status === 401 ||
-      ["UNAUTHORIZED", "DEVICE_REVOKED", "INVALID_DEVICE_CREDENTIAL"].includes(
-        this.state.lastErrorCode,
-      )
-    ) {
+    this.state.lastErrorCode = code;
+    this.state.lastErrorDiagnostic = diagnostic;
+    this.state.lastErrorAt = new Date().toISOString();
+    if (first) {
+      this.onEvent("warn", "Cloud Bridge sync failed", { code, ...diagnostic });
+      this.queueTelemetry({
+        eventType: "desktop.cloud.bridge.error",
+        severity: "warn",
+        operation: "sync",
+        errorCode: code,
+        errorFingerprint: errorFingerprint(error),
+        recoverable: true,
+        attributes: diagnostic,
+      });
+    }
+    if (first && (error?.status === 401 ||
+      ["UNAUTHORIZED", "DEVICE_REVOKED", "INVALID_DEVICE_CREDENTIAL"].includes(code))) {
       Promise.resolve(this.onAuthRejected(error)).catch(() => undefined);
     }
-    this.state.lastErrorAt = new Date().toISOString();
-    this.onEvent("warn", "Cloud Bridge sync failed", {
-      code: this.state.lastErrorCode,
-    });
-    this.queueTelemetry({
-      eventType: "desktop.cloud.bridge.error",
-      severity: "warn",
-      operation: "sync",
-      errorCode: this.state.lastErrorCode,
-      errorFingerprint: errorFingerprint(error),
-      recoverable: true,
-    });
   }
 
   async syncOnce({ forceHeartbeat = false } = {}) {
@@ -518,6 +612,7 @@ export class CloudBridgeService {
 
       await this.projectRuntimeTerminalStates();
       await this.flushOutbox();
+      this.noteRecovered();
       return this.snapshot();
     } finally {
       this.syncing = false;

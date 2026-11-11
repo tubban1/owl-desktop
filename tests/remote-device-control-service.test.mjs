@@ -125,6 +125,23 @@ afterEach(() => {
 });
 
 describe("RemoteDeviceControlService", () => {
+  it("rejects known unsupported actions before creating a Cloud command or submission record", async () => {
+    const f = fixture();
+    for (const action of ["fs.read.one", "fs.stat", "primitive.call", "file.read", "sys.exec", "runtime.task.create-and-start@1"]) {
+      const payload = {
+        ...request,
+        submissionId: "bad-" + action,
+        steps: [{ id: "private-step-id", action, args: { path: "/secret/private-file" } }],
+      };
+      await expect(f.service.submitTask(payload)).rejects.toMatchObject({
+        code: "REMOTE_UNSUPPORTED_ROUTED_ACTION",
+      });
+    }
+    expect(f.controlPlane.createCommand).not.toHaveBeenCalled();
+    expect(f.commands).toHaveLength(0);
+    expect(Object.keys(f.store.read().submissions)).toHaveLength(0);
+  });
+
   it("persists one remote submission and replays the same command identity", async () => {
     const f = fixture();
 
