@@ -8,6 +8,13 @@ export type RuntimePermissionProjection = {
     pendingApply:boolean;reviewConfigured:boolean;supportsReview:boolean;requiresExactRuntimeApproval:boolean;liveEffective:"unverified"|"verified"}>;
 };
 
+export type WindowsGuiMode = "off"|"inspect"|"semantic"|"foreground";
+export type WindowsGuiStatus = {
+  platform:string;requestedMode:WindowsGuiMode;effectiveMode:WindowsGuiMode|"unverified";
+  available:boolean;reason:string|null;applied:boolean;
+  foregroundMayTakeFocus:boolean;changed?:boolean;
+};
+
 export type Settings = {
   youtubeOauthClientId?:string;
   instagramAppId?:string;
@@ -17,6 +24,7 @@ export type Settings = {
   allowedDirectories: string[];
   runtimeBaseUrl: string;
   autoConnectRuntime: boolean;
+  windowsGuiMode?: WindowsGuiMode;
   mcpEnabled: boolean;
   mcpPort: number;
   tunnelEnabled: boolean;

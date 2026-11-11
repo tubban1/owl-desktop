@@ -143,6 +143,8 @@ contextBridge.exposeInMainWorld("owlDesktop", {
     ipcRenderer.invoke("accounts:status", id, status, options),
   accountCapabilities: (id) =>
     ipcRenderer.invoke("accounts:capabilities", id),
+  getWindowsGuiMode: () => ipcRenderer.invoke("windows-gui:get"),
+  setWindowsGuiMode: (mode) => ipcRenderer.invoke("windows-gui:set",mode),
   getRuntimePermissions: () => ipcRenderer.invoke("runtime-permissions:get"),
   setRuntimePermission: (key,mode) => ipcRenderer.invoke("runtime-permissions:set",key,mode),
   applyRuntimePermissions: () => ipcRenderer.invoke("runtime-permissions:apply"),

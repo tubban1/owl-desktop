@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import {projectWindowsDevDocumentRoots} from "./windows-dev-file-permissions.mjs";
 import {applyRuntimePermissionModes} from "./runtime-permissions.mjs";
+import {inspectWindowsGuiHelper,windowsGuiRuntimeFlags} from "./windows-gui-consent.mjs";
 
 // Per-device, explicit local opt-in. Source code alone must never grant remote
 // developers shell or filesystem access. The launcher inherits this setting
@@ -65,18 +66,11 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
   }catch(error) {
     if(error?.message==="WINDOWS_DEV_RUNTIME_PORT_IN_USE")throw error;
   }
-  // DEV-only UI Automation read access. Existing Windows provider deliberately
-  // refuses ALL native click/key/clipboard/screenshot actions until a reviewed
-  // Windows Helper is installed. Never turn on shell/delete as a side effect.
-  const readOnlyUi = process.env.OWL_WIN_DEV_UIA_READ_ONLY === "true";
-  const uiHelper = path.join(canonicalRoot, "scripts", "windows", "desktop-readonly.ps1");
-  if (readOnlyUi) {
-    if (!fs.existsSync(uiHelper) ||
-        !fs.readFileSync(uiHelper, "utf8").includes("UIAutomationClient") ||
-        !fs.readFileSync(path.join(canonicalRoot,"dist","providers","desktopProvider.js"),"utf8").includes("WindowsDesktopProvider")) {
-      throw Error("WINDOWS_UIA_READONLY_ADAPTER_MISSING");
-    }
-  }
+  // Per-device local consent. Missing or modified Helper fails closed; other
+  // Runtime capabilities remain available to the user.
+  const helperFile=path.join(canonicalRoot,"windows-helper","bin","OWLHelper.exe");
+  const helperProof=inspectWindowsGuiHelper(helperFile);
+  const gui=windowsGuiRuntimeFlags(store.getSettings().windowsGuiMode,helperProof);
   const desktopSettings=store.getSettings();
   const documentAccess=projectWindowsDevDocumentRoots({
     settings:desktopSettings,workspaceRoot:path.dirname(canonicalRoot),
@@ -99,7 +93,10 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
     PORT:"8788",
     OWL_STATE_ROOT:path.join(path.dirname(canonicalRoot),"owl-runtime-win-state"),
     ALLOWED_DIRECTORIES:documentAccess.allowedDirectories.join(","),
-    ALLOW_GUI:readOnlyUi ? "true" : "false",
+    ALLOW_GUI:gui.ALLOW_GUI,
+    OWL_WIN_GUI_INPUT:gui.OWL_WIN_GUI_INPUT,
+    OWL_WIN_GUI_FOREGROUND_INPUT:gui.OWL_WIN_GUI_FOREGROUND_INPUT,
+    OWL_WIN_GUI_HELPER_PATH:helperFile,
     ALLOW_BROWSER:"false",
     // Runtime shellOps uses SHELL with the portable -c argument; PowerShell supports -c on Windows.
     SHELL: "powershell.exe"
@@ -121,10 +118,11 @@ export async function startWindowsDevRuntime({store,baseUrl}={}){
         const disclosedFlags=new Set(["ALLOW_WRITE","ALLOW_DELETE","ALLOW_SHELL",
           "ALLOW_GIT_PUSH","ALLOW_ROLLBACK","OWL_APPROVAL_MODE","OWL_APPROVAL_ACTIONS",
           "OWL_SCOPED_CAPABILITIES","OWL_SCOPED_ACTION_ALLOWLIST",
-          "OWL_HUMAN_APPROVAL_ENFORCE","OWL_HUMAN_APPROVAL_PUBLIC_KEY_B64"]);
+          "OWL_HUMAN_APPROVAL_ENFORCE","OWL_HUMAN_APPROVAL_PUBLIC_KEY_B64",
+          "ALLOW_GUI","OWL_WIN_GUI_INPUT","OWL_WIN_GUI_FOREGROUND_INPUT"]);
         appliedPermissionFlags=new Map(Object.entries(env).filter(([key])=>disclosedFlags.has(key)));
         console.log("OWL_WIN_MANAGED_DEV_RUNTIME_READY",{pid:child.pid,leaseVerification:true});
-        return {managed:true,pid:child.pid,
+        return {managed:true,pid:child.pid,guiMode:gui.effective,guiReason:gui.reason,
           effectiveDirectoryCount:documentAccess.allowedDirectories.length,
           blockedDirectoryReasons:documentAccess.blockedDirectories.map(x=>x.reason)};
       }

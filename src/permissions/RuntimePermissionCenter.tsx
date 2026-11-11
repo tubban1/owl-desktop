@@ -1,6 +1,6 @@
 import {useEffect,useState} from "react";
 import {RefreshCw} from "lucide-react";
-import type {RuntimeAccessState,RuntimePermissionKey,RuntimePermissionProjection} from "../types";
+import type {RuntimeAccessState,RuntimePermissionKey,RuntimePermissionProjection,WindowsGuiMode,WindowsGuiStatus} from "../types";
 import {ApprovalAttention} from "../approvals/ApprovalAttention";
 export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onDeny}:{
  approvals:unknown;access:RuntimeAccessState|null;endpoint?:string;
@@ -10,9 +10,11 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
  const [busy,setBusy]=useState(false),[message,setMessage]=useState("");
  const [helper,setHelper]=useState<{platform:string;helperMode:string;helperInstalled:boolean;nativeInput:boolean;clipboard:boolean}|null>(null);
  const [helperStatus,setHelperStatus]=useState("Not checked");
+ const [windowsGui,setWindowsGui]=useState<WindowsGuiStatus|null>(null);
  const [pendingMode,setPendingMode]=useState<{key:RuntimePermissionKey;mode:"blocked"|"review"|"enabled"}|null>(null);
  const refresh=async()=>{
    const permission=await window.owlDesktop.getRuntimePermissions();setData(permission);
+   try{setWindowsGui(await window.owlDesktop.getWindowsGuiMode());}catch{setWindowsGui(null);}
    try{
      const inventory=await window.owlDesktop.skillSnapshot();
      const provider=inventory.providers.find(item=>item.id==="desktop");
@@ -38,6 +40,17 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
     "Saved. Connected Runtime policy still needs verification; no action has been approved.");
   }
   catch(e){setMessage(String(e));}finally{setPendingMode(null);setBusy(false);}
+ };
+ const changeWindowsGui=async(mode:WindowsGuiMode)=>{
+  setBusy(true);setMessage("");
+  try{
+   const result=await window.owlDesktop.setWindowsGuiMode(mode);
+   setWindowsGui(result);
+   setMessage(result.changed===false?"Cancelled; Windows GUI consent was unchanged.":
+    result.applied?"Native GUI consent applied to the managed Windows Runtime.":
+    "Consent saved, but NOT active in this Runtime. Verify the Windows Helper and managed Runtime restart before use.");
+   await refresh();
+  }catch(e){setMessage(String(e));}finally{setBusy(false);}
  };
  const apply=async()=>{
   setBusy(true);setMessage("");
@@ -97,6 +110,23 @@ export function RuntimePermissionCenter({approvals,access,endpoint,onApprove,onD
    <span>Native keyboard input</span><strong>{!helper?"Unverified":helper.nativeInput?"Available":"Unavailable · no approved native input"}</strong>
    <span>OS clipboard</span><strong>{!helper?"Unverified":helper.clipboard?"Available":"Unavailable"}</strong>
   </div>
+  {windowsGui?.platform==="win32"&&<div>
+   <div className="setting-group-label"><span>Windows native GUI — local consent</span></div>
+   <p className="panel-help">This is separate from browser automation and file permissions. The default is Off. Semantic UI Automation does not send mouse events but some apps may change focus. Foreground takeover can move your real pointer and type into the active app. UAC/secure desktop is never automated.</p>
+   <div className="setting-row">
+    <div><strong>Windows GUI access</strong>
+     <span>Helper: {windowsGui.available?"Installed and SHA-256 verified":windowsGui.reason??"Not installed"}</span>
+     <span>Saved: {windowsGui.requestedMode} · Running: {windowsGui.effectiveMode} · {windowsGui.applied?"Applied":"Not yet verified/applied"}</span>
+    </div>
+    <select className="setting-input compact-input" value={windowsGui.requestedMode} disabled={busy||(!windowsGui.available&&windowsGui.requestedMode==="off")}
+     onChange={e=>void changeWindowsGui(e.target.value as WindowsGuiMode)}>
+     <option value="off">Off · No native GUI</option>
+     <option value="inspect">Inspect · Read-only</option>
+     <option value="semantic">Semantic · Background UI Automation</option>
+     <option value="foreground">Foreground · Physical mouse / keyboard takeover</option>
+    </select>
+   </div>
+  </div>}
   {pendingMode&&<p role="status" className="panel-help">Pending confirmation: {pendingMode.key} → {pendingMode.mode==="enabled"?"打开":pendingMode.mode==="blocked"?"关闭":"询问"}. This does not change the running Runtime.</p>}
   {message&&<p role="status" className="panel-help">{message}</p>}
   <div className="runtime-version">

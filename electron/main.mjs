@@ -22,6 +22,7 @@ import { startWindowsDevNativeBrowser } from "./services/windows-dev-native-brow
 import { RuntimeHostSupervisor } from "./services/runtime-host-supervisor.mjs";
 import { LocalRuntimeBootstrap } from "./services/local-runtime-bootstrap.mjs";
 import { runtimePermissionProjection, validateRuntimePermissionChange, installedRuntimeSupportsSignedReview, runtimePermissionChangeCopy, assertSafePermissionCombination } from "./services/runtime-permissions.mjs";
+import {assertWindowsGuiMode,inspectWindowsGuiHelper,windowsGuiRuntimeFlags,windowsGuiConsentCopy} from "./services/windows-gui-consent.mjs";
 import { readDevOwner, ownerMatches } from "../scripts/lib/dev-full-owner.mjs";
 import { readDevRuntimePermissionStatus, devPermissionStatusFile } from "../scripts/lib/dev-runtime-permissions.mjs";
 import { TunnelSupervisor } from "./services/tunnel-supervisor.mjs";
@@ -2462,6 +2463,46 @@ Only this single action will be approved.`,
     return runtimePermissionProjection(settings,path.join(os.homedir(),".owl","runtime.env"),{
       packaged:app.isPackaged,componentFile:path.join(os.homedir(),".owl","current","component.json")});
   }
+  const windowsGuiStatus=()=>{
+    const requested=store.getSettings().windowsGuiMode??"off";
+    const runtimeRoot=app.isPackaged ? null : process.env.OWL_WIN_DEV_RUNTIME_ROOT;
+    const helperFile=app.isPackaged
+      ? path.join(process.resourcesPath,"helper","win32-x64","OWLHelper.exe")
+      : runtimeRoot?path.join(runtimeRoot,"windows-helper","bin","OWLHelper.exe"):null;
+    const proof=helperFile?inspectWindowsGuiHelper(helperFile):
+      {verified:false,reason:"WINDOWS_GUI_HELPER_NOT_INSTALLED"};
+    const desired=windowsGuiRuntimeFlags(requested,proof);
+    const live=!app.isPackaged?getWindowsDevAppliedPermissionFlags():null;
+    const liveMode=live?.get("ALLOW_GUI")==="true"?
+      live?.get("OWL_WIN_GUI_FOREGROUND_INPUT")==="true"?"foreground":
+      live?.get("OWL_WIN_GUI_INPUT")==="true"?"semantic":"inspect":"off";
+    return {platform:process.platform,requestedMode:desired.requested,
+      available:proof.verified,reason:proof.reason,
+      effectiveMode:live?liveMode:"unverified",
+      applied:!!live&&desired.effective===liveMode,
+      foregroundMayTakeFocus:desired.requested==="foreground"};
+  };
+  ipcMain.handle("windows-gui:get",()=>windowsGuiStatus());
+  ipcMain.handle("windows-gui:set",async(_event,mode)=>{
+    if(process.platform!=="win32")throw Error("WINDOWS_GUI_ONLY");
+    assertWindowsGuiMode(mode);
+    const before=windowsGuiStatus();
+    if(mode!=="off"&&!before.available)
+      throw Error("WINDOWS_GUI_HELPER_NOT_VERIFIED: Install reviewed OWL Windows Helper before enabling native GUI.");
+    const copy=windowsGuiConsentCopy(mode);
+    const {response}=await dialog.showMessageBox(mainWindow??undefined,{
+      type:"warning",buttons:["Cancel","Confirm Windows GUI mode"],
+      defaultId:0,cancelId:0,noLink:true,
+      title:copy.title,message:copy.message,detail:copy.detail,
+    });
+    if(response!==1)return {...before,changed:false};
+    store.setWindowsGuiMode(mode);
+    const apply=await applyRuntimeUserPreferences(store.getSettings());
+    record(apply.applied?"info":"warn","runtime","Windows GUI consent changed",{
+      requestedMode:mode,applied:apply.applied,reason:apply.reason??null,
+    });
+    return {...windowsGuiStatus(),changed:true,applied:apply.applied===true};
+  });
   ipcMain.handle("runtime-permissions:get",()=>currentRuntimePermissionProjection());
   ipcMain.handle("runtime-permissions:set", async (_event,key,mode) => {
     validateRuntimePermissionChange(key,mode);

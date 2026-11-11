@@ -16,16 +16,20 @@ describe("Windows developer Runtime bootstrap safety",()=>{
  });
 });
 
-it("Windows DEV UIA opt-in never enables shell, delete or input actions", async () => {
+it("Windows GUI consent, not a launcher env flag, controls native input", async () => {
   const fs = await import("node:fs/promises");
   const source = await fs.readFile(new URL("../electron/services/windows-dev-runtime.mjs", import.meta.url), "utf8");
-  expect(source).toContain('OWL_WIN_DEV_UIA_READ_ONLY');
-  expect(source).toContain('ALLOW_GUI:readOnlyUi ? "true" : "false"');
+  expect(source).toContain("windowsGuiRuntimeFlags(");
+  expect(source).toContain("inspectWindowsGuiHelper(");
+  expect(source).toContain("OWL_WIN_GUI_HELPER_PATH:helperFile");
+  expect(source).toContain("ALLOW_GUI:gui.ALLOW_GUI");
+  expect(source).toContain("OWL_WIN_GUI_INPUT:gui.OWL_WIN_GUI_INPUT");
+  expect(source).toContain("OWL_WIN_GUI_FOREGROUND_INPUT:gui.OWL_WIN_GUI_FOREGROUND_INPUT");
   expect(source).toContain('ALLOW_SHELL:"false"');
   expect(source).toContain('ALLOW_DELETE:"false"');
   const launcher = await fs.readFile(new URL("../scripts/windows/dev-desktop.ps1", import.meta.url), "utf8");
-  expect(launcher).toContain('OWL_WIN_DEV_UIA_READ_ONLY="true"');
-  expect(launcher).toContain('WINDOWS_DEV_PINNED_RUNTIME_SHA_MISMATCH');
-  expect(launcher).toContain('OWL_RUNTIME_SOURCE_ROOT=$runtime');
+  expect(launcher).not.toContain("OWL_WIN_DEV_UIA_READ_ONLY=");
+  expect(launcher).toContain("WINDOWS_DEV_PINNED_RUNTIME_SHA_MISMATCH");
+  expect(launcher).toContain("OWL_RUNTIME_SOURCE_ROOT=$runtime");
   expect(launcher).not.toContain('$runtime=(Join-Path $workspace "owl-runtime-pin")');
 });

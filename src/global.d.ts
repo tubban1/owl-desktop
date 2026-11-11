@@ -270,6 +270,8 @@ declare global {
         browserSessionPreferred: boolean;
         nativeSessionPreferred: boolean;
       } | null>;
+      getWindowsGuiMode(): Promise<import("./types").WindowsGuiStatus>;
+      setWindowsGuiMode(mode:import("./types").WindowsGuiMode): Promise<import("./types").WindowsGuiStatus>;
       getRuntimePermissions(): Promise<import("./types").RuntimePermissionProjection>;
       setRuntimePermission(key:import("./types").RuntimePermissionKey,mode:"blocked"|"review"|"enabled"): Promise<import("./types").RuntimePermissionProjection>;
       applyRuntimePermissions(): Promise<{applied:boolean;reason?:string}>;

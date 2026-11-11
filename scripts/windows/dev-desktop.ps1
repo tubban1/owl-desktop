@@ -63,9 +63,8 @@ if ($env:OWL_WIN_DEV_WORKSPACE_ACCESS -eq "true") {
 # Reuse the Mac native browser bridge on Windows DEV; the actual extension
 # must connect via the registered host before it can control a Chrome tab.
 $env:OWL_WIN_DEV_NATIVE_BROWSER="true"
-# Native Windows UI Automation is a separate read-only adapter. This does NOT
-# authorize pointer, keyboard, shell or clipboard mutation.
-$env:OWL_WIN_DEV_UIA_READ_ONLY="true"
+# Windows native GUI mode is managed by Desktop local consent, not an
+# inherited startup environment variable or a remote Agent tool.
 $env:OWL_WIN_DEV_RUNTIME_ROOT=$runtime
 $env:OWL_RUNTIME_SOURCE_ROOT=$runtime
 $env:OWL_WIN_DEV_RUNTIME_PUBLIC_KEY=$key

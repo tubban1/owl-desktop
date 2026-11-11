@@ -6,6 +6,7 @@ import { app, safeStorage } from "electron";
 import { normalizeOnboardingState } from "./services/onboarding-state.mjs";
 import { normalizeRuntimePermissionModes, validateRuntimePermissionChange, readRuntimeEnvFlags } from "./services/runtime-permissions.mjs";
 import {createHumanApprovalSigner} from "./services/human-approval-signer.mjs";
+import {normalizeWindowsGuiMode,assertWindowsGuiMode} from "./services/windows-gui-consent.mjs";
 
 const readJson = (file, fallback) => {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return fallback; }
@@ -43,6 +44,7 @@ export class DesktopStore {
       allowedDirectories: standardFolders,
       runtimeBaseUrl: "http://127.0.0.1:8788",
       autoConnectRuntime: true,
+      windowsGuiMode: "off",
       mcpEnabled: true,
       mcpPort: 8790,
       tunnelEnabled: false,
@@ -95,6 +97,7 @@ export class DesktopStore {
             .filter((value) => fs.existsSync(value)),
         )]
       : standardFolders;
+    settings.windowsGuiMode=normalizeWindowsGuiMode(settings.windowsGuiMode);
     // One-time migration of inherit/missing modes to real explicit states.
     settings.runtimePermissionModes=normalizeRuntimePermissionModes(
       settings.runtimePermissionModes,
@@ -105,6 +108,13 @@ export class DesktopStore {
     return settings;
   }
 
+  setWindowsGuiMode(mode) {
+    assertWindowsGuiMode(mode);
+    const next={...this.getSettings(),windowsGuiMode:mode};
+    writeJson(this.settingsFile,next);
+    return next;
+  }
+
   setRuntimePermission(key, mode) {
     validateRuntimePermissionChange(key,mode);
     const before=this.getSettings();
@@ -113,6 +123,8 @@ export class DesktopStore {
     return next;
   }
   updateSettings(patch) {
+    if(patch && Object.prototype.hasOwnProperty.call(patch,"windowsGuiMode"))
+      throw new Error("WINDOWS_GUI_REQUIRES_LOCAL_USER_CONSENT");
     if(patch && Object.prototype.hasOwnProperty.call(patch,"runtimePermissionModes"))
       throw new Error("RUNTIME_PERMISSION_REQUIRES_DEDICATED_APPROVAL");
 
