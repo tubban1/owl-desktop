@@ -17,6 +17,7 @@ import {tryAcquireLocalRolloutLock} from "./lib/ota-local-rollout-lock.mjs";
 import {syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
 import {activationPermit,localUserIdleSeconds} from "./lib/ota-activation-policy.mjs";
 import {syncMacGuardFromVerifiedRelease} from "./lib/ota-mac-guard-sync.mjs";
+import {macOwnedTunnelHealthUrl} from "./lib/ota-mac-tunnel-health.mjs";
 
 const device=platform,peer=device==="mac"?"windows":"mac";
 if(!device)throw Error("ROLL_UNSUPPORTED_OS");
@@ -123,17 +124,14 @@ async function tunnelReady(root){
   const h=await http("http://127.0.0.1:18081/health?details=true");
   return h?.ready===true&&h?.live===true;
  }
- const lines=run("/usr/bin/pgrep",["-fl","tunnel-client-runtime"],{allowError:true}).split("\n");
- for(const line of lines){
-  if(!line.includes(path.join(root,"vendor","owl-tunnel")))continue;
-  const m=line.match(/--health\.url-file\s+(\S+)/);if(!m)continue;
-  try{
-   const url=fs.readFileSync(m[1],"utf8").trim();if(!url.startsWith("http://127.0.0.1:"))continue;
-   const data=await http(url.replace(/\/$/,"")+"/health?details=true");
-   if(data?.ready===true&&data?.live===true)return true;
-  }catch{}
- }
- return false;
+ // Process ownership is proved by the exact release's Connection Host
+ // being the tunnel's parent. Tunnel binaries may intentionally be shared
+ // with the OWL source checkout and do not have to reside under _releases.
+ const processTable=run("/bin/ps",["-axo","pid=,ppid=,command="],{allowError:true});
+ const url=macOwnedTunnelHealthUrl({releaseRoot:root,processTable});
+ if(!url)return false; // unknown owner or unavailable health => fail closed
+ const health=await http(url);
+ return health?.ready===true && health?.live===true;
 }
 async function liveStatus(){
  const root=actualRoot();if(!root)return {healthy:false,root:null,sha:null};
