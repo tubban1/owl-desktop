@@ -16,6 +16,7 @@ import {parseOtaReceipt} from "./lib/ota-receipt.mjs";
 import {tryAcquireLocalRolloutLock} from "./lib/ota-local-rollout-lock.mjs";
 import {syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
 import {activationPermit,localUserIdleSeconds} from "./lib/ota-activation-policy.mjs";
+import {syncMacGuardFromVerifiedRelease} from "./lib/ota-mac-guard-sync.mjs";
 
 const device=platform,peer=device==="mac"?"windows":"mac";
 if(!device)throw Error("ROLL_UNSUPPORTED_OS");
@@ -216,6 +217,13 @@ function candidate(sha){
  return dest;
 }
 function applyMac(oldRoot,newRoot,oldSha,newSha){
+ // The independently installed OTA agent may predate the candidate release.
+ // Sync the exact verified release's watchdog BEFORE scheduling activation.
+ // Otherwise an old watchdog can undo the new recovery policy (2026-11-12).
+ if(!cleanRoot(newRoot,newSha,{built:true}))
+  throw Error("ROLL_MAC_GUARD_RELEASE_NOT_VERIFIED");
+ const guard=syncMacGuardFromVerifiedRelease({releaseRoot:newRoot,agentRoot:agent});
+ console.log("ROLL_MAC_GUARD_SYNC="+JSON.stringify(guard));
  const script=path.join(agent,"mac-safe-cutover.mjs");if(!fs.existsSync(script))throw Error("ROLL_MAC_GUARD_NOT_INSTALLED");
  const name="fan.fde.owl.rollout."+newSha.slice(0,12);
  const file=path.join(home,"Library","LaunchAgents",name+".plist");
