@@ -82,5 +82,12 @@ describe("Mac OTA Tunnel identity vs source path",()=>{
     expect(code).toContain("macOwnedTunnelHealthUrl({releaseRoot:root,processTable})");
     expect(code).not.toContain("line.includes(path.join(root,\"vendor\",\"owl-tunnel\"))");
     expect(installer).toContain('["scripts/lib/ota-mac-tunnel-health.mjs","lib/ota-mac-tunnel-health.mjs"]');
+    // Cutover guard must use the SAME release-owned tunnel proof as the OTA
+    // update checker, else it will reject a known healthy source-based tunnel.
+    const cutover=fs.readFileSync(new URL("../scripts/mac-safe-cutover.mjs",import.meta.url),"utf8");
+    expect(cutover).toContain("macOwnedTunnelHealthUrl({releaseRoot:root,processTable:table})");
+    expect(cutover).not.toContain("line.includes(prefix)");
+    const sync=fs.readFileSync(new URL("../scripts/lib/ota-mac-guard-sync.mjs",import.meta.url),"utf8");
+    expect(sync).toContain('"lib/ota-mac-tunnel-health.mjs"');
   });
 });

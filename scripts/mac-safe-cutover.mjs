@@ -14,6 +14,7 @@ import {macDesktopMainPresent,macProcessTable,macWatchdogDecision} from "./lib/m
 import {syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
 import {recoverOrphanedMacDevRuntime} from "./lib/mac-orphan-dev-runtime.mjs";
 import {selectMacReleaseOnNextLogin} from "./lib/mac-release-startup-selection.mjs";
+import {macOwnedTunnelHealthUrl} from "./lib/ota-mac-tunnel-health.mjs";
 
 const [mode,oldRoot,newRoot,oldSha,newSha]=process.argv.slice(2);
 const sha=/^[a-f0-9]{40}$/;
@@ -112,22 +113,18 @@ async function localRecovered(dir){
  return localProbeHealthy(await componentProbe(dir));
 }
 async function tunnelReady(root){
- const proc=run("/usr/bin/pgrep",["-fl","tunnel-client-runtime"],{allowError:true});
- if(proc.status!==0)return false;
- const prefix=path.join(root,"vendor","owl-tunnel");
- for(const line of proc.stdout.split("\n")){
-  if(!line.includes(prefix)||!line.includes("tunnel-client-runtime run"))continue;
-  const match=line.match(/--health\.url-file\s+(\S+)/);
-  if(!match)continue;
-  try{
-   const url=fs.readFileSync(match[1],"utf8").trim();
-   if(!url.startsWith("http://127.0.0.1:"))continue;
-   const res=await fetch(url.replace(/\/$/,"")+"/health?details=true",{signal:AbortSignal.timeout(2600)});
-   const data=await res.json();
-   if(res.ok&&data.ready===true&&data.live===true)return true;
-  }catch{}
- }
- return false;
+ // Only a tunnel owned by this release's exact Connection Host may count
+ // as healthy. Its signed binary can be stored in a shared source checkout,
+ // not necessarily under this release's vendor/ directory.
+ const table=run("/bin/ps",["-axo","pid=,ppid=,command="],{allowError:true}).stdout;
+ const healthUrl=macOwnedTunnelHealthUrl({releaseRoot:root,processTable:table});
+ if(!healthUrl)return false;
+ try{
+  const res=await fetch(healthUrl,{signal:AbortSignal.timeout(3500)});
+  if(!res.ok)return false;
+  const data=await res.json();
+  return data.ready===true&&data.live===true;
+ }catch{return false;}
 }
 
 function exactSupervisor(dir){

@@ -8,6 +8,7 @@ import {createHash, randomUUID} from "node:crypto";
 export const MAC_GUARD_FILES=Object.freeze([
   "mac-safe-cutover.mjs",
   "lib/mac-postactivation-health.mjs",
+  "lib/ota-mac-tunnel-health.mjs",
 ]);
 
 const hash=(bytes)=>createHash("sha256").update(bytes).digest("hex");
