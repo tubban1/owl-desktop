@@ -1,4 +1,5 @@
 import express from "express";
+import {Readable} from "node:stream";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -12,6 +13,7 @@ import { summarizeMcpCallMetrics } from "./call-metrics.mjs";
 import { evaluateOtaActivity } from "./ota-activity.mjs";
 import { createOtaAdmissionFence } from "./ota-admission-fence.mjs";
 import { readOtaActivityToken, validLocalOtaRequest } from "./ota-activity-auth.mjs";
+import {createModernMcpAdapter,isModernMcpRequest} from "./modern-protocol-adapter.mjs";
 
 export async function startOwlMcpHttpServer({
   port = 8790,
@@ -42,6 +44,8 @@ export async function startOwlMcpHttpServer({
   const app = express();
   const sessions = new Map();
   const otaAdmission = createOtaAdmissionFence();
+  let modernActiveToolRequests=0;
+  const modernAdapter=createModernMcpAdapter({fileDelivery,userChromeBridge,mailService,providerOperations,peerRecovery});
   // Bounded, payload-free local telemetry. Upstream ChatGPT/Tunnel timing is
   // intentionally NOT inferred from this server-side measurement.
   const recentMcpCalls = [];
@@ -318,6 +322,70 @@ export async function startOwlMcpHttpServer({
     }
     res.once("finish", recordLatency);
     res.once("close", recordLatency);
+    // 2026 requests are self-describing and MUST NOT enter the v1 session map.
+    // The v2 SDK validates version/header/origin and owns all modern codecs.
+    if(isModernMcpRequest(req)){
+      const transportSessionId=`modern:${randomUUID()}`;
+      const identity=resolveOwnerIdentity(req.headers,transportSessionId,fallbackOwnerId);
+      const key=typeof req.headers['x-owl-idempotency-key']==='string'
+        ?req.headers['x-owl-idempotency-key'].trim().slice(0,256):'';
+      const runtimeRequestId=key
+        ?`owl-modern:${identity.runtimeSessionId}:${key}`
+        :`owl-modern:${randomUUID()}`;
+      const signal=new AbortController(); // Not tied to the upstream connection.
+      const context={runtimeBaseUrl,runtimeToken,runtimeSessionId:identity.runtimeSessionId,
+        ownerStable:identity.stable,ownerSource:identity.source,
+        clientKind:identity.clientKind??null,clientLabel:identity.clientLabel??null,
+        transportSessionId,runtimeRequestId,traceId,
+        logicalRequestId:req.body?.id!==undefined?String(req.body.id):runtimeRequestId,
+        clientIdempotencyKey:key||undefined,signal:signal.signal,
+        agentInbox,remoteDeviceControl,mailService,plannerContinuation,
+        bindWorkstream:(workstreamId)=>{
+          const record=plannerContinuation?.get?.(workstreamId);
+          if(!record?.workstream){const e=new Error('Unknown OWL workstream.');e.code='WORKSTREAM_NOT_FOUND';throw e;}
+          context.runtimeSessionId=workstreamId;context.ownerStable=true;
+          context.ownerSource='workstream-binding';
+        },
+        unbindWorkstream:(workstreamId)=>!workstreamId||context.runtimeSessionId===workstreamId,
+        onEvent,
+        recordToolOutcome:(outcome,code)=>{
+          toolOutcome=outcome==='error'?'error':'success';
+          toolErrorCode=typeof code==='string'?code.slice(0,80):null;
+        },
+        recordToolWait:(ms)=>{intentionalWaitingMs=Number.isFinite(ms)
+          ?Math.max(0,Math.min(ms,120_000)):0;},
+      };
+      const headers=new Headers();
+      for(const [name,value] of Object.entries(req.headers)){
+        if(typeof value==='string' && !['connection','transfer-encoding','content-length','host'].includes(name))
+          headers.set(name,value);
+      }
+      const body=req.method==='POST'?JSON.stringify(req.body??{}):undefined;
+      preflightCompleted=performance.now();
+      if(toolName)modernActiveToolRequests++;
+      try{
+        const request=new Request('http://127.0.0.1/mcp',{method:req.method,headers,body});
+        const response=await withMcpRequestContext(context,()=>modernAdapter.handle(request));
+        res.status(response.status);
+        for(const name of ['content-type','cache-control','www-authenticate','retry-after']){
+          const value=response.headers.get(name);if(value)res.setHeader(name,value);
+        }
+        if(response.headers.get('content-type')?.includes('text/event-stream') && response.body){
+          // MCP subscriptions/listen returns an open SSE stream. Buffering it
+          // until EOF would hang indefinitely and hide all notifications.
+          const readable=Readable.fromWeb(response.body);
+          res.once('close',()=>readable.destroy());
+          readable.once('error',()=>{if(!res.destroyed)res.destroy();});
+          readable.pipe(res);
+        }else{
+          res.end(Buffer.from(await response.arrayBuffer()));
+        }
+      }catch(error){
+        onEvent('error','Modern MCP request failed',{code:'MCP_MODERN_REQUEST_FAILED'});
+        if(!res.headersSent)res.status(500).json({error:'MCP_MODERN_REQUEST_FAILED'});
+      }finally{if(toolName)modernActiveToolRequests=Math.max(0,modernActiveToolRequests-1);}
+      return;
+    }
     const suppliedSessionId =
       typeof req.headers["mcp-session-id"] === "string"
         ? req.headers["mcp-session-id"]
@@ -670,7 +738,7 @@ export async function startOwlMcpHttpServer({
     let armed;
     try{armed=otaAdmission.arm({ttlMs:req.body?.ttlMs??30_000})}
     catch{return res.status(409).json({ready:false,reason:"ota-drain-lease-unavailable"});}
-    const inFlightTools=[...sessions.values()].reduce((sum,session)=>
+    const inFlightTools=modernActiveToolRequests+[...sessions.values()].reduce((sum,session)=>
       sum+Number(session.activeToolRequestCount??0),0);
     const client=new RuntimeHttpClient({
       baseUrl:runtimeBaseUrl,sessionId:"owl-mcp:ota-drain",
@@ -687,7 +755,7 @@ export async function startOwlMcpHttpServer({
       }
       // The Runtime queries might overlap with a request accepted before
       // the fence was armed. Recheck the in-flight count before approval.
-      const pending=[...sessions.values()].reduce((sum,session)=>
+      const pending=modernActiveToolRequests+[...sessions.values()].reduce((sum,session)=>
         sum+Number(session.activeToolRequestCount??0),0);
       if(pending!==0) {
         otaAdmission.release(armed.nonce);
@@ -708,7 +776,7 @@ export async function startOwlMcpHttpServer({
     if (validLocalOtaRequest(req,otaActivityToken)) return next();
     return res.status(401).json({error:"Unauthorized"});
   }, async (_req,res) => {
-    const inFlightTools=[...sessions.values()].reduce((sum,session)=>
+    const inFlightTools=modernActiveToolRequests+[...sessions.values()].reduce((sum,session)=>
       sum+Number(session.activeToolRequestCount??0),0);
     const client=new RuntimeHttpClient({
       baseUrl:runtimeBaseUrl,sessionId:"owl-mcp:ota-observe",
@@ -807,6 +875,7 @@ export async function startOwlMcpHttpServer({
       await session.transport.close().catch(() => undefined);
     }
     sessions.clear();
+    await modernAdapter.close();
     await new Promise((resolve) => listener.close(resolve));
     onEvent("info", "OWL MCP stopped");
   }
