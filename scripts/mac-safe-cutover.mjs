@@ -13,6 +13,7 @@ import {retireSupersededMacCurrentJobs} from "./lib/mac-release-startup.mjs";
 import {macDesktopMainPresent,macProcessTable,macWatchdogDecision} from "./lib/mac-postactivation-health.mjs";
 import {inspectMacNativeHostPin,syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
 import {macReleaseNameMatchesSha} from "./lib/mac-release-name.mjs";
+import {tryAcquireLocalRolloutLock} from "./lib/ota-local-rollout-lock.mjs";
 import {recoverOrphanedMacDevRuntime} from "./lib/mac-orphan-dev-runtime.mjs";
 import {selectMacReleaseOnNextLogin} from "./lib/mac-release-startup-selection.mjs";
 import {macOwnedTunnelHealthUrl,macOwnedTunnelHealthDiagnostics} from "./lib/ota-mac-tunnel-health.mjs";
@@ -319,6 +320,7 @@ async function check(){
  return {oldRoot,newRoot,oldSha,newSha,
   nativeHostConfigured:nativePin.configured,
   nativeHostSafeToRebind:!nativePin.configured||nativePin.trusted,
+  localRolloutLockPresent:fs.existsSync(path.join(state,"ota","rollout.lock")),
   oldRunning:localProbeHealthy(oldComponents)&&oldTunnelReady,
   nextRunning:localProbeHealthy(nextComponents)&&await tunnelReady(newRoot),
   oldComponents,nextComponents,oldTunnelReady,
@@ -425,6 +427,11 @@ if(mode==="watch"){
  process.exit(0);
 }
 if(process.ppid!==1)throw Error("CUTOVER_MUST_RUN_UNDER_INDEPENDENT_LAUNCHD");
+// Share the same single-writer lock as the automatic updater. Manual
+// launchd cutovers and OTA ticks must never own the same live Desktop at once.
+const releaseLock=tryAcquireLocalRolloutLock(path.join(state,"ota"));
+if(!releaseLock)throw Error("CUTOVER_LOCAL_ROLLOUT_ALREADY_ACTIVE");
+try {
 const nativePin=inspectMacNativeHostPin();
 if(nativePin.configured&&!nativePin.trusted)throw Error("CUTOVER_NATIVE_HOST_CURRENT_UNTRUSTED");
 if(!await healthy(oldRoot)||await healthy(newRoot))throw Error("CUTOVER_PREFLIGHT_UNHEALTHY");
@@ -470,4 +477,7 @@ try{
  const recovered=await rollback(String(e.message??e));
  console.error("MAC_CUTOVER_FAILED_RECOVERED="+recovered);
  process.exitCode=4;
+}
+} finally {
+ releaseLock();
 }
