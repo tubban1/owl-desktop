@@ -169,6 +169,16 @@ describe("OWL MCP compatibility surface", () => {
     const useTab = listed.tools.find((tool) => tool.name === "browser_use_tab");
     expect(useTab?.description).toContain("page_id");
 
+    // Connector-facing schemas must expose the fields supported by
+    // Runtime's git.commit and shell.start, not silently retain old shapes.
+    const gitCommit = listed.tools.find(tool => tool.name === "git_commit");
+    expect(gitCommit?.inputSchema?.properties).toHaveProperty("author_name");
+    expect(gitCommit?.inputSchema?.properties).toHaveProperty("author_email");
+    expect(gitCommit?.inputSchema?.properties).toHaveProperty("cwd");
+    expect(gitCommit?.inputSchema?.properties).toHaveProperty("message");
+    const startProcess = listed.tools.find(tool => tool.name === "start_process");
+    expect(startProcess?.inputSchema?.properties).toHaveProperty("include_control_token");
+
     const workstreamProgress = listed.tools.find(
       (tool) => tool.name === "workstream_progress",
     );
