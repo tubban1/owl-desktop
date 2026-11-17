@@ -86,30 +86,31 @@ function Test-Health {
 function Write-GateObservation([string]$Root,[string]$Phase){
  try{
   $current=MainProcess $Root
+  $target=if($Root -eq $NewRoot){'candidate'}else{'fallback'}
   $probe=[ordered]@{at=(Get-Date).ToUniversalTime().ToString('o');
-   phase=$Phase;mainPresent=[bool]$current;
+   phase=$Phase;target=$target;mainPresent=[bool]$current;
    runtime=@{reachable=$false;ok=$false;serviceMatched=$false};
    mcp=@{reachable=$false;ok=$false;serviceMatched=$false};
    tunnel=@{reachable=$false;ready=$false;live=$false}}
   try{
-   $r=Invoke-RestMethod -Uri 'http://127.0.0.1:8788/health' -TimeoutSec 3
+   $r=Invoke-RestMethod -Uri 'http://127.0.0.1:8788/health' -TimeoutSec 1
    $probe.runtime=@{reachable=$true;ok=[bool]($r.ok -eq $true);
     serviceMatched=[bool]($r.service -eq 'owl-runtime')}
   }catch{}
   try{
-   $m=Invoke-RestMethod -Uri 'http://127.0.0.1:8790/health' -TimeoutSec 3
+   $m=Invoke-RestMethod -Uri 'http://127.0.0.1:8790/health' -TimeoutSec 1
    $probe.mcp=@{reachable=$true;ok=[bool]($m.ok -eq $true);
     serviceMatched=[bool]($m.service -eq 'owl-mcp')}
   }catch{}
   try{
-   $t=Invoke-RestMethod -Uri 'http://127.0.0.1:18081/health?details=true' -TimeoutSec 3
+   $t=Invoke-RestMethod -Uri 'http://127.0.0.1:18081/health?details=true' -TimeoutSec 1
    $probe.tunnel=@{reachable=$true;ready=[bool]($t.ready -eq $true);
     live=[bool]($t.live -eq $true)}
   }catch{}
   New-Item -ItemType Directory -Force -Path $state | Out-Null
   $log=Join-Path $state ('cutover-gate-'+$ExpectedNewSha.Substring(0,8)+'.jsonl')
   Add-Content -LiteralPath $log -Value ($probe|ConvertTo-Json -Compress -Depth 5) -Encoding UTF8
-  $script:lastGateSnapshot=$probe
+  if($target -eq 'candidate'){$script:lastGateSnapshot=$probe}
  }catch{
   # Instrumentation failure must never turn a successful health gate into
   # failure, nor turn a failed gate into success.
