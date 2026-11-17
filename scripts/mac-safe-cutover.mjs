@@ -11,7 +11,8 @@ import {spawnSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {retireSupersededMacCurrentJobs} from "./lib/mac-release-startup.mjs";
 import {macDesktopMainPresent,macProcessTable,macWatchdogDecision} from "./lib/mac-postactivation-health.mjs";
-import {syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
+import {inspectMacNativeHostPin,syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
+import {macReleaseNameMatchesSha} from "./lib/mac-release-name.mjs";
 import {recoverOrphanedMacDevRuntime} from "./lib/mac-orphan-dev-runtime.mjs";
 import {selectMacReleaseOnNextLogin} from "./lib/mac-release-startup-selection.mjs";
 import {macOwnedTunnelHealthUrl,macOwnedTunnelHealthDiagnostics} from "./lib/ota-mac-tunnel-health.mjs";
@@ -36,6 +37,8 @@ function verifyDir(dir,shaExpected){
  if(!sha.test(String(shaExpected)))throw Error("INVALID_COMMIT");
  const canonical=fs.realpathSync(dir);
  if(!canonical.startsWith(sourceBoundary))throw Error("RELEASE_ROOT_OUTSIDE_AUTHORIZED_PROJECT");
+ // Native Messaging Host accepts only the immutable owl-desktop-sha7 form.
+ if(!macReleaseNameMatchesSha(canonical,shaExpected))throw Error("RELEASE_ROOT_NAME_SHA_MISMATCH");
  const found=run("/usr/bin/git",["-C",canonical,"rev-parse","HEAD"]).stdout.trim();
  if(found!==shaExpected)throw Error("RELEASE_SHA_MISMATCH");
  const dirty=run("/usr/bin/git",["-C",canonical,"status","--porcelain","--untracked-files=normal"]).stdout.trim();
@@ -312,7 +315,10 @@ async function check(){
  const oldComponents=await componentProbe(oldRoot);
  const nextComponents=await componentProbe(newRoot);
  const oldTunnelReady=await tunnelReady(oldRoot);
+ const nativePin=inspectMacNativeHostPin();
  return {oldRoot,newRoot,oldSha,newSha,
+  nativeHostConfigured:nativePin.configured,
+  nativeHostSafeToRebind:!nativePin.configured||nativePin.trusted,
   oldRunning:localProbeHealthy(oldComponents)&&oldTunnelReady,
   nextRunning:localProbeHealthy(nextComponents)&&await tunnelReady(newRoot),
   oldComponents,nextComponents,oldTunnelReady,
@@ -419,6 +425,8 @@ if(mode==="watch"){
  process.exit(0);
 }
 if(process.ppid!==1)throw Error("CUTOVER_MUST_RUN_UNDER_INDEPENDENT_LAUNCHD");
+const nativePin=inspectMacNativeHostPin();
+if(nativePin.configured&&!nativePin.trusted)throw Error("CUTOVER_NATIVE_HOST_CURRENT_UNTRUSTED");
 if(!await healthy(oldRoot)||await healthy(newRoot))throw Error("CUTOVER_PREFLIGHT_UNHEALTHY");
 provision();
 journal({phase:"started",oldRoot,newRoot,oldSha,newSha,startedAt:new Date().toISOString()});
