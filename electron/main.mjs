@@ -40,6 +40,12 @@ import { connectInstagramBrowser, instagramRedirectUri, validateInstagramAppSecr
 import { publishInstagramReel } from "./services/instagram-publisher.mjs";
 import { RuntimeSkillManagerPort } from "./services/skill-manager-port.mjs";
 import { CloudHttpClient } from "./services/cloud-http-client.mjs";
+import {
+  startWindowsDevCloudMcpConsumer,
+  stopWindowsDevCloudMcpConsumer,
+  windowsDevCloudMcpSnapshot,
+  wakeWindowsDevCloudMcpConsumer,
+} from "./services/windows-dev-cloud-mcp-consumer.mjs";
 import { CloudAccountAuth } from "./services/cloud-account-auth.mjs";
 import { CloudEnrollmentService, cloudEnrollmentSecretNames } from "./services/cloud-enrollment-service.mjs";
 import { CloudControlPlaneService } from "./services/cloud-control-plane-service.mjs";
@@ -1383,6 +1389,11 @@ function cloudBridgeSnapshot() {
 }
 
 async function stopCloudBridge() {
+  await stopWindowsDevCloudMcpConsumer().catch((error) => {
+    record("warn", "cloud-mcp", "Windows DEV Cloud MCP consumer stop failed", {
+      code: error?.code ?? error?.name ?? "ERROR",
+    });
+  });
   if (cloudBridge) {
     await cloudBridge.stop().catch(() => undefined);
     cloudBridge = undefined;
@@ -1483,6 +1494,33 @@ async function startCloudBridge() {
     record("error", "cloud", "Cloud Bridge failed to start", {
       code: cloudBridgeState.lastErrorCode,
       message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  // Windows DEV owns its local MCP listener; unlike the packaged app, it does
+  // not have a separate Connection Host. Start the official durable Cloud
+  // consumer inside this same OS-Vault-authorized Desktop process.
+  if (
+    process.platform === "win32" && !app.isPackaged &&
+    !externalConnectionHostEnabled && settings.cloudEnabled === true &&
+    cloudBridgeState?.running === true
+  ) {
+    await startWindowsDevCloudMcpConsumer({
+      cloudClient: client,
+      settings,
+      mcpToken: mcpToken(),
+      userDataRoot: app.getPath("userData"),
+      onEvent(level, message, meta) {
+        record(level, "cloud-mcp", message, meta);
+      },
+    }).then((snapshot) => {
+      record("info", "cloud-mcp", "Windows DEV durable Cloud MCP consumer started", {
+        ready: snapshot?.ready === true,
+        failureCount: snapshot?.failureCount ?? 0,
+      });
+    }).catch((error) => {
+      record("warn", "cloud-mcp", "Windows DEV Cloud MCP consumer startup failed", {
+        code: error?.code ?? error?.name ?? "ERROR",
+      });
     });
   }
   return cloudBridgeSnapshot();
@@ -1741,12 +1779,7 @@ async function runtimeSnapshot(options = {}) {
           consumer: null,
           completionStore: null,
         }
-      : {
-          configured: false,
-          config: null,
-          consumer: null,
-          completionStore: null,
-        },
+      : windowsDevCloudMcpSnapshot(),
     cloud: cloudBridgeSnapshot(),
     agentInbox: agentInbox?.summary() ?? {
       pending: 0,
@@ -3748,7 +3781,17 @@ if (packagedConnectivityHostSoakOnly) {
     });
   });
 
+  powerMonitor.on("resume", () => {
+    if (process.platform !== "win32" || app.isPackaged || externalConnectionHostEnabled) return;
+    void wakeWindowsDevCloudMcpConsumer().catch((error) => {
+      record("warn", "cloud-mcp", "Windows DEV Cloud MCP wake recovery failed", {
+        code: error?.code ?? error?.name ?? "ERROR",
+      });
+    });
+  });
+
   app.on("before-quit", () => {
+    void stopWindowsDevCloudMcpConsumer();
     if(connectivityNotificationTimer)clearInterval(connectivityNotificationTimer);
     if(approvalNotificationTimer)clearInterval(approvalNotificationTimer);
     usageStatistics?.flush();
