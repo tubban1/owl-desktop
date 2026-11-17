@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, Notification, dialog, ipcMain, powerMonitor, shell } from "electron";
 import { configureOwlDesktopStorage } from "./storage-layout.mjs";
 import { installStdioEpipeGuard } from "../scripts/lib/stdio-epipe-guard.mjs";
-import { assessConnectivityRecovery } from "./services/connectivity-recovery-result.mjs";
+import { assessConnectivityRecovery, waitForCustomTunnelReadiness } from "./services/connectivity-recovery-result.mjs";
 import { DesktopStore } from "./store.mjs";
 import {getUploadConsent,changeUploadConsent} from "../shared/agent-upload-consent.mjs";
 import { createScopedProviderOperations } from "./services/provider-operations.mjs";
@@ -2069,7 +2069,8 @@ Only this single action will be approved.`,
     const settings = store.getSettings();
     await startMcp();
     if (settings.connectivityMode === "custom_tunnel") {
-      const tunnel = await startTunnel();
+      const started = await startTunnel();
+      const tunnel = await waitForCustomTunnelReadiness(started, tunnelStatus);
       return {
         mode: "custom_tunnel",
         tunnel,

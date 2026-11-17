@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessConnectivityRecovery } from "../electron/services/connectivity-recovery-result.mjs";
+import { assessConnectivityRecovery, waitForCustomTunnelReadiness, isVerifiedCustomTunnelStatus } from "../electron/services/connectivity-recovery-result.mjs";
 
 const base = {
   mode: "cloud_durable",
@@ -44,7 +44,57 @@ describe("Recover Cloud result from real proof, not IPC success", () => {
   it("keeps custom Tunnel validation separate from managed Cloud MCP", () => {
     expect(assessConnectivityRecovery({ ...base, mode: "custom_tunnel", tunnel: { reachability: { state: "stale" } } }))
       .toMatchObject({ ready: false, code: "CUSTOM_TUNNEL_UNVERIFIED" });
-    expect(assessConnectivityRecovery({ ...base, mode: "custom_tunnel", tunnel: { reachability: { state: "ready" } } }))
-      .toMatchObject({ ready: true });
+    expect(assessConnectivityRecovery({ ...base, mode: "custom_tunnel", tunnel: {
+      state: "running", reachability: { state: "ready", localReady: true, controlPlane: { status: "ok" } },
+    } })).toMatchObject({ ready: true });
   });
+  it("waits for verified recovery evidence rather than reporting a transient startup failure", async () => {
+    const starting = { state: "running", reachability: { state: "starting" } };
+    const healthy = { state: "running", reachability: {
+      state: "ready", localReady: true, controlPlane: { status: "ok" },
+    } };
+    let checks = 0;
+    const tunnel = await waitForCustomTunnelReadiness(starting, async () =>
+      ++checks === 1 ? starting : healthy, { attempts: 3, sleep: async () => {} });
+    expect(checks).toBe(2);
+    expect(tunnel).toEqual(healthy);
+    expect(assessConnectivityRecovery({ ...base, mode: "custom_tunnel", tunnel }))
+      .toMatchObject({ ready: true, code: null });
+  });
+
+  it("never promotes an unverified or degraded Tunnel into a healthy result", async () => {
+    const notProven = { state: "running", reachability: { state: "ready", localReady: true,
+      controlPlane: { status: "degraded" } } };
+    expect(isVerifiedCustomTunnelStatus(notProven)).toBe(false);
+    const candidate = await waitForCustomTunnelReadiness(notProven,
+      async () => notProven, { attempts: 2, sleep: async () => {} });
+    expect(assessConnectivityRecovery({ ...base, mode: "custom_tunnel", tunnel: candidate }))
+      .toMatchObject({ ready: false, code: "CUSTOM_TUNNEL_UNVERIFIED" });
+  });
+
+  it("enforces a real deadline even when the Connection Host never answers", async () => {
+    const starting = { state: "running", reachability: { state: "starting" } };
+    const began = Date.now();
+    const result = await waitForCustomTunnelReadiness(starting,
+      () => new Promise(() => {}), {
+        attempts: 14, pollIntervalMs: 1, maxWaitMs: 35,
+      });
+    expect(Date.now() - began).toBeLessThan(400);
+    expect(result).toEqual(starting);
+  });
+
+  it("bounds waiting when a health check never completes or the Host disconnects", async () => {
+    const starting = { state: "running", reachability: { state: "starting" } };
+    let count = 0;
+    const result = await waitForCustomTunnelReadiness(starting, async () => {
+      count++;
+      return starting;
+    }, { attempts: 3, sleep: async () => {} });
+    expect(count).toBe(3);
+    expect(assessConnectivityRecovery({ ...base, mode: "custom_tunnel", tunnel: result }).ready).toBe(false);
+    const disconnected = await waitForCustomTunnelReadiness(starting,
+      async () => { throw Error("Disconnected"); }, { attempts: 10, sleep: async () => {} });
+    expect(disconnected).toBe(starting);
+  });
+
 });

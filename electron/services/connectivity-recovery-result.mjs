@@ -20,9 +20,12 @@ export function assessConnectivityRecovery({
       "Local MCP is not running. Open Settings → Diagnostics to check the Runtime and Connection Host.");
   }
   if (mode === "custom_tunnel") {
-    const reachable = tunnel?.reachability?.state === "ready";
+    // A process that exists is not proof of a usable remote channel.
+    // Match the TunnelSupervisor's verified healthy state, not its startup
+    // acknowledgement; this must fail closed when health data is missing.
+    const reachable = isVerifiedCustomTunnelStatus(tunnel);
     return reachable
-      ? result(true, null, "Custom Tunnel connection is ready.", "none")
+      ? result(true, null, "Custom Tunnel and control-plane health verified. Remote ChatGPT MCP invocation has not been independently verified.", "none")
       : result(false, "CUSTOM_TUNNEL_UNVERIFIED",
           "Custom Tunnel reachability is not verified. Open Settings → Diagnostics to inspect the connection.");
   }
@@ -59,4 +62,50 @@ export function assessConnectivityRecovery({
   }
   return result(false, code,
     "Cloud MCP has not completed a verified poll. Open Settings → Diagnostics to inspect the Connection Host and Cloud connectivity.");
+}
+
+export const isVerifiedCustomTunnelStatus = (tunnel) =>
+  tunnel?.state === "running" &&
+  tunnel?.reachability?.state === "ready" &&
+  tunnel?.reachability?.localReady === true &&
+  tunnel?.reachability?.controlPlane?.status === "ok";
+
+// Starting a Tunnel is asynchronous: the OS process may start before the
+// read-only local and control-plane health probes complete. Never turn that
+// normal interval into a permanent error banner. Wait only a bounded interval
+// for actual evidence; no extra starts or tool calls are issued.
+export async function waitForCustomTunnelReadiness(initialStatus, readStatus, {
+  attempts = 14,
+  pollIntervalMs = 350,
+  maxWaitMs = 5_000,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  let current = initialStatus;
+  if (isVerifiedCustomTunnelStatus(current)) return current;
+  const deadline = Date.now() + maxWaitMs;
+  for (let i = 0; i < attempts; i += 1) {
+    if (!["running", "restarting"].includes(current?.state)) break;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await sleep(Math.min(pollIntervalMs, remaining));
+    const probeBudget = deadline - Date.now();
+    if (probeBudget <= 0) break;
+    let timer;
+    try {
+      // An unresponsive Host health request may take longer than the polling
+      // interval. Bound the entire recovery IPC, not just the number of polls.
+      const next = await Promise.race([
+        readStatus(),
+        new Promise((resolve) => { timer = setTimeout(() => resolve(null), probeBudget); }),
+      ]);
+      if (!next) break;
+      current = next;
+    } catch {
+      break; // A failed control IPC must never be treated as proof.
+    } finally {
+      clearTimeout(timer);
+    }
+    if (isVerifiedCustomTunnelStatus(current)) return current;
+  }
+  return current;
 }
