@@ -1,8 +1,11 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+const expectEqual = (actual, expected) => expect(actual).toEqual(expected);
+const expectRejects = (thunk, regex) => expect(thunk()).rejects.toThrow(regex);
+
 import {
   startWindowsDevCloudMcpConsumer,
   stopWindowsDevCloudMcpConsumer,
@@ -28,25 +31,25 @@ test("Windows DEV consumer uses existing local MCP and durable store; lifecycle 
       executorFactory: (args) => {executorArgs=args;return {probe:async()=>{}};},
       consumerFactory: (args) => {opts=args;return mock;},
     });
-    assert.equal(snapshot.ready,true);
-    assert.equal(started,1);
-    assert.equal(executorArgs.mcpUrl,"http://127.0.0.1:8790/mcp");
-    assert.equal(executorArgs.mcpToken,undefined);
-    assert.equal(opts.maxConcurrentCalls,2);
-    assert.equal(opts.pollIntervalMs,5000);
-    assert.equal(windowsDevCloudMcpSnapshot().configured,true);
-    assert.equal(await wakeWindowsDevCloudMcpConsumer().then(x=>x.ready),true);
-    assert.equal(wakeCount,1);
-    assert.equal(fs.existsSync(path.join(root,"connectivity","cloud-mcp-completions")),true);
+    expectEqual(snapshot.ready,true);
+    expectEqual(started,1);
+    expectEqual(executorArgs.mcpUrl,"http://127.0.0.1:8790/mcp");
+    expectEqual(executorArgs.mcpToken,undefined);
+    expectEqual(opts.maxConcurrentCalls,2);
+    expectEqual(opts.pollIntervalMs,5000);
+    expectEqual(windowsDevCloudMcpSnapshot().configured,true);
+    expectEqual(await wakeWindowsDevCloudMcpConsumer().then(x=>x.ready),true);
+    expectEqual(wakeCount,1);
+    expectEqual(fs.existsSync(path.join(root,"connectivity","cloud-mcp-completions")),true);
   } finally {
     await stopWindowsDevCloudMcpConsumer();
     fs.rmSync(root,{recursive:true,force:true});
   }
-  assert.equal(stopCount,1);
-  assert.equal(windowsDevCloudMcpSnapshot().configured,false);
-  assert.equal(await wakeWindowsDevCloudMcpConsumer(),null);
+  expectEqual(stopCount,1);
+  expectEqual(windowsDevCloudMcpSnapshot().configured,false);
+  expectEqual(await wakeWindowsDevCloudMcpConsumer(),null);
 });
 
 test("Windows DEV consumer rejects missing Cloud device identity without creating a poller", async () => {
-  await assert.rejects(() => startWindowsDevCloudMcpConsumer({cloudClient:{},settings:{},userDataRoot:os.tmpdir()}), /CONFIG_INCOMPLETE/);
+  await expectRejects(() => startWindowsDevCloudMcpConsumer({cloudClient:{},settings:{},userDataRoot:os.tmpdir()}), /CONFIG_INCOMPLETE/);
 });
