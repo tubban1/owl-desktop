@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {describe,it,expect,afterEach} from "vitest";
-import {macOwnedTunnelHealthUrl} from "../scripts/lib/ota-mac-tunnel-health.mjs";
+import {macOwnedTunnelHealthUrl,macOwnedTunnelHealthDiagnostics} from "../scripts/lib/ota-mac-tunnel-health.mjs";
 
 const dirs=[];
 afterEach(()=>{for(const dir of dirs.splice(0))fs.rmSync(dir,{recursive:true,force:true});});
@@ -23,9 +23,35 @@ function fixture() {
   return {root,tempDir,releaseRoot,host,client,file,
     probe:(rows=host+"\n"+client,extra={})=>macOwnedTunnelHealthUrl({
       releaseRoot,tempDir,uid:process.getuid(),processTable:rows,...extra,
+    }),
+    diagnostic:(rows=host+"\n"+client,extra={})=>macOwnedTunnelHealthDiagnostics({
+      releaseRoot,tempDir,uid:process.getuid(),processTable:rows,...extra,
     })};
 }
 describe("Mac OTA Tunnel identity vs source path",()=>{
+  it("provides safe ownership/health-file breakdown without exposing command or credentials",()=>{
+    const f=fixture();
+    const good=f.diagnostic();
+    expect(good).toMatchObject({
+      hostCount:1,childCount:1,ownedHealthUrlAccepted:true,
+      healthFilePresent:true,healthFileNameMatched:true,
+      healthFilePermissionMatched:true,reason:"owned-url-accepted",
+    });
+    const bad=f.diagnostic(f.host+"\n"+f.client.replace("29017 22757","29017 77777"));
+    expect(bad).toMatchObject({hostCount:1,childCount:0,reason:"child-count"});
+    fs.chmodSync(f.file,0o644);
+    const insecure=f.diagnostic();
+    expect(insecure).toMatchObject({
+      hostCount:1,childCount:1,ownedHealthUrlAccepted:false,
+      healthFilePermissionMatched:false,reason:"health-file-permissions",
+    });
+    const redacted=JSON.stringify([good,bad,insecure]);
+    expect(redacted).not.toContain("tunnel_test");
+    expect(redacted).not.toContain("--control-plane");
+    expect(redacted).not.toContain("49289");
+    expect(redacted).not.toContain(f.root);
+  });
+
   it("recognizes a healthy owned child even when its executable is from a shared source checkout",()=>{
     const f=fixture();
     expect(f.probe()).toBe("http://127.0.0.1:49289/health?details=true");
