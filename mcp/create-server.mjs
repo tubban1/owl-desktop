@@ -2587,6 +2587,8 @@ export function createOwlMcpServer({fileDelivery=null,userChromeBridge=null,mail
       command: z.string().min(1),
       cwd: z.string().min(1),
       workspace_mode: z.enum(["read", "write"]).optional(),
+      // Recovery capability is sensitive; do not return unless requested.
+      include_control_token: z.boolean().optional(),
     },
     {
       title: "Start Process",
@@ -2739,7 +2741,14 @@ export function createOwlMcpServer({fileDelivery=null,userChromeBridge=null,mail
   ]) {
     const schemas = {
       add: { cwd: z.string().min(1), paths: z.array(z.string()).min(1) },
-      commit: { cwd: z.string().min(1), message: z.string().min(1) },
+      commit: {
+        cwd: z.string().min(1),
+        message: z.string().min(1),
+        // Runtime git.commit validates the pair and applies identity to just
+        // this invocation. Do not require global Git configuration.
+        author_name: z.string().min(1).max(120).optional(),
+        author_email: z.string().min(3).max(254).optional(),
+      },
       pull: {
         cwd: z.string().min(1),
         remote: z.string().optional(),
