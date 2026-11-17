@@ -20,5 +20,15 @@ describe("Native-host-compatible immutable Mac release roots",()=>{
   expect(src.indexOf('if(!macReleaseNameMatchesSha(canonical,shaExpected))')).toBeLessThan(src.indexOf('original.pid,"SIGTERM"'));
   expect(src).toContain('if(nativePin.configured&&!nativePin.trusted)throw Error("CUTOVER_NATIVE_HOST_CURRENT_UNTRUSTED")');
   expect(src).toContain("nativeHostSafeToRebind");
+  expect(src).toContain('tryAcquireLocalRolloutLock(path.join(state,"ota"))');
+  expect(src).toContain('CUTOVER_LOCAL_ROLLOUT_ALREADY_ACTIVE');
+  expect(src).toContain('releaseLock()');
+  expect(src.indexOf('tryAcquireLocalRolloutLock(path.join(state,"ota"))')).toBeLessThan(src.indexOf('provision();'));
+  const reconcile=fs.readFileSync(new URL("../scripts/reconcile-mac-native-host.mjs",import.meta.url),"utf8");
+  expect(reconcile).toContain('macReleaseNameMatchesSha(active,expectedSha)');
+  expect(reconcile).toContain('MAC_NATIVE_HOST_POSTCONDITION_FAILED');
+  expect(reconcile).toContain('inspectMacNativeHostPin({home:os.homedir()})');
+  expect(reconcile.indexOf('macReleaseNameMatchesSha(active,expectedSha)')).toBeLessThan(reconcile.indexOf('atomicReplace(wrapper,next)'));
+  expect(reconcile.indexOf('MAC_NATIVE_HOST_POSTCONDITION_FAILED')).toBeLessThan(reconcile.indexOf('fs.renameSync(tmp,receipt)'));
  });
 });

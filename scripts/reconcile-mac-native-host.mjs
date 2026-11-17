@@ -7,6 +7,8 @@ import path from "node:path";
 import {execFileSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {inspectNativeHostParity} from "./lib/native-host-parity.mjs";
+import {macReleaseNameMatchesSha} from "./lib/mac-release-name.mjs";
+import {inspectMacNativeHostPin} from "./lib/mac-native-host-protection.mjs";
 
 const arg=name=>{const pos=process.argv.indexOf(name);return pos<0?null:process.argv[pos+1];};
 const mode=arg("--mode")??"check";
@@ -16,7 +18,7 @@ const active=fs.realpathSync(arg("--active-root")??".");
 const expectedSha=arg("--expected-sha");
 if(!/^[a-f0-9]{40}$/.test(expectedSha??""))throw Error("MAC_NATIVE_HOST_COMMIT_REQUIRED");
 const parent=path.join(os.homedir(),"Documents/Me/Project/cursor/_releases")+path.sep;
-if(!active.startsWith(parent)||!path.basename(active).startsWith("owl-desktop-"))
+if(!active.startsWith(parent)||!macReleaseNameMatchesSha(active,expectedSha))
  throw Error("MAC_NATIVE_HOST_RELEASE_ROOT_INVALID");
 const head=execFileSync("git",["-C",active,"rev-parse","HEAD"],{encoding:"utf8",timeout:6000}).trim();
 if(head!==expectedSha)throw Error("MAC_NATIVE_HOST_RELEASE_SHA_MISMATCH");
@@ -35,6 +37,9 @@ const origin=manifest.allowed_origins[0];
 const id=origin.match(/^chrome-extension:\/\/([a-p]{32})\/$/)?.[1];
 if(!id)throw Error("MAC_NATIVE_HOST_ORIGIN_UNTRUSTED");
 const old=fs.readFileSync(wrapper,"utf8");
+const originalPin=inspectMacNativeHostPin({home:os.homedir()});
+if(!originalPin.configured||!originalPin.trusted)
+ throw Error(originalPin.reason??"MAC_NATIVE_HOST_CURRENT_UNTRUSTED");
 const originalScript=old.match(/'([^'\n]+[\\/]connection-host[\\/]native-messaging-host\.mjs)'/)?.[1]??null;
 const script=path.join(active,"connection-host/native-messaging-host.mjs");
 const result=inspectNativeHostParity({expectedRoot:active,sourceRoot:originalScript,
@@ -72,6 +77,9 @@ try{
  atomicReplace(wrapper,next);
  const confirmed=fs.readFileSync(wrapper,"utf8");
  if(confirmed!==next)throw Error("MAC_NATIVE_HOST_REBIND_VERIFY_FAILED");
+ const verified=inspectMacNativeHostPin({home:os.homedir()});
+ if(!verified.trusted||!verified.safeToPrune||verified.script!==script)
+  throw Error("MAC_NATIVE_HOST_POSTCONDITION_FAILED");
  const tmp=receipt+"."+randomUUID()+".tmp";
  fs.writeFileSync(tmp,JSON.stringify({targetSha:expectedSha,savedWrapper:saved,at:new Date().toISOString()})+"\n",{mode:0o600,flag:"wx"});
  fs.renameSync(tmp,receipt);
