@@ -14,7 +14,7 @@ import {macDesktopMainPresent,macProcessTable,macWatchdogDecision} from "./lib/m
 import {syncMacNativeHostForLive} from "./lib/mac-native-host-protection.mjs";
 import {recoverOrphanedMacDevRuntime} from "./lib/mac-orphan-dev-runtime.mjs";
 import {selectMacReleaseOnNextLogin} from "./lib/mac-release-startup-selection.mjs";
-import {macOwnedTunnelHealthUrl} from "./lib/ota-mac-tunnel-health.mjs";
+import {macOwnedTunnelHealthUrl,macOwnedTunnelHealthDiagnostics} from "./lib/ota-mac-tunnel-health.mjs";
 
 const [mode,oldRoot,newRoot,oldSha,newSha]=process.argv.slice(2);
 const sha=/^[a-f0-9]{40}$/;
@@ -112,19 +112,27 @@ async function localRecovered(dir){
  await healMissingOwner(dir);
  return localProbeHealthy(await componentProbe(dir));
 }
-async function tunnelReady(root){
+async function tunnelReady(root,evidence=null){
  // Only a tunnel owned by this release's exact Connection Host may count
  // as healthy. Its signed binary can be stored in a shared source checkout,
  // not necessarily under this release's vendor/ directory.
  const table=run("/bin/ps",["-axo","pid=,ppid=,command="],{allowError:true}).stdout;
  const healthUrl=macOwnedTunnelHealthUrl({releaseRoot:root,processTable:table});
+ if(evidence)Object.assign(evidence,macOwnedTunnelHealthDiagnostics({
+  releaseRoot:root,processTable:table,
+ }));
  if(!healthUrl)return false;
  try{
   const res=await fetch(healthUrl,{signal:AbortSignal.timeout(3500)});
+  if(evidence)evidence.httpOk=res.ok;
   if(!res.ok)return false;
   const data=await res.json();
+  if(evidence){evidence.ready=data.ready===true;evidence.live=data.live===true;}
   return data.ready===true&&data.live===true;
- }catch{return false;}
+ }catch(e){
+  if(evidence)evidence.healthError=e?.name==="TimeoutError"?"timeout":"unavailable";
+  return false;
+ }
 }
 
 function exactSupervisor(dir){
@@ -160,11 +168,25 @@ async function healMissingOwner(dir){
  finally{try{fs.unlinkSync(tmp)}catch{}}
  return ownerMatches(dir);
 }
-async function healthy(dir){
+async function healthy(dir,evidence=null){
  // An external cleanup process may remove the non-authoritative owner receipt.
  // A unique exact PID + birth + immutable root is independently verifiable.
  if(!ownerMatches(dir))await healMissingOwner(dir);
- return Boolean(exactSupervisor(dir))&&desktopMainRunning(dir)&&await health(8790)&&await health(18788)&&await tunnelReady(dir);
+ // Preserve the original short-circuit boolean gate exactly. The optional
+ // evidence records WHICH prerequisite stopped the gate, without weakening it.
+ const supervisor=Boolean(exactSupervisor(dir));
+ const desktop=supervisor&&desktopMainRunning(dir);
+ const mcp=desktop&&await health(8790);
+ const runtime=mcp&&await health(18788);
+ const tunnelEvidence=evidence?{}:null;
+ const tunnel=runtime&&await tunnelReady(dir,tunnelEvidence);
+ if(evidence)Object.assign(evidence,{
+  supervisorPresent:supervisor,desktopMainPresent:Boolean(desktop),
+  mcpHealthy:Boolean(mcp),runtimeHealthy:Boolean(runtime),
+  tunnelChecked:Boolean(runtime),tunnelHealthy:Boolean(tunnel),
+  tunnel:tunnelEvidence,
+ });
+ return Boolean(tunnel);
 }
 async function portsFree(){
  // Vite binds IPv4 127.0.0.1. An unrelated IPv6-only wildcard listener
@@ -407,7 +429,21 @@ try{
  if(!await waitFor(portsFree,45000))throw Error("OLD_OWNED_PORTS_DID_NOT_RELEASE");
  if(process.env.OWL_QA_FAIL_AFTER_STOP==="1")throw Error("INJECTED_QA_FAILURE_AFTER_STOP");
  kick(ids.next);
- if(!await waitFor(()=>healthy(newRoot),150000))throw Error("NEW_MCP_AND_RUNTIME_NOT_HEALTHY");
+ // Each poll is persisted before any rollback can clear the transient
+ // candidate process and its tunnel health URL file. No token, command line,
+ // URL, filepath or Cloud tunnel ID is written to these receipts.
+ let lastCandidateGate=null;
+ const candidateHealthy=async()=>{
+  const gate={};
+  const accepted=await healthy(newRoot,gate);
+  lastCandidateGate={at:new Date().toISOString(),accepted,...gate};
+  watchdogEvidence({event:"activation-gate-poll",gate:lastCandidateGate});
+  return accepted;
+ };
+ if(!await waitFor(candidateHealthy,150000)){
+  watchdogEvidence({event:"activation-gate-final-failure",gate:lastCandidateGate});
+  throw Error("NEW_MCP_AND_RUNTIME_NOT_HEALTHY");
+ }
  // Chrome Native Host must follow the new verified release before success.
  // Do not mark activated if Chrome would still point to a retired release.
  const nativeHost=syncMacNativeHostForLive({activeRoot:newRoot,expectedSha:newSha});

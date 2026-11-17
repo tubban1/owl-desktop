@@ -80,12 +80,50 @@ function Test-Health {
     $m.ok -eq $true -and $m.service -eq 'owl-mcp')
  }catch{return $false}
 }
+# Independent diagnostics only. Never relax or replace MainProcess /
+# Test-Health / Test-Tunnel. Do not persist responses, URLs, command lines,
+# OAuth tokens or tunnel IDs; only typed booleans and bounded reason labels.
+function Write-GateObservation([string]$Root,[string]$Phase){
+ try{
+  $current=MainProcess $Root
+  $target=if($Root -eq $NewRoot){'candidate'}else{'fallback'}
+  $probe=[ordered]@{at=(Get-Date).ToUniversalTime().ToString('o');
+   phase=$Phase;target=$target;mainPresent=[bool]$current;
+   runtime=@{reachable=$false;ok=$false;serviceMatched=$false};
+   mcp=@{reachable=$false;ok=$false;serviceMatched=$false};
+   tunnel=@{reachable=$false;ready=$false;live=$false}}
+  try{
+   $r=Invoke-RestMethod -Uri 'http://127.0.0.1:8788/health' -TimeoutSec 1
+   $probe.runtime=@{reachable=$true;ok=[bool]($r.ok -eq $true);
+    serviceMatched=[bool]($r.service -eq 'owl-runtime')}
+  }catch{}
+  try{
+   $m=Invoke-RestMethod -Uri 'http://127.0.0.1:8790/health' -TimeoutSec 1
+   $probe.mcp=@{reachable=$true;ok=[bool]($m.ok -eq $true);
+    serviceMatched=[bool]($m.service -eq 'owl-mcp')}
+  }catch{}
+  try{
+   $t=Invoke-RestMethod -Uri 'http://127.0.0.1:18081/health?details=true' -TimeoutSec 1
+   $probe.tunnel=@{reachable=$true;ready=[bool]($t.ready -eq $true);
+    live=[bool]($t.live -eq $true)}
+  }catch{}
+  New-Item -ItemType Directory -Force -Path $state | Out-Null
+  $log=Join-Path $state ('cutover-gate-'+$ExpectedNewSha.Substring(0,8)+'.jsonl')
+  Add-Content -LiteralPath $log -Value ($probe|ConvertTo-Json -Compress -Depth 5) -Encoding UTF8
+  if($target -eq 'candidate'){$script:lastGateSnapshot=$probe}
+ }catch{
+  # Instrumentation failure must never turn a successful health gate into
+  # failure, nor turn a failed gate into success.
+ }
+}
 function Wait-Healthy([string]$Root,[int]$Seconds){
  $until=(Get-Date).AddSeconds($Seconds)
  while((Get-Date) -lt $until){
   if((MainProcess $Root) -and (Test-Health) -and (Test-Tunnel)){return $true}
+  Write-GateObservation $Root 'poll'
   Start-Sleep -Milliseconds 900
  }
+ Write-GateObservation $Root 'final-failure'
  return $false
 }
 function Wait-PortsReleased([int]$Seconds){
@@ -161,7 +199,8 @@ function Write-Receipt([string]$Phase,[string]$Reason,[bool]$Restored=$false){
   phase=$Phase;reason=$Reason;from=$OldRoot;to=$NewRoot;
   fromSha=$ExpectedOldSha;toSha=$ExpectedNewSha;rollbackHealthy=$Restored;
   computerBackupPortListening=[bool](PortBusy 8787);
-  oldRuntimePid=if($script:oldPortSnapshot){[int]$script:oldPortSnapshot[8788]}else{0}}
+  oldRuntimePid=if($script:oldPortSnapshot){[int]$script:oldPortSnapshot[8788]}else{0};
+  lastGate=if($script:lastGateSnapshot){$script:lastGateSnapshot}else{$null}}
  $tmp=Join-Path $state ('cutover-'+[guid]::NewGuid().ToString('N')+'.tmp')
  $final=Join-Path $state 'cutover-last.json'
  try{$receipt|ConvertTo-Json -Depth 4|Set-Content -LiteralPath $tmp -Encoding UTF8
