@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { reconcileCustomTunnelFeedback } from "./connection-recovery-feedback";
 import {
   Activity, Boxes, CheckCircle2, Cloud, Cpu, Gauge, HardDrive,
   KeyRound, ListTree, Plus, RefreshCw, Settings2, ShieldCheck,
@@ -208,6 +209,24 @@ export default function App() {
   const tunnelTransportReady = tunnelReachability
     ? tunnelReachability === "ready"
     : snapshot?.tunnel.state === "running";
+  // A failed one-off recovery action can precede a successful asynchronous
+  // Tunnel health poll. A later verified snapshot resolves only that stale
+  // diagnostic; unrelated Cloud/authentication errors stay visible.
+  const customTunnelNowVerified =
+    settings?.connectivityMode === "custom_tunnel" &&
+    snapshot?.mcp.status === "running" &&
+    snapshot?.tunnel.state === "running" &&
+    snapshot?.tunnel.reachability?.state === "ready" &&
+    snapshot?.tunnel.reachability?.localReady === true &&
+    snapshot?.tunnel.reachability?.controlPlane?.status === "ok";
+  useEffect(() => {
+    // Also respond when an in-flight recovery IPC finishes *after* an already
+    // healthy snapshot. Otherwise the delayed failure may remain visible.
+    if (!customTunnelNowVerified ||
+        connectionRecoveryFeedback?.code !== "CUSTOM_TUNNEL_UNVERIFIED") return;
+    setConnectionRecoveryFeedback((current) =>
+      reconcileCustomTunnelFeedback(current, customTunnelNowVerified));
+  }, [customTunnelNowVerified, connectionRecoveryFeedback?.code]);
   const durableMcpReady =
     snapshot?.cloudMcp?.configured === true &&
     snapshot?.cloudMcp?.consumer?.ready === true;
@@ -1235,7 +1254,7 @@ export default function App() {
           {connectionRecoveryFeedback && (
             <section className={"cloud-recovery-feedback " + connectionRecoveryFeedback.state} role="status" aria-live="polite">
               <div>
-                <strong>{connectionRecoveryFeedback.state === "checking" ? "Connecting OWL Cloud" : connectionRecoveryFeedback.state === "ready" ? "Cloud connection verified" : "Cloud connection needs attention"}</strong>
+                <strong>{connectionRecoveryFeedback.state === "checking" ? "Connecting OWL Cloud" : connectionRecoveryFeedback.state === "ready" ? (settings?.connectivityMode === "custom_tunnel" ? "Tunnel health verified" : "Cloud connection verified") : "Cloud connection needs attention"}</strong>
                 <p>{connectionRecoveryFeedback.message}</p>
                 {connectionRecoveryFeedback.code && <small>Diagnostic code: {connectionRecoveryFeedback.code}</small>}
               </div>
