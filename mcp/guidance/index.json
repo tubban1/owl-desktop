@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "xiaohongshu-publishing",
+      "version": "1.0.0",
+      "title": "Xiaohongshu publishing",
+      "description": "Chinese copy, video/image upload, topic and cover review, rights and AI disclosures, checkpointed submission and receipt verification",
+      "path": "xiaohongshu-publishing-1.0.0.md",
+      "sha256": "b9bf1a6512e1cbf23903e19bca991d66c23be4dbad89f145d2b2d8a0d97f175e",
+      "appliesTo": [
+        "xhs.publish"
+      ],
+      "related": [
+        "ai-content-disclosure"
+      ],
+      "keywords": [
+        "xhs",
+        "小红书",
+        "rednote",
+        "发布",
+        "publish",
+        "视频"
+      ]
+    },
+    {
+      "id": "ai-content-disclosure",
+      "version": "1.0.0",
+      "title": "AI content and originality review",
+      "description": "Shared rights, originality and AI labeling decision guidance; reusable across social platforms with no execution authority",
+      "path": "ai-content-disclosure-1.0.0.md",
+      "sha256": "b7b0ee14afc104614ee35bde40ddd36ba7bb433075fe95ea51a68791be7553a9",
+      "appliesTo": [],
+      "related": [],
+      "keywords": [
+        "ai",
+        "人工智能",
+        "ai标识",
+        "原创",
+        "版权",
+        "disclosure",
+        "声明"
+      ]
+    }
+  ]
+}

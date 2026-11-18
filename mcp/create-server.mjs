@@ -6,6 +6,7 @@ import {createBrowserCompatRouter} from "./browser-compat-router.mjs";
 import { registerBrowserWorkflowTools } from "./browser-workflow-tools.mjs";
 import { readAuthorizedLocalImage } from "./native-image.mjs";
 import { readAuthorizedDocument } from "./local-document.mjs";
+import { listGuidance, readGuidance } from "./guidance-library.mjs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { RuntimeHttpClient } from "../electron/runtime-http-client.mjs";
@@ -1649,6 +1650,29 @@ export function createOwlMcpServer({fileDelivery=null,userChromeBridge=null,mail
       openWorldHint: false,
     },
     () => invoke("skills.catalog"),
+  );
+
+  tool(
+    server,
+    "guidance",
+    "Discover or read versioned OWL Agent guidance/playbooks, including Xiaohongshu publishing. Read the relevant guidance before executing third-party workflows. Guidance never grants execution permission.",
+    {
+      op: z.enum(["list", "read"]).optional(),
+      goal: z.string().max(500).optional(),
+      id: z.string().max(80).optional(),
+      version: z.string().max(32).optional(),
+    },
+    {
+      title: "Guidance Discovery and Read",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async ({ op, goal, id, version }) =>
+      op === "read"
+        ? await readGuidance(id ?? "", version)
+        : await listGuidance(goal ?? ""),
   );
 
   tool(

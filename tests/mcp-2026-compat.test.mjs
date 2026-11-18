@@ -34,7 +34,7 @@ async function wire(url,method,params={},headers={},version='2026-07-28'){
   return {status:r.status,response};
 }
 describe('OWL MCP dual era (isolated fake Runtime, no actual side effects)',()=>{
- it('2026 wire discovery and 151 tool definitions, result/cache fields',async()=>{
+ it('2026 wire discovery and 152 tool definitions, result/cache fields',async()=>{
    const url=await setup();
    const discovery=await wire(url,'server/discover');
    expect(discovery.status).toBe(200);
@@ -42,7 +42,7 @@ describe('OWL MCP dual era (isolated fake Runtime, no actual side effects)',()=>
    expect(discovery.response.result.resultType).toBe('complete');
    const list=await wire(url,'tools/list');
    expect(list.status).toBe(200);
-   expect(list.response.result.tools).toHaveLength(151);
+   expect(list.response.result.tools).toHaveLength(152);
    expect(list.response.result.tools.every(t=>t.inputSchema)).toBe(true);
    expect(list.response.result.resultType).toBe('complete');
    expect(typeof list.response.result.ttlMs).toBe('number');
@@ -57,7 +57,7 @@ describe('OWL MCP dual era (isolated fake Runtime, no actual side effects)',()=>
    try{
      await client.connect(transport);
      expect(client.getProtocolEra()).toBe('modern');
-     expect((await client.listTools()).tools).toHaveLength(151);
+     expect((await client.listTools()).tools).toHaveLength(152);
      const result=await client.callTool({name:'runtime_info',arguments:{}});
      expect(result.isError).not.toBe(true);
      expect(result.content[0].text).toContain('synthetic-readonly');
@@ -69,7 +69,7 @@ describe('OWL MCP dual era (isolated fake Runtime, no actual side effects)',()=>
    try{
      await client.connect(transport);
      expect(transport.sessionId).toBeTruthy();
-     expect((await client.listTools()).tools).toHaveLength(151);
+     expect((await client.listTools()).tools).toHaveLength(152);
      expect((await client.callTool({name:'runtime_info',arguments:{}})).isError).not.toBe(true);
    }finally{await transport.close();}
  });
@@ -81,7 +81,7 @@ describe('OWL MCP dual era (isolated fake Runtime, no actual side effects)',()=>
    try{
      await modern.connect(mt);await old.connect(lt);
      const m=(await modern.listTools()).tools;const o=(await old.listTools()).tools;
-     expect(m).toHaveLength(151);expect(o).toHaveLength(151);
+     expect(m).toHaveLength(152);expect(o).toHaveLength(152);
      const byOld=new Map(o.map(x=>[x.name,x]));
      for(const next of m){
        const prev=byOld.get(next.name);expect(prev,next.name).toBeTruthy();

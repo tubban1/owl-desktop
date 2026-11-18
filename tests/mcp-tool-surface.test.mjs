@@ -54,6 +54,7 @@ describe("OWL MCP compatibility surface", () => {
       "primitive_catalog",
       "skill_run",
       "skill_catalog",
+      "guidance",
       "get_capabilities",
       "list_directory",
       "list_directory_tree",
@@ -157,6 +158,23 @@ describe("OWL MCP compatibility surface", () => {
 
     const missing = required.filter((name) => !names.has(name));
     expect(missing).toEqual([]);
+
+    const guidanceListResult = await client.callTool({
+      name: "guidance", arguments: { op: "list", goal: "小红书发布" },
+    });
+    expect(guidanceListResult.isError).not.toBe(true);
+    const guidanceList = JSON.parse(guidanceListResult.content.find(x => x.type === "text").text);
+    expect(guidanceList.registryKind).toBe("guidance-only");
+    expect(guidanceList.entries.some(x => x.id === "xiaohongshu-publishing")).toBe(true);
+    const guidanceReadResult = await client.callTool({
+      name: "guidance", arguments: {
+        op: "read", id: "xiaohongshu-publishing", version: "1.0.0",
+      },
+    });
+    const guidance = JSON.parse(guidanceReadResult.content.find(x => x.type === "text").text);
+    expect(guidance.executable).toBe(false);
+    expect(guidance.content).toContain("SUBMISSION_UNCERTAIN");
+    expect(guidance.digest).toMatch(/^[a-f0-9]{64}$/);
 
     const browserOpen = listed.tools.find((tool) => tool.name === "browser_open");
     expect(browserOpen?.description).toContain("DEFAULT: Open a background tab");

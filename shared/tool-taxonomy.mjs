@@ -43,6 +43,7 @@ const explicit = {
   primitive_catalog:["Primitive Catalog","Core"],
   skill_run:["Run Skill","Core"],
   skill_catalog:["Skill Catalog","Core"],
+  guidance:["Guidance Library","Core"],
   capability_manifest:["Capability Manifest","Core"],
   get_capabilities:["Get Capabilities","Core"],
   browser_agent_snapshot:["Browser Snapshot","Browser"],
