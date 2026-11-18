@@ -171,6 +171,21 @@ describe("OWL MCP compatibility surface", () => {
 
     // Connector-facing schemas must expose the fields supported by
     // Runtime's git.commit and shell.start, not silently retain old shapes.
+    // The connector publishes additionalProperties:false: enforce the same
+    // behavior at runtime, not just in tools/list. No Runtime side-effects
+    // should occur for an unrecognized input key.
+    for (const name of ["provider_status", "list_processes"]) {
+      const entry = listed.tools.find(tool => tool.name === name);
+      expect(entry?.inputSchema?.additionalProperties).toBe(false);
+      const invalid = await client.callTool({
+        name, arguments: { bogus_unknown_field: "must-reject" },
+      });
+      expect(invalid.isError).toBe(true);
+      expect(JSON.stringify(invalid.content)).toMatch(/Invalid arguments|unrecognized|unknown/i);
+    }
+    const regular = await client.callTool({ name: "provider_status", arguments: {} });
+    expect(regular.isError).not.toBe(true);
+
     const gitCommit = listed.tools.find(tool => tool.name === "git_commit");
     expect(gitCommit?.inputSchema?.properties).toHaveProperty("author_name");
     expect(gitCommit?.inputSchema?.properties).toHaveProperty("author_email");
