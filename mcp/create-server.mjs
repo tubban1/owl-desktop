@@ -814,11 +814,13 @@ function tool(server, name, description, schema, annotations, handler) {
     ...schema,
     workstream_id: z.string().min(1).max(200).optional(),
   };
-  server.tool(
+  // The public tools/list contract says additionalProperties:false.
+  // SDK legacy server.tool(rawShape) uses permissive Zod parsing and silently
+  // strips unknown inputs. Register a strict object so tools/call actually
+  // rejects unexpected fields before the handler or Runtime is invoked.
+  server.registerTool(
     name,
-    description,
-    workstreamAwareSchema,
-    annotations,
+    { description, inputSchema: z.strictObject(workstreamAwareSchema), annotations },
     async (rawArgs) => {
       const context = currentMcpRequestContext();
       const {
