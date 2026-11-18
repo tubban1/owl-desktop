@@ -24,6 +24,35 @@
       ]
     },
     {
+      "id": "xiaohongshu-publishing",
+      "version": "1.1.0",
+      "title": "Xiaohongshu publishing",
+      "description": "Evidence-based Xiaohongshu 9:16/16:9 cover prep, topic popup exact selection, originality and AI declaration dialog review, safe publish checkpoints",
+      "path": "xiaohongshu-publishing-1.1.0.md",
+      "sha256": "87a9413d8117afdb2db9e2d7fab5471b5cbf6c1fadef40f75c48f609b9696d70",
+      "appliesTo": [
+        "xhs.publish"
+      ],
+      "related": [
+        "ai-content-disclosure"
+      ],
+      "keywords": [
+        "xhs",
+        "小红书",
+        "rednote",
+        "发布",
+        "publish",
+        "视频",
+        "封面",
+        "话题",
+        "原创声明",
+        "弹窗",
+        "cover",
+        "topic",
+        "popup"
+      ]
+    },
+    {
       "id": "ai-content-disclosure",
       "version": "1.0.0",
       "title": "AI content and originality review",

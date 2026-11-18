@@ -20,6 +20,21 @@ describe("independent versioned OWL guidance", () => {
     expect(createHash("sha256").update(xhs.content).digest("hex")).toBe(xhs.digest);
   });
 
+  it("preserves v1.0.0 and discovers the newer page-researched v1.1.0", async () => {
+    const oldVersion = await readGuidance("xiaohongshu-publishing", "1.0.0");
+    const current = await readGuidance("xiaohongshu-publishing");
+    expect(oldVersion.version).toBe("1.0.0");
+    expect(current.version).toBe("1.1.0");
+    expect(current.content).toContain("CURSOR_TARGET_OCCLUDED");
+    expect(current.content).toContain("9:16 portrait");
+    expect(current.content).toContain("immediately after the final character");
+    expect(current.content).toContain("ORIGINAL_DECLARATION_UNVERIFIED");
+    expect(current.content).toContain("Not yet verified");
+    expect(createHash("sha256").update(current.content).digest("hex")).toBe(current.digest);
+    const hits = await listGuidance("原创声明");
+    expect(hits.entries.some(item => item.id === "xiaohongshu-publishing" && item.version === "1.1.0")).toBe(true);
+  });
+
   it("supports shared guidance without inventing an executable Runtime skill", async () => {
     const shared = await readGuidance("ai-content-disclosure");
     expect(shared.appliesTo).toEqual([]);
